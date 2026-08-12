@@ -58,4 +58,4 @@ Free is a complete **manual** backup, restore, and local migrate tool (including
 
 ## License
 
-GPLv2 or later. See [`license.txt`](license.txt) and [`LICENSE`](LICENSE).
+GPLv2 or later. See [`license.txt`](license.txt).
