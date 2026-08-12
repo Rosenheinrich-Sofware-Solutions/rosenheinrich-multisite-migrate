@@ -1,0 +1,131 @@
+#rmmigrate_dashboard_widget .mm-dashboard-widget {
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--mm-text, #1d2327);
+}
+
+#rmmigrate_dashboard_widget .mm-dashboard-widget-status p {
+    margin: 0 0 8px;
+}
+
+#rmmigrate_dashboard_widget .mm-dashboard-widget-running {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+#rmmigrate_dashboard_widget .mm-dashboard-widget-running .spinner {
+    float: none;
+    margin: 0;
+}
+
+#rmmigrate_dashboard_widget .mm-dashboard-widget-create.button-primary {
+background: var(--mm-btn-primary, #0f766e);
+border-color: var(--mm-btn-primary, #0f766e);
+    color: var(--mm-surface, #ffffff);
+    box-shadow: none;
+    text-shadow: none;
+}
+
+#rmmigrate_dashboard_widget .mm-dashboard-widget-create.button-primary:hover,
+#rmmigrate_dashboard_widget .mm-dashboard-widget-create.button-primary:focus {
+background: var(--mm-btn-primary-hover, #115e59);
+border-color: var(--mm-btn-primary-hover, #115e59);
+    color: var(--mm-surface, #ffffff);
+}
+
+#rmmigrate_dashboard_widget .mm-dashboard-widget-separator {
+    margin: 12px 0;
+    border: 0;
+    border-top: 1px solid var(--mm-border, #dce1e8);
+}
+
+#rmmigrate_dashboard_widget .mm-dashboard-widget-recent h4 {
+    margin: 0 0 8px;
+    font-size: 13px;
+}
+
+#rmmigrate_dashboard_widget .mm-dashboard-widget-empty {
+    margin: 0;
+    color: var(--mm-text-muted, #646970);
+}
+
+#rmmigrate_dashboard_widget .mm-dashboard-widget-job-list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+#rmmigrate_dashboard_widget .mm-dashboard-widget-job-list li + li {
+    margin-top: 6px;
+}
+
+#rmmigrate_dashboard_widget .mm-dashboard-widget-job-list a {
+    display: grid;
+    grid-template-columns: 20px 1fr auto;
+    gap: 6px;
+    align-items: center;
+    text-decoration: none;
+    color: inherit;
+}
+
+#rmmigrate_dashboard_widget .mm-dashboard-widget-job-list a:hover {
+    color: var(--mm-link, #2271b1);
+}
+
+#rmmigrate_dashboard_widget .mm-dashboard-widget-job-list .dashicons {
+    font-size: 16px;
+    width: 16px;
+    height: 16px;
+    color: var(--mm-success, #007017);
+}
+
+#rmmigrate_dashboard_widget .mm-dashboard-widget-job-date {
+    color: var(--mm-text-muted, #646970);
+    font-size: 12px;
+    white-space: nowrap;
+}
+
+#rmmigrate_dashboard_widget .mm-dashboard-widget-view-all {
+    margin: 8px 0 0;
+}
+
+#rmmigrate_dashboard_widget .mm-dashboard-widget-sections {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 16px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+#rmmigrate_dashboard_widget .mm-dashboard-widget-sections a {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    text-decoration: none;
+    color: var(--mm-link, #2271b1);
+}
+
+#rmmigrate_dashboard_widget .mm-dashboard-widget-sections .dashicons {
+    font-size: 16px;
+    width: 16px;
+    height: 16px;
+}
+
+#rmmigrate_dashboard_widget .mm-dashboard-widget-section-count {
+    font-weight: 600;
+}
+
+#rmmigrate_dashboard_widget .mm-dashboard-widget-section-meta {
+    color: var(--mm-text-muted, #646970);
+    font-size: 12px;
+}
+
+#rmmigrate_dashboard_widget .mm-dashboard-widget-upsell {
+    margin: 12px 0 0;
+    padding-top: 10px;
+    border-top: 1px solid var(--mm-border, #dce1e8);
+    color: var(--mm-text-muted, #646970);
+    font-size: 12px;
+}

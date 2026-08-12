@@ -1,0 +1,97 @@
+.notice.mm-global-multisite-notice {
+    border-left-color: var(--mm-error);
+    padding: var(--mm-space-3) var(--mm-space-4);
+    border-radius: var(--mm-radius-sm);
+}
+
+.mm-banner.mm-global-multisite-notice {
+    padding: var(--mm-space-3) var(--mm-space-4);
+    width: 100%;
+    box-sizing: border-box;
+    position: static;
+    float: none;
+    clear: both;
+}
+
+.mm-banner.mm-global-multisite-notice .mm-global-multisite-notice__inner {
+    padding-right: 2.25rem;
+}
+
+.mm-global-multisite-notice__inner {
+    display: flex;
+    gap: var(--mm-space-4);
+    align-items: flex-start;
+    position: relative;
+}
+
+.mm-global-multisite-notice__dismiss {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 36px;
+    height: 36px;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--mm-text-muted);
+    cursor: pointer;
+    text-indent: -9999px;
+    overflow: hidden;
+}
+
+.mm-global-multisite-notice__dismiss::before {
+    content: "\f153";
+    font-family: dashicons;
+    font-size: 16px;
+    line-height: 36px;
+    text-indent: 0;
+    display: block;
+    width: 36px;
+    height: 36px;
+    text-align: center;
+}
+
+.mm-global-multisite-notice__dismiss:hover,
+.mm-global-multisite-notice__dismiss:focus {
+    color: var(--mm-navy);
+}
+
+.mm-global-multisite-notice__actions {
+    margin-bottom: 0 !important;
+}
+
+.mm-global-multisite-notice__icon {
+    font-size: 28px;
+    width: 28px;
+    height: 28px;
+    color: var(--mm-text-muted);
+    margin-top: 2px;
+}
+
+.mm-global-multisite-notice__content p {
+    margin: 0.4em 0;
+}
+
+.mm-global-multisite-notice__content .button-primary {
+    margin-right: var(--mm-space-2);
+    background: var(--mm-btn-primary);
+    border-color: var(--mm-btn-primary);
+    color: var(--mm-surface);
+    text-shadow: none;
+    font-weight: 600;
+}
+
+.mm-global-multisite-notice__content .button-primary:hover,
+.mm-global-multisite-notice__content .button-primary:focus {
+    background: var(--mm-btn-primary-hover);
+    border-color: var(--mm-btn-primary-hover);
+    color: var(--mm-surface);
+}
+
+@media (max-width: 782px) {
+    .mm-global-multisite-notice__inner {
+        flex-direction: column;
+        gap: var(--mm-space-2);
+    }
+}

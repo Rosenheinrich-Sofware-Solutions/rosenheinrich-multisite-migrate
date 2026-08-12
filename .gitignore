@@ -1,0 +1,20 @@
+# OS / editor
+.DS_Store
+Thumbs.db
+Desktop.ini
+ehthumbs.db
+
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Logs / caches
+*.log
+.phpunit.result.cache
+.phpcs-cache
+
+# Local env
+.env
+.env.*

@@ -1,0 +1,72 @@
+
+:root {
+    --mm-navy-deep: #080e1a;
+    --mm-navy: #0a1220;
+    --mm-navy-light: #0f1a2e;
+    --mm-navy-edge: #1a2d4a;
+    --mm-teal: #14b8a6;
+    --mm-teal-bright: #56e0d4;
+    --mm-teal-dim: #0d9488;
+    --mm-teal-text: #0f766e;
+    /* Filled buttons: AA white-on-teal (~5.5:1). Bright --mm-teal stays for non-text accents. */
+    --mm-btn-primary: var(--mm-teal-text);
+    --mm-btn-primary-hover: #115e59;
+    --mm-muted: #a8bdd4;
+    --mm-surface: #ffffff;
+    --mm-surface-alt: #f5f7fa;
+    --mm-surface-muted: #f4f8f8;
+    --mm-border: #dce1e8;
+    --mm-text: #1d2327;
+    --mm-text-muted: #50575e;
+    --mm-link: #2271b1;
+
+    --mm-success: #007017;
+    --mm-success-bg: #edfaef;
+    --mm-warning: #996800;
+    --mm-warning-bg: #fcf9e8;
+    --mm-error: #8a2424;
+    --mm-error-bg: #fcf0f1;
+    --mm-info: #2271b1;
+    --mm-info-bg: #eef6fc;
+    --mm-active-bg: #f0fdfa;
+    --mm-highlight: #dc2626;
+    --mm-highlight-bg: #fef2f2;
+
+    --mm-space-1: 4px;
+    --mm-space-2: 8px;
+    --mm-space-3: 12px;
+    --mm-space-4: 16px;
+    --mm-space-5: 20px;
+    --mm-space-6: 24px;
+    --mm-space-7: 32px;
+    --mm-space-8: 48px;
+
+    --mm-font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen-Sans, Ubuntu, Cantarell, "Helvetica Neue", sans-serif;
+    --mm-font-display: "Segoe UI Variable Display", "Segoe UI", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+    --mm-text-xs: 0.75rem;
+    --mm-text-sm: 0.8125rem;
+    --mm-text-base: 0.9375rem;
+    --mm-text-lg: 1.0625rem;
+    --mm-text-xl: 1.25rem;
+    --mm-text-2xl: clamp(1.35rem, 2.5vw, 1.65rem);
+    --mm-font-medium: 500;
+    --mm-font-semibold: 600;
+    --mm-font-bold: 700;
+
+    --mm-radius-sm: 4px;
+    --mm-radius: 12px;
+    --mm-radius-lg: 16px;
+    --mm-radius-pill: 999px;
+
+    --mm-shadow: 0 2px 8px rgba(10, 18, 32, 0.08);
+    --mm-shadow-lg: 0 8px 32px rgba(10, 18, 32, 0.16);
+    --mm-shadow-card: 0 4px 18px rgba(10, 18, 32, 0.06);
+    --mm-transition: 0.2s ease;
+    --mm-focus-ring: 0 0 0 3px rgba(20, 184, 166, 0.22);
+
+    --mm-admin-gutter: 20px;
+    --mm-content-max: none;
+    --mm-touch-min: 44px;
+    --mm-header-gradient: linear-gradient(145deg, #12233a 0%, var(--mm-navy) 42%, #071018 100%);
+    --mm-overlay: rgba(10, 18, 32, 0.55);
+}
