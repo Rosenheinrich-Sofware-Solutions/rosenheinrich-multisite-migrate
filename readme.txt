@@ -128,6 +128,10 @@ Learn more and [compare plans](https://multisitemigrate.rosenheinrich.com/pricin
 
 Help translate the plugin UI and wordpress.org readme on [translate.wordpress.org](https://translate.wordpress.org/projects/wp-plugins/rosenheinrich-multisite-migrate/) — see the [Polyglots handbook](https://make.wordpress.org/polyglots/handbook/translating/how-to-translate/) to get started.
 
+= Source =
+
+Browse the Free plugin source and open issues on [GitHub](https://github.com/Rosenheinrich-Sofware-Solutions/rosenheinrich-multisite-migrate?utm_source=wprepo&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=github_source). Installs and updates remain on WordPress.org.
+
 == Installation ==
 
 1. Upload the plugin to `/wp-content/plugins/` or install it from Plugins → Add New.
