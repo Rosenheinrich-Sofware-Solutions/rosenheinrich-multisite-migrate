@@ -49,6 +49,9 @@ final class Rmmigrate_Plugin
         require_once $includes . 'class-upgrader.php';
         require_once $includes . 'class-capabilities.php';
         require_once $includes . 'class-settings.php';
+        require_once $includes . 'class-schedules.php';
+        require_once $includes . 'class-scheduler.php';
+        require_once $includes . 'class-notifications.php';
         require_once $includes . 'class-access.php';
         require_once $includes . 'class-request-input.php';
         require_once $includes . 'class-time.php';
@@ -187,6 +190,7 @@ final class Rmmigrate_Plugin
         Rmmigrate_Hosting_Detection::register();
         Rmmigrate_Retention::register();
         Rmmigrate_Job_Cleanup::register();
+        Rmmigrate_Scheduler::register();
         Rmmigrate_Admin_Save::register();
         Rmmigrate_Setup_Wizard::register();
         Rmmigrate_Review_Nudge::register();

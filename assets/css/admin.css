@@ -1372,3 +1372,129 @@ a.mm-job-item:focus {
         width: 100%;
     }
 }
+
+.mm-toggle-row {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--mm-space-3);
+    margin: var(--mm-space-3) 0 0;
+    padding: var(--mm-space-4);
+    border: 1px solid var(--mm-border);
+    border-radius: var(--mm-radius);
+    background: var(--mm-surface-alt);
+    cursor: pointer;
+}
+
+.mm-toggle-row input[type="checkbox"] {
+    margin: 0.15rem 0 0;
+    flex: 0 0 auto;
+}
+
+.mm-toggle-row__body {
+    display: flex;
+    flex-direction: column;
+    gap: var(--mm-space-1);
+    min-width: 0;
+}
+
+.mm-toggle-row__title {
+    font-weight: var(--mm-font-semibold);
+    color: var(--mm-navy);
+    font-size: var(--mm-text-sm);
+}
+
+.mm-toggle-stack {
+    display: flex;
+    flex-direction: column;
+    gap: var(--mm-space-3);
+    margin-top: var(--mm-space-4);
+}
+
+.mm-toggle-stack > .mm-toggle-row {
+    margin-top: 0;
+}
+
+.mm-settings-fields {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--mm-space-4);
+    margin-top: var(--mm-space-3);
+}
+
+.mm-settings-field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--mm-space-2);
+    min-width: 0;
+}
+
+.mm-settings-field--full {
+    grid-column: 1 / -1;
+}
+
+.mm-settings-field label {
+    display: block;
+    margin: 0;
+    font-weight: var(--mm-font-semibold);
+    font-size: var(--mm-text-sm);
+    color: var(--mm-navy);
+}
+
+.mm-settings-field .regular-text,
+.mm-settings-field select,
+.mm-settings-field input[type="number"] {
+    width: 100%;
+    max-width: none;
+    min-height: 36px;
+    padding: 0 var(--mm-space-3);
+    border: 1px solid var(--mm-border);
+    border-radius: var(--mm-radius-sm);
+    box-shadow: none;
+    box-sizing: border-box;
+}
+
+.mm-settings-field select {
+    max-width: 28rem;
+}
+
+.mm-settings-field input[type="number"] {
+    max-width: 12rem;
+}
+
+.mm-settings-field .regular-text:focus,
+.mm-settings-field select:focus,
+.mm-settings-field input[type="number"]:focus {
+    border-color: var(--mm-teal);
+    box-shadow: var(--mm-focus-ring);
+    outline: none;
+}
+
+.mm-settings-field > .description {
+    margin: 0;
+}
+
+.mm-log-storage-panel .mm-form-actions {
+    margin-top: var(--mm-space-5);
+}
+
+.mm-notifications-panel__test {
+    margin-top: var(--mm-space-5);
+    padding-top: var(--mm-space-4);
+    border-top: 1px solid var(--mm-border);
+}
+
+.mm-notifications-panel__test .description {
+    margin: var(--mm-space-2) 0 0;
+}
+
+@media (max-width: 782px) {
+    .mm-settings-fields {
+        grid-template-columns: 1fr;
+    }
+
+    .mm-settings-field select,
+    .mm-settings-field input[type="number"] {
+        max-width: none;
+    }
+}
+

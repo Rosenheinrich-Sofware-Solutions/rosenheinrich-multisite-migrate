@@ -238,8 +238,8 @@ if (!defined('ABSPATH')) {
 		<?php
 		if (class_exists('Rmmigrate_Pro_Hints')) {
 			Rmmigrate_Pro_Hints::render('mcp_pro_tools', array(
-				'title'     => __('Automated schedules, cloud, restore & staging abilities (Pro)', 'rosenheinrich-multisite-migrate'),
-				'text'      => __('Free includes status, archives, activity log, cancel, and local backup with excludes. Pro adds schedule CRUD, cloud destinations, restore, staging, and empty-server tools for AI clients.', 'rosenheinrich-multisite-migrate'),
+				'title'     => __('Cloud schedules, restore & staging abilities (Pro)', 'rosenheinrich-multisite-migrate'),
+				'text'      => __('Free includes status, archives, activity log, cancel, local backup with excludes, and one local schedule. Pro adds schedule CRUD for cloud destinations, restore, staging, and empty-server tools for AI clients.', 'rosenheinrich-multisite-migrate'),
 				'cta_label' => __('Explore Pro AI tools', 'rosenheinrich-multisite-migrate'),
 				'placement' => 'mcp_tab',
 			));

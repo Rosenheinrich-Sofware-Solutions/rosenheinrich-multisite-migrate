@@ -64,7 +64,7 @@ Rmmigrate_Pro_Hints::render(
     'post_backup_offsite',
     array(
         'title'     => __('Same server = same risk', 'rosenheinrich-multisite-migrate'),
-        'text'      => __('Local archives share the host blast radius. Plus adds BYO cloud (Drive, Dropbox, S3), schedules, and failure emails so silent partial backups do not go unnoticed.', 'rosenheinrich-multisite-migrate'),
+        'text'      => __('Local archives share the host blast radius. Plus adds BYO cloud (Drive, Dropbox, S3), and cloud schedules so silent partial backups do not go unnoticed.', 'rosenheinrich-multisite-migrate'),
         'cta_label' => __('See Plus off-site backup', 'rosenheinrich-multisite-migrate'),
         'placement' => 'plugin_intent_offsite',
     )

@@ -24,6 +24,7 @@ class Rmmigrate_Admin_Menu
         return array(
             'multisite-migrate-archives' => __('Backups', 'rosenheinrich-multisite-migrate'),
             'multisite-migrate-migrate'  => __('Import & Restore', 'rosenheinrich-multisite-migrate'),
+            'multisite-migrate-schedule' => __('Schedules', 'rosenheinrich-multisite-migrate'),
             'multisite-migrate-advanced' => __('Settings', 'rosenheinrich-multisite-migrate'),
             'multisite-migrate-activity' => __('Activity Log', 'rosenheinrich-multisite-migrate'),
             'multisite-migrate-health'   => __('Health', 'rosenheinrich-multisite-migrate'),
@@ -42,6 +43,7 @@ class Rmmigrate_Admin_Menu
         $items = array(
             array('slug' => 'multisite-migrate-archives', 'label' => $titles['multisite-migrate-archives'], 'callback' => $callback),
             array('slug' => 'multisite-migrate-migrate', 'label' => $titles['multisite-migrate-migrate'], 'callback' => $callback),
+            array('slug' => 'multisite-migrate-schedule', 'label' => $titles['multisite-migrate-schedule'], 'callback' => $callback),
             array('slug' => 'multisite-migrate-advanced', 'label' => $titles['multisite-migrate-advanced'], 'callback' => $callback),
             array('slug' => 'multisite-migrate-activity', 'label' => $titles['multisite-migrate-activity'], 'callback' => $callback),
             array('slug' => 'multisite-migrate-health', 'label' => $titles['multisite-migrate-health'], 'callback' => $callback),
@@ -198,6 +200,9 @@ class Rmmigrate_Admin_Menu
         }
         if (strpos($hook, 'multisite-migrate-mcp') !== false) {
             $needs[] = 'mcp';
+        }
+        if (strpos($hook, 'multisite-migrate-schedule') !== false || strpos($hook, 'multisite-migrate-automate') !== false) {
+            $needs[] = 'schedule';
         }
         if ($hook === 'toplevel_page_multisite-migrate-archives' || $hook === 'tools_page_multisite-migrate-archives') {
             $needs = array_merge($needs, array('admin-tools', 'backup-create'));

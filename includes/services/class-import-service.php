@@ -160,5 +160,14 @@ final class Rmmigrate_Import_Service
         );
         Rmmigrate_Logger::log_system(sprintf('Import job #%d registered successfully (%d bytes)', $job->get_id(), $job->get_file_size()));
         Rmmigrate_Logger::log_job($job->get_id(), sprintf('Import archive registered: %s (%d bytes)', $job->get_local_path(), $job->get_file_size()));
+        Rmmigrate_Notifications::maybe_send_event(
+            'import',
+            sprintf(
+                /* translators: %d: job ID */
+                __('Import completed for job #%1$d', 'rosenheinrich-multisite-migrate'),
+                $job->get_id()
+            ),
+            true
+        );
     }
 }

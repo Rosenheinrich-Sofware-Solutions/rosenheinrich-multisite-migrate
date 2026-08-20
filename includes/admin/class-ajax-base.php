@@ -274,6 +274,12 @@ trait Rmmigrate_Ajax_Base
             'success',
             array('job_id' => $job->get_id())
         );
+        Rmmigrate_Notifications::maybe_send_event(
+            'import',
+            /* translators: %d: job ID */
+            sprintf(__('Import completed for job #%1$d', 'rosenheinrich-multisite-migrate'), $job->get_id()),
+            true
+        );
     }
 
     /**

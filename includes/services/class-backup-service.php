@@ -12,10 +12,13 @@ final class Rmmigrate_Backup_Service
      */
     public static function start_backup(array $input): array
     {
+        $triggered_by = (string) ($input['triggered_by'] ?? 'manual');
+        $is_cron = ($triggered_by === 'cron');
+
         $scope = (string) ($input['scope'] ?? Rmmigrate_Multisite_Scope::SCOPE_NETWORK);
         if (!is_multisite()) {
             $scope = Rmmigrate_Multisite_Scope::SCOPE_NETWORK;
-        } elseif (!current_user_can('manage_network')) {
+        } elseif (!$is_cron && !current_user_can('manage_network')) {
             $scope = Rmmigrate_Multisite_Scope::SCOPE_SUBSITE;
         }
 
@@ -73,17 +76,16 @@ final class Rmmigrate_Backup_Service
             $archive_mode_override = '';
         }
 
-        if (is_multisite() && !current_user_can('manage_network') && $scope !== Rmmigrate_Multisite_Scope::SCOPE_SUBSITE) {
+        if (!$is_cron && is_multisite() && !current_user_can('manage_network') && $scope !== Rmmigrate_Multisite_Scope::SCOPE_SUBSITE) {
             throw new Rmmigrate_Service_Exception(esc_html(__('Network backup requires super admin.', 'rosenheinrich-multisite-migrate')));
         }
-        $resolved = Rmmigrate_Multisite_Scope::resolve_backup_scope($scope, $excluded, $included);
+        $resolved = Rmmigrate_Multisite_Scope::resolve_backup_scope($scope, $excluded, $included, $is_cron);
         if (is_wp_error($resolved)) {
             throw new Rmmigrate_Service_Exception(esc_html($resolved->get_error_message()));
         }
         $scope = $resolved['scope'];
         $excluded = $resolved['excluded_blogs'];
 
-        $triggered_by = (string) ($input['triggered_by'] ?? 'manual');
         if ($triggered_by === 'manual' && current_user_can(is_multisite() ? 'manage_network' : 'manage_options')) {
             $settings = Rmmigrate_Settings::get();
             $settings['default_scope'] = $scope;

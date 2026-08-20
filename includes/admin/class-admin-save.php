@@ -19,14 +19,37 @@ class Rmmigrate_Admin_Save
         add_action('admin_post_rmmigrate_diagnostic_zip', array(__CLASS__, 'diagnostic_zip'));
         add_action('admin_post_rmmigrate_delete_all_logs', array(__CLASS__, 'delete_all_logs'));
         add_action('admin_post_rmmigrate_settings_import', array(__CLASS__, 'import_settings'));
+        add_action('network_admin_edit_rmmigrate_schedule_settings', array(__CLASS__, 'save_schedule'));
+        add_action('admin_post_rmmigrate_schedule_settings', array(__CLASS__, 'save_schedule'));
+        add_action('network_admin_edit_rmmigrate_test_email', array(__CLASS__, 'send_test_email'));
+        add_action('admin_post_rmmigrate_test_email', array(__CLASS__, 'send_test_email'));
     }
 
-    private static function can_save(): bool
+    private static function can_save_network_only(): bool
     {
         if (is_multisite()) {
             return current_user_can('manage_network');
         }
         return current_user_can('manage_options');
+    }
+
+    /**
+     * Network admin or subsite admin (manage_options) in site context.
+     */
+    private static function can_save(): bool
+    {
+        if (!is_multisite()) {
+            return current_user_can('manage_options');
+        }
+        if (current_user_can('manage_network') && is_network_admin()) {
+            return true;
+        }
+        return Rmmigrate_Access::is_subsite_admin_context() && current_user_can('manage_options');
+    }
+
+    private static function redirect_as_network(): bool
+    {
+        return is_multisite() && is_network_admin() && current_user_can('manage_network');
     }
 
     public static function save_settings(): void
@@ -41,7 +64,22 @@ class Rmmigrate_Admin_Save
         if ($tab === 'general') {
             $tab = 'engine';
         }
-        $merged = Rmmigrate_Settings::parse_post($post, $current);
+
+        $subsite = Rmmigrate_Access::is_subsite_admin_context() && !is_network_admin();
+        if ($subsite) {
+            $merged = Rmmigrate_Settings::merge_subsite_settings_from_post(
+                $current,
+                $post,
+                $tab,
+                (int) get_current_blog_id()
+            );
+        } else {
+            if (is_multisite() && !current_user_can('manage_network')) {
+                wp_die(esc_html__('Permission denied.', 'rosenheinrich-multisite-migrate'));
+            }
+            $merged = Rmmigrate_Settings::parse_post($post, $current);
+        }
+
         if ($tab === 'import') {
             self::persist($merged, $current, 'multisite-migrate-migrate', array('tab' => 'import'));
             return;
@@ -57,14 +95,14 @@ class Rmmigrate_Admin_Save
         }
         check_admin_referer('rmmigrate_clear_activity_log');
         Rmmigrate_Activity_Log::clear_all();
-        $url = Rmmigrate_Admin_Router::admin_url('multisite-migrate-activity', array('log_cleared' => '1'), is_multisite() && current_user_can('manage_network'));
+        $url = Rmmigrate_Admin_Router::admin_url('multisite-migrate-activity', array('log_cleared' => '1'), self::redirect_as_network());
         wp_safe_redirect($url);
         exit;
     }
 
     public static function export_settings(): void
     {
-        if (!self::can_save()) {
+        if (!self::can_save_network_only()) {
             wp_die(esc_html__('Permission denied.', 'rosenheinrich-multisite-migrate'));
         }
         check_admin_referer('rmmigrate_export_settings');
@@ -79,7 +117,7 @@ class Rmmigrate_Admin_Save
 
     public static function import_settings(): void
     {
-        if (!self::can_save()) {
+        if (!self::can_save_network_only()) {
             wp_die(esc_html__('Permission denied.', 'rosenheinrich-multisite-migrate'));
         }
         check_admin_referer('rmmigrate_settings_import');
@@ -97,13 +135,11 @@ class Rmmigrate_Admin_Save
             wp_die(esc_html__('Invalid settings file.', 'rosenheinrich-multisite-migrate'));
         }
         $current = Rmmigrate_Settings::get();
-        // Merge only keys that are in the known defaults — prevents arbitrary injection
-        // of keys like mysqldump_path (exec'd) via a crafted JSON file.
         $allowed_keys = array_keys(Rmmigrate_Settings::defaults());
         $safe_decoded = array_intersect_key($decoded, array_flip($allowed_keys));
         $merged = array_merge($current, $safe_decoded);
         Rmmigrate_Settings::save($merged);
-        $url = Rmmigrate_Admin_Router::admin_url('multisite-migrate-advanced', array('tab' => 'engine', 'updated' => '1'), is_multisite() && current_user_can('manage_network'));
+        $url = Rmmigrate_Admin_Router::admin_url('multisite-migrate-advanced', array('tab' => 'engine', 'updated' => '1'), self::redirect_as_network());
         wp_safe_redirect($url);
         exit;
     }
@@ -130,12 +166,70 @@ class Rmmigrate_Admin_Save
 
     public static function delete_all_logs(): void
     {
-        if (!self::can_save()) {
+        if (!self::can_save_network_only()) {
             wp_die(esc_html__('Permission denied.', 'rosenheinrich-multisite-migrate'));
         }
         check_admin_referer('rmmigrate_delete_all_logs');
         Rmmigrate_Activity_Log::clear_all();
-        $url = Rmmigrate_Admin_Router::admin_url('multisite-migrate-activity', array('log_cleared' => '1'), is_multisite() && current_user_can('manage_network'));
+        $url = Rmmigrate_Admin_Router::admin_url('multisite-migrate-activity', array('log_cleared' => '1'), self::redirect_as_network());
+        wp_safe_redirect($url);
+        exit;
+    }
+
+    public static function save_schedule(): void
+    {
+        if (!self::can_save()) {
+            wp_die(esc_html__('Permission denied.', 'rosenheinrich-multisite-migrate'));
+        }
+        check_admin_referer('rmmigrate_schedule_settings');
+        $post = Rmmigrate_Request_Input::post_array();
+        $current = Rmmigrate_Settings::get();
+        $subsite = Rmmigrate_Access::is_subsite_admin_context() && !is_network_admin();
+        if ($subsite) {
+            $merged = Rmmigrate_Schedules::merge_subsite_from_post($current, $post, (int) get_current_blog_id());
+        } else {
+            if (is_multisite() && !current_user_can('manage_network')) {
+                wp_die(esc_html__('Permission denied.', 'rosenheinrich-multisite-migrate'));
+            }
+            $merged = Rmmigrate_Schedules::merge_from_post($current, $post);
+        }
+        $scope_check = Rmmigrate_Schedules::validate_enabled_schedules($merged);
+        if (is_wp_error($scope_check)) {
+            $url = Rmmigrate_Admin_Router::admin_url(
+                'multisite-migrate-schedule',
+                array(
+                    'error' => '1',
+                    'message' => rawurlencode($scope_check->get_error_message()),
+                ),
+                self::redirect_as_network()
+            );
+            wp_safe_redirect($url);
+            exit;
+        }
+        Rmmigrate_Settings::save($merged);
+        $url = Rmmigrate_Admin_Router::admin_url(
+            'multisite-migrate-schedule',
+            array('updated' => '1'),
+            self::redirect_as_network()
+        );
+        wp_safe_redirect($url);
+        exit;
+    }
+
+    public static function send_test_email(): void
+    {
+        if (!self::can_save()) {
+            wp_die(esc_html__('Permission denied.', 'rosenheinrich-multisite-migrate'));
+        }
+        check_admin_referer('rmmigrate_test_email');
+        $sent = Rmmigrate_Notifications::send_test();
+        $args = array('tab' => 'notifications');
+        $args[$sent ? 'email_sent' : 'email_failed'] = '1';
+        $url = Rmmigrate_Admin_Router::admin_url(
+            'multisite-migrate-advanced',
+            $args,
+            self::redirect_as_network()
+        );
         wp_safe_redirect($url);
         exit;
     }
@@ -149,7 +243,7 @@ class Rmmigrate_Admin_Save
     {
         Rmmigrate_Settings::save($merged);
         $args = array_merge(array('updated' => '1'), $extra_args);
-        $url = Rmmigrate_Admin_Router::admin_url($page, $args, is_multisite() && current_user_can('manage_network'));
+        $url = Rmmigrate_Admin_Router::admin_url($page, $args, self::redirect_as_network());
         wp_safe_redirect($url);
         exit;
     }

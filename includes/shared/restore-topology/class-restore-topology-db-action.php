@@ -52,10 +52,7 @@ class Rmmigrate_Restore_Topology_Db_Action
     private static function run_prepare_overwrite(PDO $pdo, string $db_action, array $manifest, array $context = array()): void
     {
         if ($db_action === 'empty') {
-            $tables = $pdo->query('SHOW TABLES');
-            $rows = $tables ? $tables->fetchAll(PDO::FETCH_NUM) : array();
-            foreach ($rows as $row) {
-                $table = (string) $row[0];
+            foreach (self::list_database_tables($pdo) as $table) {
                 if (self::is_plugin_runtime_table($table)) {
                     continue;
                 }
@@ -63,6 +60,20 @@ class Rmmigrate_Restore_Topology_Db_Action
             }
 
             return;
+        }
+
+        $destination = is_array($context['destination'] ?? null) ? $context['destination'] : array();
+        $gate_state = array_merge(
+            $context,
+            array(
+                'install_mode' => (string) ($context['install_mode'] ?? 'overwrite'),
+                'db_action'    => $db_action,
+            )
+        );
+        if (Rmmigrate_Restore_Topology_Compatibility::is_subsite_full_overwrite_scenario($gate_state, $manifest, $destination)) {
+            throw new RuntimeException(
+                esc_html__('Replacing an entire multisite installation requires Empty entire database.', 'rosenheinrich-multisite-migrate')
+            );
         }
 
         $restore_mode = Rmmigrate_Restore_Topology_Manifest::restore_mode($manifest, $context);

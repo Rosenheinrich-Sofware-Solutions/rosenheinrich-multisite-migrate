@@ -926,6 +926,17 @@ class Rmmigrate_Job
                         'context' => array('triggered_by' => $triggered_by),
                     )
                 );
+                $progress = $this->get_progress();
+                if ($type === 'backup' && !empty($progress['scheduled'])) {
+                    if ($status === self::STATUS_COMPLETE && $error === null) {
+                        Rmmigrate_Scheduler::reset_schedule_failures();
+                    } elseif ($status === self::STATUS_ERROR) {
+                        Rmmigrate_Scheduler::record_schedule_failure(
+                            $error ?? __('Unknown error', 'rosenheinrich-multisite-migrate')
+                        );
+                    }
+                }
+                Rmmigrate_Notifications::maybe_send_job($this, $status, $error);
             }
         }
 

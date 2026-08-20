@@ -2,9 +2,9 @@
 Contributors: rosenheinrich
 Tags: backup, migration, wordpress-backup, restore, multisite
 Requires at least: 6.9
-Tested up to: 7.0
+Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.1.4
+Stable tag: 1.1.6
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -14,7 +14,7 @@ Back up, restore and migrate single sites or multisite networks. Free, portable 
 
 = Backup, Restore & Migration for Single Sites and Multisite =
 
-Back up, restore, and migrate normal single-site WordPress installs and full multisite networks — free, no license key. Portable archives with search & replace, plus AI agents (Claude, Cursor, ChatGPT, and similar) via MCP. [Full network backups](https://multisitemigrate.rosenheinrich.com/features/multisite-networks/?utm_source=wprepo&utm_medium=link&utm_content=multisite_networks&utm_campaign=multisite_migrate_free) from Network Admin stay included in Free; Pro is only for schedules, cloud, empty-server installer, staging, WP-CLI, [network split / extract to standalone](https://multisitemigrate.rosenheinrich.com/docs-network-split/?utm_source=wprepo&utm_medium=link&utm_content=docs_network_split&utm_campaign=multisite_migrate_free), and extended AI abilities.
+Back up, restore, and migrate normal single-site WordPress installs and full multisite networks — free, no license key. Portable archives with search & replace, plus AI agents (Claude, Cursor, ChatGPT, and similar) via MCP. [Full network backups](https://multisitemigrate.rosenheinrich.com/features/multisite-networks/?utm_source=wprepo&utm_medium=link&utm_content=multisite_networks&utm_campaign=multisite_migrate_free) from Network Admin stay included in Free; Pro is for cloud / multiple / incremental schedules, cloud storage, empty-server installer, staging, WP-CLI, [network split / extract to standalone](https://multisitemigrate.rosenheinrich.com/docs-network-split/?utm_source=wprepo&utm_medium=link&utm_content=docs_network_split&utm_campaign=multisite_migrate_free), and extended AI abilities.
 
 = Video walkthrough =
 
@@ -22,7 +22,7 @@ Short overview of Multisite Migrate Free — setup, backups, import, health, and
 
 https://www.youtube.com/watch?v=k51_xB2_eo0
 
-No trial, no usage limits. Everything under Free features works without a key. [Scheduled backups](https://multisitemigrate.rosenheinrich.com/pricing/?utm_source=wprepo&utm_medium=link&utm_content=pricing&utm_campaign=multisite_migrate_free), [cloud storage](https://multisitemigrate.rosenheinrich.com/features/cloud-backup/?utm_source=wprepo&utm_medium=link&utm_content=cloud_backup&utm_campaign=multisite_migrate_free), [empty-server migration](https://multisitemigrate.rosenheinrich.com/features/empty-server-migration/?utm_source=wprepo&utm_medium=link&utm_content=empty_server_migration&utm_campaign=multisite_migrate_free), and [staging push](https://multisitemigrate.rosenheinrich.com/features/staging/?utm_source=wprepo&utm_medium=link&utm_content=staging&utm_campaign=multisite_migrate_free) ship in the separate [Multisite Migrate Pro](https://multisitemigrate.rosenheinrich.com/pricing/?utm_source=wprepo&utm_medium=link&utm_content=get_pro&utm_campaign=multisite_migrate_free) plugin.
+No trial, no usage limits. Everything under Free features works without a key. Free includes one local scheduled backup. [Cloud scheduled backups](https://multisitemigrate.rosenheinrich.com/pricing/?utm_source=wprepo&utm_medium=link&utm_content=pricing&utm_campaign=multisite_migrate_free), [cloud storage](https://multisitemigrate.rosenheinrich.com/features/cloud-backup/?utm_source=wprepo&utm_medium=link&utm_content=cloud_backup&utm_campaign=multisite_migrate_free), [empty-server migration](https://multisitemigrate.rosenheinrich.com/features/empty-server-migration/?utm_source=wprepo&utm_medium=link&utm_content=empty_server_migration&utm_campaign=multisite_migrate_free), and [staging push](https://multisitemigrate.rosenheinrich.com/features/staging/?utm_source=wprepo&utm_medium=link&utm_content=staging&utm_campaign=multisite_migrate_free) ship in the separate [Multisite Migrate Pro](https://multisitemigrate.rosenheinrich.com/pricing/?utm_source=wprepo&utm_medium=link&utm_content=get_pro&utm_campaign=multisite_migrate_free) plugin.
 
 = Why Multisite Migrate =
 
@@ -53,6 +53,8 @@ Full multisite network backup from Network Admin is free. Subsite admins can bac
 * **[Local export & import](https://multisitemigrate.rosenheinrich.com/docs-backup/?utm_source=wprepo&utm_medium=link&utm_content=docs_backup&utm_campaign=multisite_migrate_free)** — move a site between installs with a portable archive.
 * **[Search & replace](https://multisitemigrate.rosenheinrich.com/docs-restore/?utm_source=wprepo&utm_medium=link&utm_content=docs_restore&utm_campaign=multisite_migrate_free)** — rewrite URLs and paths during import and migration, with serialized-data support.
 * **[AES-256 archive encryption](https://multisitemigrate.rosenheinrich.com/docs-backup/?utm_source=wprepo&utm_medium=link&utm_content=docs_backup&utm_campaign=multisite_migrate_free)** — optionally encrypt backup archives.
+* **One local scheduled backup** — daily, weekly, or monthly to local storage (one schedule per admin context).
+* **Email notifications** — alerts for manual backups, scheduled backups, restores, and imports.
 * **[Health dashboard](https://multisitemigrate.rosenheinrich.com/docs/?utm_source=wprepo&utm_medium=link&utm_content=docs&utm_campaign=multisite_migrate_free)** — environment checks and backup status at a glance.
 * **[AI Backup Tools & MCP](https://multisitemigrate.rosenheinrich.com/docs/?utm_source=wprepo&utm_medium=link&utm_content=mcp_connect&utm_campaign=multisite_migrate_free)** — connect Claude, Cursor, or ChatGPT to check status, archives, and health; start a backup with confirm (free, no key).
 * **[Subsite admin backup & restore](https://multisitemigrate.rosenheinrich.com/features/multisite-networks/?utm_source=wprepo&utm_medium=link&utm_content=multisite_networks&utm_campaign=multisite_migrate_free)** — on multisite, site administrators with manage_options can back up and restore their own subsite from the site dashboard (included free; no seat delegation UI).
@@ -91,9 +93,9 @@ Use Free local export/import to clone a site to another WordPress install for st
 
 [Remote server-to-server import](https://multisitemigrate.rosenheinrich.com/pricing/?utm_source=wprepo&utm_medium=link&utm_content=pricing&utm_campaign=multisite_migrate_free) pulls a package between servers without a slow browser upload of multi-GB archives. Available in Pro alongside [cloud storage](https://multisitemigrate.rosenheinrich.com/features/cloud-backup/?utm_source=wprepo&utm_medium=link&utm_content=cloud_backup&utm_campaign=multisite_migrate_free).
 
-= Scheduled WordPress Backups (Pro) =
+= Scheduled WordPress Backups =
 
-[Automated backup schedules](https://multisitemigrate.rosenheinrich.com/pricing/?utm_source=wprepo&utm_medium=link&utm_content=pricing&utm_campaign=multisite_migrate_free) and incremental file backups reduce manual work for agencies and networks. Scheduling is Pro-only; Free remains a complete tool for on-demand backups and restores.
+Free includes **one local scheduled backup** (daily, weekly, or monthly) via WP-Cron, stored on your server. [Plus/Pro](https://multisitemigrate.rosenheinrich.com/pricing/?utm_source=wprepo&utm_medium=link&utm_content=pricing&utm_campaign=multisite_migrate_free) adds multiple schedules, cloud destinations, incremental file backups.
 
 = Cloud Storage for WordPress Backups (Pro) =
 
@@ -111,8 +113,7 @@ Need each Multisite site as its own WordPress install? [Multisite Migrate Pro](h
 
 Advanced workflows ship as a separate plugin, **Multisite Migrate Pro**, from our website. Pro is **not required** for any Free feature above. Pro adds:
 
-* **[Automated backup schedules and incremental file backups](https://multisitemigrate.rosenheinrich.com/pricing/?utm_source=wprepo&utm_medium=link&utm_content=pricing&utm_campaign=multisite_migrate_free)**
-* **[Email notifications](https://multisitemigrate.rosenheinrich.com/pricing/?utm_source=wprepo&utm_medium=link&utm_content=pricing&utm_campaign=multisite_migrate_free)**
+* **[Cloud, multiple, and incremental schedules](https://multisitemigrate.rosenheinrich.com/pricing/?utm_source=wprepo&utm_medium=link&utm_content=pricing&utm_campaign=multisite_migrate_free)** — beyond Free’s one local schedule
 * **[Per-site access controls and subsite seat limits](https://multisitemigrate.rosenheinrich.com/pricing/?utm_source=wprepo&utm_medium=link&utm_content=pricing&utm_campaign=multisite_migrate_free)** for large networks (Settings → Site access)
 * **[Cloud storage](https://multisitemigrate.rosenheinrich.com/features/cloud-backup/?utm_source=wprepo&utm_medium=link&utm_content=cloud_backup&utm_campaign=multisite_migrate_free)** destinations (Google Drive, Dropbox, Amazon S3, SFTP)
 * **[Remote (server-to-server) import](https://multisitemigrate.rosenheinrich.com/pricing/?utm_source=wprepo&utm_medium=link&utm_content=pricing&utm_campaign=multisite_migrate_free)**
@@ -168,6 +169,10 @@ Yes. Full backup, restore, local migrate, and search & replace work on single-si
 
 Yes. [Backing up and restoring a full multisite network](https://multisitemigrate.rosenheinrich.com/features/multisite-networks/?utm_source=wprepo&utm_medium=link&utm_content=multisite_networks&utm_campaign=multisite_migrate_free) from Network Admin is included in the free plugin, with no key or upgrade required. Site administrators with the manage_options capability can also back up and restore their own subsite from the site admin dashboard. Delegating subsite access with seat limits under Settings → Site access is part of [Multisite Migrate Pro](https://multisitemigrate.rosenheinrich.com/pricing/?utm_source=wprepo&utm_medium=link&utm_content=get_pro&utm_campaign=multisite_migrate_free).
 
+= Does Free include scheduled backups? =
+
+Yes. Free includes one local scheduled backup (daily, weekly, or monthly) stored on your server. Multiple schedules, cloud destinations, incremental backups are part of [Multisite Migrate Plus/Pro](https://multisitemigrate.rosenheinrich.com/pricing/?utm_source=wprepo&utm_medium=link&utm_content=pricing&utm_campaign=multisite_migrate_free).
+
 = Do I need an account or license key? =
 
 No. The free plugin is completely functional with no key, no trial and no time or usage limits. See [pricing](https://multisitemigrate.rosenheinrich.com/pricing/?utm_source=wprepo&utm_medium=link&utm_content=pricing&utm_campaign=multisite_migrate_free) only if you want Pro workflows such as cloud schedules or the empty-server installer.
@@ -186,7 +191,7 @@ Create a backup (or export a portable archive), move it to the destination, then
 
 = What is the difference between the free plugin and Pro? =
 
-The free plugin handles manual backups, restore, local import/export, search & replace, encryption, [full multisite network backups](https://multisitemigrate.rosenheinrich.com/features/multisite-networks/?utm_source=wprepo&utm_medium=link&utm_content=multisite_networks&utm_campaign=multisite_migrate_free) from Network Admin, subsite admin backup & restore on the administrator's own subsite, and free AI / MCP tools (status, archives, health, confirmed backup-now). Pro is a separate download that adds scheduling, [cloud storage](https://multisitemigrate.rosenheinrich.com/features/cloud-backup/?utm_source=wprepo&utm_medium=link&utm_content=cloud_backup&utm_campaign=multisite_migrate_free), site access delegation with subsite seats, remote import, the [empty-server installer](https://multisitemigrate.rosenheinrich.com/features/empty-server-migration/?utm_source=wprepo&utm_medium=link&utm_content=empty_server_migration&utm_campaign=multisite_migrate_free), [staging](https://multisitemigrate.rosenheinrich.com/features/staging/?utm_source=wprepo&utm_medium=link&utm_content=staging&utm_campaign=multisite_migrate_free), [WP-CLI](https://multisitemigrate.rosenheinrich.com/docs-wp-cli/?utm_source=wprepo&utm_medium=link&utm_content=docs_wp_cli&utm_campaign=multisite_migrate_free), [network split / extract to standalone](https://multisitemigrate.rosenheinrich.com/docs-network-split/?utm_source=wprepo&utm_medium=link&utm_content=docs_network_split&utm_campaign=multisite_migrate_free), and extended AI abilities. [Compare plans](https://multisitemigrate.rosenheinrich.com/pricing/?utm_source=wprepo&utm_medium=link&utm_content=compare_plans&utm_campaign=multisite_migrate_free).
+The free plugin handles manual backups, one local scheduled backup, restore, local import/export, search & replace, encryption, [full multisite network backups](https://multisitemigrate.rosenheinrich.com/features/multisite-networks/?utm_source=wprepo&utm_medium=link&utm_content=multisite_networks&utm_campaign=multisite_migrate_free) from Network Admin, subsite admin backup & restore on the administrator's own subsite, and free AI / MCP tools (status, archives, health, confirmed backup-now). Pro is a separate download that adds cloud / multiple / incremental schedules, [cloud storage](https://multisitemigrate.rosenheinrich.com/features/cloud-backup/?utm_source=wprepo&utm_medium=link&utm_content=cloud_backup&utm_campaign=multisite_migrate_free), site access delegation with subsite seats, remote import, the [empty-server installer](https://multisitemigrate.rosenheinrich.com/features/empty-server-migration/?utm_source=wprepo&utm_medium=link&utm_content=empty_server_migration&utm_campaign=multisite_migrate_free), [staging](https://multisitemigrate.rosenheinrich.com/features/staging/?utm_source=wprepo&utm_medium=link&utm_content=staging&utm_campaign=multisite_migrate_free), [WP-CLI](https://multisitemigrate.rosenheinrich.com/docs-wp-cli/?utm_source=wprepo&utm_medium=link&utm_content=docs_wp_cli&utm_campaign=multisite_migrate_free), [network split / extract to standalone](https://multisitemigrate.rosenheinrich.com/docs-network-split/?utm_source=wprepo&utm_medium=link&utm_content=docs_network_split&utm_campaign=multisite_migrate_free), and extended AI abilities. [Compare plans](https://multisitemigrate.rosenheinrich.com/pricing/?utm_source=wprepo&utm_medium=link&utm_content=compare_plans&utm_campaign=multisite_migrate_free).
 
 = Can I split a Multisite network into separate single-site installs? =
 
@@ -218,6 +223,13 @@ Only when you explicitly opt in:
 No analytics or advertising trackers are included. See the [privacy policy](https://multisitemigrate.rosenheinrich.com/privacy-policy/).
 
 == Changelog ==
+
+= 1.1.6 =
+* One local scheduled backup (daily/weekly/monthly) — local storage only; one schedule per admin context.
+* Email notifications for manual backups, scheduled backups, restores, and imports (Settings → Notifications).
+
+= 1.1.5 =
+* Maintenance release.
 
 = 1.1.4 =
 * Performance updates.
@@ -287,6 +299,12 @@ No analytics or advertising trackers are included. See the [privacy policy](http
 * Initial public release of the free edition: multisite-aware backups, restore, local import/export, search & replace, AES-256 encryption and a health dashboard.
 
 == Upgrade Notice ==
+
+= 1.1.6 =
+Local scheduled backups and email notifications; recommended update.
+
+= 1.1.5 =
+Maintenance release. Recommended update.
 
 = 1.1.4 =
 Performance updates. Recommended update.

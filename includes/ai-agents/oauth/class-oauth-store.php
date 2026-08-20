@@ -230,11 +230,18 @@ final class Rmmigrate_OAuth_Store
         return $row;
     }
 
-    public static function revoke_token_id(int $id): void
+    public static function revoke_token_id(int $id): bool
     {
         global $wpdb;
-        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- OAuth token revocation.
-        $wpdb->update(self::tokens_table(), array('revoked' => 1), array('id' => $id), array('%d'), array('%d'));
+        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- OAuth token revocation (atomic).
+        $updated = $wpdb->query(
+            $wpdb->prepare(
+                'UPDATE %i SET revoked = 1 WHERE id = %d AND revoked = 0',
+                self::tokens_table(),
+                $id
+            )
+        );
+        return (int) $updated === 1;
     }
 
     public static function revoke_all_for_client(string $client_id): void

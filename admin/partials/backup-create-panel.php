@@ -156,7 +156,7 @@ $rmmigrate_uploads_placeholder = Rmmigrate_Engine_Config::uploads_basedir();
                     'create_cloud',
                     array(
                         'title'     => __('Same server = same blast radius', 'rosenheinrich-multisite-migrate'),
-                        'text'      => __('Local backups stay on this host. Plus adds BYO cloud (Drive, Dropbox, S3), scheduled backups, and failure emails so jobs that stall mid-timeout do not fail silently.', 'rosenheinrich-multisite-migrate'),
+                        'text'      => __('Local backups stay on this host. Plus adds BYO cloud (Drive, Dropbox, S3), and scheduled backups to cloud destinations so jobs that stall mid-timeout do not fail silently.', 'rosenheinrich-multisite-migrate'),
                         'cta_label' => __('Set up off-site backup', 'rosenheinrich-multisite-migrate'),
                         'placement' => 'plugin_intent_offsite',
                     )

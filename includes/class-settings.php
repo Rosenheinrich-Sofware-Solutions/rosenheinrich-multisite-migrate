@@ -59,7 +59,137 @@ class Rmmigrate_Settings
             'lock_mode'                 => 'auto',
             'archive_mode_manual'       => false,
             'exclude_deleted_subsite_tables' => false,
+            'schedules'                 => array(),
+            'email_enabled'             => true,
+            'email_address'             => '',
+            'email_manual_mode'         => 'failure',
+            'email_schedule_mode'       => 'failure',
+            'email_restore_mode'        => 'failure',
+            'email_import_mode'         => 'failure',
+            'email_blogs'               => array(),
         );
+    }
+
+    /**
+     * Keys only Network Admin may change (subsite save must not overwrite).
+     *
+     * @return string[]
+     */
+    public static function network_global_keys(): array
+    {
+        return array(
+            'local_storage_path',
+            'storage_htaccess',
+            'retention_network',
+            'log_retention_months',
+            'log_max_bytes',
+            'log_max_rotated_files',
+            'activity_max_entries',
+            'activity_page_size',
+            'log_view_lines',
+            'admin_safe_mode',
+            'installer_brand_name',
+            'installer_brand_logo',
+        );
+    }
+
+    /**
+     * WordPress administrator email for notifications (network on multisite, else current site).
+     */
+    public static function default_admin_email(?int $blog_id = null): string
+    {
+        if ($blog_id === null && class_exists('Rmmigrate_Access', false) && Rmmigrate_Access::is_subsite_admin_context()) {
+            $blog_id = (int) get_current_blog_id();
+        }
+        if (is_multisite() && $blog_id !== null && $blog_id > 0) {
+            $site_email = get_blog_option($blog_id, 'admin_email');
+            if (is_string($site_email) && is_email($site_email)) {
+                return $site_email;
+            }
+        }
+        if (is_multisite() && ($blog_id === null || $blog_id <= 0)) {
+            $network_email = get_site_option('admin_email');
+            if (is_string($network_email) && is_email($network_email)) {
+                return $network_email;
+            }
+        }
+
+        $site_email = get_option('admin_email');
+        return (is_string($site_email) && is_email($site_email)) ? $site_email : '';
+    }
+
+    /**
+     * Flat email_* keys for the active admin context (network or email_blogs[blog_id]).
+     *
+     * @return array<string,mixed>
+     */
+    public static function notification_settings_for_context(?int $blog_id = null): array
+    {
+        $all = self::get();
+        if ($blog_id === null && class_exists('Rmmigrate_Access', false) && Rmmigrate_Access::is_subsite_admin_context()) {
+            $blog_id = (int) get_current_blog_id();
+        }
+
+        $defaults = array(
+            'email_enabled'       => true,
+            'email_address'       => '',
+            'email_manual_mode'   => 'failure',
+            'email_schedule_mode' => 'failure',
+            'email_restore_mode'  => 'failure',
+            'email_import_mode'   => 'failure',
+        );
+
+        if (is_multisite() && $blog_id !== null && $blog_id > 0) {
+            $blogs = is_array($all['email_blogs'] ?? null) ? $all['email_blogs'] : array();
+            $row = is_array($blogs[$blog_id] ?? null) ? $blogs[$blog_id] : array();
+            $flat = array_merge($defaults, $row);
+            $merged = array_merge($all, $flat);
+            $merged['_notification_blog_id'] = $blog_id;
+            return $merged;
+        }
+
+        $flat = array();
+        foreach (array_keys($defaults) as $key) {
+            $flat[$key] = $all[$key] ?? $defaults[$key];
+        }
+        return array_merge($all, $flat);
+    }
+
+    /**
+     * @param array<string,mixed> $current
+     * @param array<string,mixed> $post
+     * @return array<string,mixed>
+     */
+    public static function merge_subsite_settings_from_post(array $current, array $post, string $section, int $blog_id): array
+    {
+        $blog_id = max(1, $blog_id);
+        $merged = self::merge_post($current, $post, $section);
+        foreach (self::network_global_keys() as $key) {
+            if (array_key_exists($key, $current)) {
+                $merged[$key] = $current[$key];
+            }
+        }
+        if ($section === 'notifications') {
+            $blogs = is_array($current['email_blogs'] ?? null) ? $current['email_blogs'] : array();
+            $blogs[$blog_id] = array(
+                'email_enabled'       => !empty($post['email_enabled']),
+                'email_address'       => sanitize_email(wp_unslash($post['email_address'] ?? '')),
+                'email_manual_mode'   => self::email_mode($post['email_manual_mode'] ?? 'failure'),
+                'email_schedule_mode' => self::email_mode($post['email_schedule_mode'] ?? 'failure', true),
+                'email_restore_mode'  => self::email_mode($post['email_restore_mode'] ?? 'failure'),
+                'email_import_mode'   => self::email_mode($post['email_import_mode'] ?? 'failure'),
+            );
+            $merged['email_blogs'] = $blogs;
+            // Keep network flat email_* untouched.
+            foreach (array_keys($blogs[$blog_id]) as $key) {
+                if (array_key_exists($key, $current)) {
+                    $merged[$key] = $current[$key];
+                }
+            }
+        }
+        $merged['email_blogs'] = is_array($merged['email_blogs'] ?? null) ? $merged['email_blogs'] : ($current['email_blogs'] ?? array());
+
+        return $merged;
     }
 
     public static function get(): array
@@ -73,6 +203,16 @@ class Rmmigrate_Settings
             $settings = array();
         }
         $merged = array_merge(self::defaults(), $settings);
+
+        if (!isset($merged['schedules']) || !is_array($merged['schedules'])) {
+            $merged['schedules'] = array();
+        }
+        if (!isset($merged['email_blogs']) || !is_array($merged['email_blogs'])) {
+            $merged['email_blogs'] = array();
+        }
+        if (class_exists('Rmmigrate_Schedules', false)) {
+            $merged = Rmmigrate_Schedules::normalize($merged);
+        }
 
         self::$cache = $merged;
         return self::$cache;
@@ -239,9 +379,25 @@ class Rmmigrate_Settings
             $merged['log_view_lines'] = max(50, min(500, (int) ($post['log_view_lines'] ?? 200)));
         } elseif ($section === 'access') {
             unset($merged['installer_brand_name'], $merged['installer_brand_logo']);
+        } elseif ($section === 'notifications') {
+            $merged = array_merge($merged, array(
+                'email_enabled'       => !empty($post['email_enabled']),
+                'email_address'       => sanitize_email(wp_unslash($post['email_address'] ?? '')),
+                'email_manual_mode'   => self::email_mode($post['email_manual_mode'] ?? 'failure'),
+                'email_schedule_mode' => self::email_mode($post['email_schedule_mode'] ?? 'failure', true),
+                'email_restore_mode'  => self::email_mode($post['email_restore_mode'] ?? 'failure'),
+                'email_import_mode'   => self::email_mode($post['email_import_mode'] ?? 'failure'),
+            ));
+            $merged['email_blogs'] = is_array($current['email_blogs'] ?? null) ? $current['email_blogs'] : array();
         }
 
         return $merged;
+    }
+
+    private static function email_mode(string $mode, bool $schedule = false): string
+    {
+        $allowed = $schedule ? array('never', 'failure', 'always') : array('never', 'failure', 'success', 'always');
+        return in_array($mode, $allowed, true) ? $mode : 'failure';
     }
 
     /**

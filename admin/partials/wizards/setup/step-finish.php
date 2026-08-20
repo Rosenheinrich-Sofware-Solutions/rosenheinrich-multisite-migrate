@@ -7,7 +7,7 @@ if (!defined('ABSPATH')) {
     <div class="mm-setup-pro-panel">
         <div class="mm-setup-pro-panel__copy">
             <h2><?php esc_html_e('Go further with Pro', 'rosenheinrich-multisite-migrate'); ?></h2>
-            <p><?php esc_html_e('Schedules, cloud destinations, recovery points, and more — when you are ready.', 'rosenheinrich-multisite-migrate'); ?></p>
+            <p><?php esc_html_e('One local schedule is included. Cloud destinations, multiple schedules, and recovery points are in Plus — when you are ready.', 'rosenheinrich-multisite-migrate'); ?></p>
             <ul class="mm-setup-pro-panel__list">
                 <?php foreach ($rmmigrate_pro_highlights as $rmmigrate_item) : ?>
                     <li>

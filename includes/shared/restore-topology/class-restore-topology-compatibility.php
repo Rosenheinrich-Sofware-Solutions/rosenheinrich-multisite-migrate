@@ -79,7 +79,7 @@ class Rmmigrate_Restore_Topology_Compatibility
             );
         }
 
-        $topology_gate = self::validate_topology($state, $manifest, $destination);
+        $topology_gate = self::validate_topology($state, $manifest, $destination, $installer_context);
         if ($topology_gate !== null) {
             return $topology_gate;
         }
@@ -93,7 +93,7 @@ class Rmmigrate_Restore_Topology_Compatibility
      * @param array<string,mixed> $destination
      * @return array{gate:string,message:string,recovery_hint:string}|null
      */
-    public static function validate_topology(array $state, array $manifest, array $destination): ?array
+    public static function validate_topology(array $state, array $manifest, array $destination, bool $installer_context = false): ?array
     {
         $restore_mode = Rmmigrate_Restore_Topology_Manifest::restore_mode($manifest, $state);
         if ($restore_mode === 'subsite_on_network') {
@@ -130,10 +130,18 @@ class Rmmigrate_Restore_Topology_Compatibility
         $restore_network = Rmmigrate_Restore_Topology_Manifest::restore_as_multisite($manifest);
 
         if ($backup_subsite) {
+            if (self::allows_subsite_full_overwrite($state, $manifest, $destination)) {
+                return null;
+            }
+
+            if ($installer_context && self::is_subsite_full_overwrite_scenario($state, $manifest, $destination)) {
+                return null;
+            }
+
             return self::gate(
                 'topology_subsite_to_network',
                 __('This backup is a multisite subsite. Importing into an existing WordPress network is not supported yet. Restore to an empty standalone server instead.', 'rosenheinrich-multisite-migrate'),
-                __('Use a fresh standalone WordPress install or empty hosting space, then run the installer again with URL migration enabled.', 'rosenheinrich-multisite-migrate')
+                __('Use a fresh standalone WordPress install or empty hosting space, then run the installer again with URL migration enabled. Or use overwrite mode with Empty entire database to replace this installation as standalone.', 'rosenheinrich-multisite-migrate')
             );
         }
 
@@ -154,6 +162,107 @@ class Rmmigrate_Restore_Topology_Compatibility
         }
 
         return null;
+    }
+
+    /**
+     * Subsite backup onto a live multisite destination in overwrite mode (not subsite-on-network).
+     *
+     * @param array<string,mixed> $state
+     * @param array<string,mixed> $manifest
+     * @param array<string,mixed> $destination
+     */
+    public static function is_subsite_full_overwrite_scenario(array $state, array $manifest, array $destination): bool
+    {
+        if ((string) ($state['install_mode'] ?? '') !== 'overwrite') {
+            return false;
+        }
+        if (empty($destination['is_multisite'])) {
+            return false;
+        }
+        if (($manifest['scope'] ?? '') !== 'subsite') {
+            return false;
+        }
+        if (!Rmmigrate_Restore_Topology_Manifest::is_subsite_standalone_restore($manifest)) {
+            return false;
+        }
+
+        $restore_mode = Rmmigrate_Restore_Topology_Manifest::restore_mode($manifest, $state);
+        if ($restore_mode === 'subsite_on_network') {
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * Full-replace path confirmed: empty DB and/or overwrite ack.
+     *
+     * @param array<string,mixed> $state
+     * @param array<string,mixed> $manifest
+     * @param array<string,mixed> $destination
+     */
+    public static function allows_subsite_full_overwrite(array $state, array $manifest, array $destination): bool
+    {
+        if (!self::is_subsite_full_overwrite_scenario($state, $manifest, $destination)) {
+            return false;
+        }
+
+        $db_action = (string) ($state['db_action'] ?? '');
+        if ($db_action !== '' && $db_action !== 'empty') {
+            return false;
+        }
+
+        if ($db_action === 'empty') {
+            return true;
+        }
+
+        return !empty($state['overwrite_confirmed']) || !empty($state['full_installation_replace']);
+    }
+
+    /**
+     * Enforce Empty entire database for subsite→network full replace (POST / import).
+     *
+     * @param array<string,mixed> $state
+     * @param array<string,mixed> $manifest
+     * @param array<string,mixed> $destination
+     * @return array{gate:string,message:string,recovery_hint:string}|null
+     */
+    public static function validate_subsite_full_overwrite_db_action(array $state, array $manifest, array $destination): ?array
+    {
+        if (!self::is_subsite_full_overwrite_scenario($state, $manifest, $destination)) {
+            return null;
+        }
+        if (self::allows_subsite_full_overwrite($state, $manifest, $destination)) {
+            return null;
+        }
+
+        return self::gate(
+            'topology_subsite_full_overwrite_requires_empty',
+            __('Replacing an entire multisite installation requires Empty entire database.', 'rosenheinrich-multisite-migrate'),
+            __('On Setup, choose “Empty entire database (destructive)”, then confirm overwrite on the next step.', 'rosenheinrich-multisite-migrate')
+        );
+    }
+
+    /**
+     * Soft warnings for Setup / restore UI (non-blocking).
+     *
+     * @param array<string,mixed> $state
+     * @param array<string,mixed> $manifest
+     * @param array<string,mixed> $destination
+     * @return list<array{gate:string,message:string}>
+     */
+    public static function validate_topology_warnings(array $state, array $manifest, array $destination): array
+    {
+        if (!self::is_subsite_full_overwrite_scenario($state, $manifest, $destination)) {
+            return array();
+        }
+
+        return array(
+            array(
+                'gate'    => 'topology_subsite_full_overwrite',
+                'message' => __('This will replace the entire WordPress installation (including the network and all other sites) with this subsite as a standalone site. Choose Empty entire database, then remove WordPress core on the Overwrite step.', 'rosenheinrich-multisite-migrate'),
+            ),
+        );
     }
 
     /**

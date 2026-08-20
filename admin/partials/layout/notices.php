@@ -116,6 +116,38 @@ if (Rmmigrate_Request_Input::get_exists('updated')) {
     include RMMIGRATE_PATH . 'admin/partials/components/admin-banner.php';
 }
 
+if (Rmmigrate_Request_Input::get_exists('email_sent')) {
+    $rmmigrate_banner = array(
+        'variant' => 'success',
+        'text'    => __('Test email sent.', 'rosenheinrich-multisite-migrate'),
+        'simple'  => true,
+    );
+    include RMMIGRATE_PATH . 'admin/partials/components/admin-banner.php';
+}
+
+if (Rmmigrate_Request_Input::get_exists('email_failed')) {
+    $rmmigrate_email_error = get_transient('rmmigrate_test_email_error_' . get_current_user_id());
+    if (is_string($rmmigrate_email_error) && $rmmigrate_email_error !== '') {
+        delete_transient('rmmigrate_test_email_error_' . get_current_user_id());
+        $rmmigrate_banner = array(
+            'variant' => 'error',
+            'text'    => sprintf(
+                /* translators: %s: mailer error */
+                __('Test email could not be sent: %s', 'rosenheinrich-multisite-migrate'),
+                $rmmigrate_email_error
+            ),
+            'simple'  => true,
+        );
+    } else {
+        $rmmigrate_banner = array(
+            'variant' => 'error',
+            'text'    => __('Test email could not be sent. Check your wp_mail / SMTP configuration.', 'rosenheinrich-multisite-migrate'),
+            'simple'  => true,
+        );
+    }
+    include RMMIGRATE_PATH . 'admin/partials/components/admin-banner.php';
+}
+
 if (Rmmigrate_Request_Input::get_exists('imported')) {
     $rmmigrate_banner = array(
         'variant' => 'success',

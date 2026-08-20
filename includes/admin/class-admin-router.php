@@ -105,7 +105,7 @@ class Rmmigrate_Admin_Router
                 'license'       => 'engine',
                 'backups'       => 'engine',
                 'database'      => 'engine',
-                'notifications' => 'engine',
+                'notifications' => 'notifications',
                 'import'        => 'migrate',
             );
             if ($old_tab === 'import') {
@@ -209,6 +209,7 @@ class Rmmigrate_Admin_Router
         $pages = array(
             'multisite-migrate-archives'  => array('title' => $titles['multisite-migrate-archives'], 'partial' => 'archives.php', 'scripts' => array('restore', 'backup-create')),
             'multisite-migrate-migrate'   => array('title' => $titles['multisite-migrate-migrate'], 'partial' => 'migrate.php', 'scripts' => array('restore')),
+            'multisite-migrate-schedule'  => array('title' => $titles['multisite-migrate-schedule'], 'partial' => 'schedule.php', 'scripts' => array('schedule')),
             'multisite-migrate-advanced'  => array('title' => $titles['multisite-migrate-advanced'], 'partial' => 'advanced.php'),
             'multisite-migrate-activity'  => array('title' => $titles['multisite-migrate-activity'], 'partial' => 'activity-log-page.php', 'scripts' => array('activity-log')),
             'multisite-migrate-health'    => array('title' => $titles['multisite-migrate-health'], 'partial' => 'health.php', 'scripts' => array('admin-tools')),
@@ -320,7 +321,7 @@ class Rmmigrate_Admin_Router
 
         if ($rmmigrate_page_slug === 'multisite-migrate-advanced') {
             $rmmigrate_advanced_tab = Rmmigrate_Request_Input::get_key('tab', 'engine');
-            if (!in_array($rmmigrate_advanced_tab, array('engine', 'system'), true)) {
+            if (!in_array($rmmigrate_advanced_tab, array('engine', 'notifications', 'system'), true)) {
                 $rmmigrate_advanced_tab = 'engine';
             }
         }

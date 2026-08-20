@@ -207,6 +207,10 @@ class Rmmigrate_Multisite_Scope
             );
         }
 
+        if ($scope !== self::SCOPE_NETWORK && $scope !== self::SCOPE_SUBSITE) {
+            return new WP_Error('mm_scope', __('Invalid backup scope.', 'rosenheinrich-multisite-migrate'));
+        }
+
         return array(
             'scope'          => $scope,
             'excluded_blogs' => array(),

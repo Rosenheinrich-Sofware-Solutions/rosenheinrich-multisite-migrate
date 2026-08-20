@@ -22,8 +22,6 @@ class Rmmigrate_Access
     private static function subsite_hidden_pages(): array
     {
         return array(
-            'multisite-migrate-advanced',
-            'multisite-migrate-mcp',
             'multisite-migrate-setup',
         );
     }
@@ -36,8 +34,11 @@ class Rmmigrate_Access
         return array(
             'multisite-migrate-archives',
             'multisite-migrate-migrate',
+            'multisite-migrate-schedule',
+            'multisite-migrate-advanced',
             'multisite-migrate-activity',
             'multisite-migrate-health',
+            'multisite-migrate-mcp',
         );
     }
 

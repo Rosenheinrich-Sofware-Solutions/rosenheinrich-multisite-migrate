@@ -17,6 +17,7 @@ class Rmmigrate_Deactivator
         wp_clear_scheduled_hook('rmmigrate_purge_deletes');
         wp_clear_scheduled_hook('rmmigrate_deferred_hosting_detect');
         wp_clear_scheduled_hook('rmmigrate_deferred_retention_prune');
+        wp_clear_scheduled_hook('rmmigrate_tick');
         delete_transient('rmmigrate_lock');
         delete_transient('rmmigrate_preflight');
     }

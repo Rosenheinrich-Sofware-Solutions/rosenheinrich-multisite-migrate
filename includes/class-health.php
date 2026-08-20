@@ -237,7 +237,7 @@ class Rmmigrate_Health
             case 'wp_options_auto_increment':
                 return __('Repair wp_options AUTO_INCREMENT before restore — incomplete DB exports can break restores.', 'rosenheinrich-multisite-migrate');
             case 'scheduler':
-                return __('Open Schedules in Plus to automate backups and get failure emails.', 'rosenheinrich-multisite-migrate');
+                return __('Open Schedules for one local backup, or upgrade to Plus for cloud and multiple schedules.', 'rosenheinrich-multisite-migrate');
             default:
                 return __('Open Health for details, then retry the backup.', 'rosenheinrich-multisite-migrate');
         }

@@ -95,7 +95,7 @@ $rmmigrate_log_max_mb = (int) round((Rmmigrate_Engine_Config::log_max_bytes()) /
     </form>
 </div>
 
-<div class="mm-form-section">
+<div class="mm-form-section mm-log-storage-panel">
     <h2><?php esc_html_e('Log storage', 'rosenheinrich-multisite-migrate'); ?></h2>
     <p class="description"><?php esc_html_e('Size limits rotate large log files automatically. Activity entries are trimmed on the current activity.jsonl file before rotation.', 'rosenheinrich-multisite-migrate'); ?></p>
     <form method="post" action="<?php echo esc_url($rmmigrate_is_network ? network_admin_url('edit.php?action=rmmigrate_settings') : admin_url('admin-post.php')); ?>">
@@ -104,34 +104,36 @@ $rmmigrate_log_max_mb = (int) round((Rmmigrate_Engine_Config::log_max_bytes()) /
         <?php if (!$rmmigrate_is_network) : ?>
             <input type="hidden" name="action" value="rmmigrate_settings">
         <?php endif; ?>
-        <p>
-            <label for="log_max_bytes"><?php esc_html_e('Max log file size', 'rosenheinrich-multisite-migrate'); ?></label>
-            <select name="log_max_bytes" id="log_max_bytes">
-                <?php foreach (array(1 => 1048576, 2 => 2097152, 5 => 5242880, 10 => 10485760) as $rmmigrate_mb => $rmmigrate_bytes) : ?>
-                    <option value="<?php echo esc_attr((string) $rmmigrate_bytes); ?>" <?php selected($rmmigrate_log_max_mb, $rmmigrate_mb); ?>><?php echo esc_html(sprintf(/* translators: %d: megabytes */ __('%d MB', 'rosenheinrich-multisite-migrate'), $rmmigrate_mb)); ?></option>
-                <?php endforeach; ?>
-            </select>
-        </p>
-        <p>
-            <label for="log_max_rotated_files"><?php esc_html_e('Rotated copies to keep', 'rosenheinrich-multisite-migrate'); ?></label>
-            <input type="number" name="log_max_rotated_files" id="log_max_rotated_files" min="2" max="10" value="<?php echo esc_attr((string) ($rmmigrate_settings['log_max_rotated_files'] ?? 5)); ?>" class="small-text">
-        </p>
-        <p>
-            <label for="activity_max_entries"><?php esc_html_e('Activity entries to keep', 'rosenheinrich-multisite-migrate'); ?></label>
-            <input type="number" name="activity_max_entries" id="activity_max_entries" min="500" max="10000" value="<?php echo esc_attr((string) ($rmmigrate_settings['activity_max_entries'] ?? 2000)); ?>" class="small-text">
-        </p>
-        <p>
-            <label for="activity_page_size"><?php esc_html_e('Activity rows per page', 'rosenheinrich-multisite-migrate'); ?></label>
-            <select name="activity_page_size" id="activity_page_size">
-                <?php foreach (array(10, 25, 50) as $rmmigrate_size) : ?>
-                    <option value="<?php echo esc_attr((string) $rmmigrate_size); ?>" <?php selected((int) ($rmmigrate_settings['activity_page_size'] ?? 25), $rmmigrate_size); ?>><?php echo esc_html((string) $rmmigrate_size); ?></option>
-                <?php endforeach; ?>
-            </select>
-        </p>
-        <p>
-            <label for="log_view_lines"><?php esc_html_e('Raw log viewer lines per chunk', 'rosenheinrich-multisite-migrate'); ?></label>
-            <input type="number" name="log_view_lines" id="log_view_lines" min="50" max="500" value="<?php echo esc_attr((string) ($rmmigrate_settings['log_view_lines'] ?? 200)); ?>" class="small-text">
-        </p>
+        <div class="mm-settings-fields">
+            <div class="mm-settings-field">
+                <label for="log_max_bytes"><?php esc_html_e('Max log file size', 'rosenheinrich-multisite-migrate'); ?></label>
+                <select name="log_max_bytes" id="log_max_bytes">
+                    <?php foreach (array(1 => 1048576, 2 => 2097152, 5 => 5242880, 10 => 10485760) as $rmmigrate_mb => $rmmigrate_bytes) : ?>
+                        <option value="<?php echo esc_attr((string) $rmmigrate_bytes); ?>" <?php selected($rmmigrate_log_max_mb, $rmmigrate_mb); ?>><?php echo esc_html(sprintf(/* translators: %d: megabytes */ __('%d MB', 'rosenheinrich-multisite-migrate'), $rmmigrate_mb)); ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <div class="mm-settings-field">
+                <label for="log_max_rotated_files"><?php esc_html_e('Rotated copies to keep', 'rosenheinrich-multisite-migrate'); ?></label>
+                <input type="number" name="log_max_rotated_files" id="log_max_rotated_files" min="2" max="10" value="<?php echo esc_attr((string) ($rmmigrate_settings['log_max_rotated_files'] ?? 5)); ?>">
+            </div>
+            <div class="mm-settings-field">
+                <label for="activity_max_entries"><?php esc_html_e('Activity entries to keep', 'rosenheinrich-multisite-migrate'); ?></label>
+                <input type="number" name="activity_max_entries" id="activity_max_entries" min="500" max="10000" value="<?php echo esc_attr((string) ($rmmigrate_settings['activity_max_entries'] ?? 2000)); ?>">
+            </div>
+            <div class="mm-settings-field">
+                <label for="activity_page_size"><?php esc_html_e('Activity rows per page', 'rosenheinrich-multisite-migrate'); ?></label>
+                <select name="activity_page_size" id="activity_page_size">
+                    <?php foreach (array(10, 25, 50) as $rmmigrate_size) : ?>
+                        <option value="<?php echo esc_attr((string) $rmmigrate_size); ?>" <?php selected((int) ($rmmigrate_settings['activity_page_size'] ?? 25), $rmmigrate_size); ?>><?php echo esc_html((string) $rmmigrate_size); ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <div class="mm-settings-field mm-settings-field--full">
+                <label for="log_view_lines"><?php esc_html_e('Raw log viewer lines per chunk', 'rosenheinrich-multisite-migrate'); ?></label>
+                <input type="number" name="log_view_lines" id="log_view_lines" min="50" max="500" value="<?php echo esc_attr((string) ($rmmigrate_settings['log_view_lines'] ?? 200)); ?>">
+            </div>
+        </div>
         <div class="mm-form-actions mm-form-actions--inline">
             <?php submit_button(__('Save log limits', 'rosenheinrich-multisite-migrate'), 'primary mm-btn-teal', 'submit', false); ?>
         </div>

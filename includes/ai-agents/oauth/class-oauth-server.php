@@ -198,6 +198,9 @@ final class Rmmigrate_OAuth_Server
         }
 
         $scopes = self::normalize_scopes($scope);
+        if (is_wp_error($scopes)) {
+            wp_die(esc_html($scopes->get_error_message()), 400);
+        }
         $code = bin2hex(random_bytes(24));
         Rmmigrate_OAuth_Store::store_token(
             $client_id,
@@ -271,7 +274,9 @@ final class Rmmigrate_OAuth_Server
             return new WP_Error('invalid_grant', 'PKCE verification failed', array('status' => 400));
         }
 
-        Rmmigrate_OAuth_Store::revoke_token_id((int) $row['id']);
+        if (!Rmmigrate_OAuth_Store::revoke_token_id((int) $row['id'])) {
+            return new WP_Error('invalid_grant', 'Invalid authorization code', array('status' => 400));
+        }
 
         $scopes = preg_split('/\s+/', (string) $row['scopes'], -1, PREG_SPLIT_NO_EMPTY);
         $scopes = is_array($scopes) ? $scopes : array(Rmmigrate_OAuth_Scopes::SCOPE_READ);
@@ -310,7 +315,9 @@ final class Rmmigrate_OAuth_Server
             return new WP_Error('invalid_grant', 'Invalid refresh token', array('status' => 400));
         }
 
-        Rmmigrate_OAuth_Store::revoke_token_id((int) $row['id']);
+        if (!Rmmigrate_OAuth_Store::revoke_token_id((int) $row['id'])) {
+            return new WP_Error('invalid_grant', 'Invalid refresh token', array('status' => 400));
+        }
         $scopes = preg_split('/\s+/', (string) $row['scopes'], -1, PREG_SPLIT_NO_EMPTY);
         $scopes = is_array($scopes) ? $scopes : array(Rmmigrate_OAuth_Scopes::SCOPE_READ);
         $user_id = (int) $row['user_id'];
@@ -376,9 +383,9 @@ final class Rmmigrate_OAuth_Server
     }
 
     /**
-     * @return array<int,string>
+     * @return array<int,string>|WP_Error
      */
-    private static function normalize_scopes(string $scope): array
+    private static function normalize_scopes(string $scope)
     {
         $parts = preg_split('/\s+/', trim($scope), -1, PREG_SPLIT_NO_EMPTY);
         $allowed = array(
@@ -389,9 +396,10 @@ final class Rmmigrate_OAuth_Server
         $out = array();
         if (is_array($parts)) {
             foreach ($parts as $p) {
-                if (in_array($p, $allowed, true)) {
-                    $out[] = $p;
+                if (!in_array($p, $allowed, true)) {
+                    return new WP_Error('invalid_scope', 'Unknown scope requested', array('status' => 400));
                 }
+                $out[] = $p;
             }
         }
         if ($out === array()) {

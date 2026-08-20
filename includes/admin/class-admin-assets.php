@@ -158,6 +158,15 @@ class Rmmigrate_Admin_Assets
             self::asset_ver('assets/css/admin.css')
         );
 
+        if (in_array('schedule', $needs, true)) {
+            wp_enqueue_style(
+                'rmmigrate-schedule',
+                RMMIGRATE_URL . 'assets/css/schedule.css',
+                array('rmmigrate-admin'),
+                self::asset_ver('assets/css/schedule.css')
+            );
+        }
+
         wp_enqueue_script(
             'rmmigrate-ui',
             RMMIGRATE_URL . 'assets/js/multisite-migrate-ui.js',
@@ -243,6 +252,15 @@ class Rmmigrate_Admin_Assets
                 RMMIGRATE_URL . 'assets/js/activity-log.js',
                 array('jquery', 'rmmigrate-ui'),
                 self::asset_ver('assets/js/activity-log.js'),
+                true
+            );
+        }
+        if (in_array('schedule', $needs, true)) {
+            wp_enqueue_script(
+                'rmmigrate-schedule-form',
+                RMMIGRATE_URL . 'assets/js/schedule-form.js',
+                array('jquery'),
+                self::asset_ver('assets/js/schedule-form.js'),
                 true
             );
         }
@@ -431,6 +449,10 @@ class Rmmigrate_Admin_Assets
                 'nonce'              => wp_create_nonce('rmmigrate_admin'),
                 'setupDismissAction' => 'rmmigrate_setup_wizard_dismiss_banner',
             )
+        );
+        wp_add_inline_script(
+            'rmmigrate-admin-ux',
+            'document.getElementById("rmmigrate-test-email")&&document.getElementById("rmmigrate-test-email").addEventListener("submit",function(){var s=document.getElementById("email_address"),d=this.querySelector(\'input[name="email_address"]\');if(s&&d){d.value=s.value;}});'
         );
     }
 }
