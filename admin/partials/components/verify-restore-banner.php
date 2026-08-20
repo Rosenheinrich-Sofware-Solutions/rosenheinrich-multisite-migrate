@@ -30,7 +30,7 @@ $rmmigrate_verify_actions = array();
 if ($rmmigrate_can_verify_restore) {
     $rmmigrate_verify_actions[] = array(
         'type'    => 'button',
-        'label'   => __('Test restore (safety)', 'rosenheinrich-multisite-migrate'),
+        'label'   => __('Test restore', 'rosenheinrich-multisite-migrate'),
         'primary' => true,
         'class'   => 'mm-restore-backup',
         'attrs'   => array(
