@@ -321,9 +321,9 @@ final class Rmmigrate_Backup_Service
 
         // User-initiated deletion: mark deleting and return fast. Heavy file purge
         // runs via Job_Cleanup::purge_pending_deletes (cron / scheduled hook).
+        // Do not schedule_cron_worker — it bails/unschedules on STATUS_DELETING.
         if ($job->get_status() === Rmmigrate_Job::STATUS_DELETING) {
             Rmmigrate_Job_Cleanup::schedule_purge();
-            Rmmigrate_Hosting_Detection::schedule_cron_worker($job_id);
             return array(
                 'ok'      => true,
                 'message' => __('Deleting…', 'rosenheinrich-multisite-migrate'),
@@ -342,7 +342,6 @@ final class Rmmigrate_Backup_Service
         Rmmigrate_Logger::log_activity('backup', $message, 'info', array('job_id' => $job_id));
 
         Rmmigrate_Job_Cleanup::schedule_purge();
-        Rmmigrate_Hosting_Detection::schedule_cron_worker($job_id);
 
         return array(
             'ok'      => true,

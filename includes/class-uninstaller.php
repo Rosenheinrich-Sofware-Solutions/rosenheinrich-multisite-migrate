@@ -124,6 +124,7 @@ class Rmmigrate_Uninstaller
         wp_clear_scheduled_hook('rmmigrate_purge_deletes');
         wp_clear_scheduled_hook('rmmigrate_deferred_hosting_detect');
         wp_clear_scheduled_hook('rmmigrate_deferred_retention_prune');
+        wp_clear_scheduled_hook('rmmigrate_tick');
     }
 
     private static function delete_settings(): void

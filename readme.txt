@@ -4,7 +4,7 @@ Tags: backup, migration, wordpress-backup, restore, multisite
 Requires at least: 6.9
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.1.6
+Stable tag: 1.1.7
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -224,6 +224,13 @@ No analytics or advertising trackers are included. See the [privacy policy](http
 
 == Changelog ==
 
+= 1.1.7 =
+* Bug fixes: activation no longer fatals when registering cron schedules.
+* Safer settings handling for exclude paths on PHP 8.3.
+* More reliable backup delete cleanup and uninstall cron clearing.
+* Hardened archive extraction against path traversal (zip slip).
+* OAuth Bearer auth fails closed for invalid opaque tokens (foreign JWTs still pass through).
+
 = 1.1.6 =
 * One local scheduled backup (daily/weekly/monthly) — local storage only; one schedule per admin context.
 * Email notifications for manual backups, scheduled backups, restores, and imports (Settings → Notifications).
@@ -299,6 +306,9 @@ No analytics or advertising trackers are included. See the [privacy policy](http
 * Initial public release of the free edition: multisite-aware backups, restore, local import/export, search & replace, AES-256 encryption and a health dashboard.
 
 == Upgrade Notice ==
+
+= 1.1.7 =
+Bug fixes for activation, settings, delete/uninstall cleanup, archive extraction, and OAuth Bearer. Recommended update.
 
 = 1.1.6 =
 Local scheduled backups and email notifications; recommended update.

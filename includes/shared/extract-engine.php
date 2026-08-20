@@ -239,6 +239,7 @@ class Rmmigrate_Extract_Engine
     {
         self::assert_safe_shell_path( $archive );
         self::assert_safe_shell_path( $dest );
+        self::assert_archive_entries_path_safe( $archive, $dest );
 
         if ( ! is_dir( $dest ) ) {
             wp_mkdir_p( $dest );
@@ -426,7 +427,45 @@ class Rmmigrate_Extract_Engine
         return implode( "\n", $lines );
     }
 
+
+    /**
+     * Reject zip-slip entries before shell unzip writes outside $dest.
+     */
+    private static function assert_archive_entries_path_safe( string $archive, string $dest ): void
+    {
+        if ( ! class_exists( 'ZipArchive' ) ) {
+            throw new RuntimeException( esc_html__('ZipArchive PHP extension is required to validate archive paths before shell unzip.', 'rosenheinrich-multisite-migrate') );
+        }
+        if ( ! class_exists( 'Rmmigrate_Path_Safety_Core', false ) ) {
+            $core = __DIR__ . '/path-safety-core.php';
+            if ( is_file( $core ) ) {
+                require_once $core;
+            }
+        }
+        if ( ! class_exists( 'Rmmigrate_Path_Safety_Core', false ) ) {
+            throw new RuntimeException( esc_html__('Path safety core is unavailable.', 'rosenheinrich-multisite-migrate') );
+        }
+
+        $zip = new ZipArchive();
+        if ( $zip->open( $archive ) !== true ) {
+            throw new RuntimeException( esc_html__('Cannot open backup archive.', 'rosenheinrich-multisite-migrate') );
+        }
+
+        for ( $i = 0; $i < $zip->numFiles; $i++ ) {
+            $name = (string) $zip->getNameIndex( $i );
+            if ( $name === '' || substr( $name, -1 ) === '/' ) {
+                continue;
+            }
+            if ( Rmmigrate_Path_Safety_Core::resolve_extract_dest( $dest, $name ) === null ) {
+                $zip->close();
+                throw new RuntimeException( esc_html__('Archive contains an unsafe path.', 'rosenheinrich-multisite-migrate') );
+            }
+        }
+        $zip->close();
+    }
+
     private static function assert_safe_shell_path( string $path ): void
+
     {
         if ( $path === '' || strpbrk( $path, "\0\r\n" ) !== false ) {
             throw new RuntimeException( esc_html__('Invalid path for shell extraction.', 'rosenheinrich-multisite-migrate') );

@@ -24,9 +24,11 @@ class Rmmigrate_Activator
      */
     public static function ensure_schema(): void
     {
-        global $wpdb;
+        if (!function_exists('dbDelta') && file_exists(ABSPATH . 'wp-admin/includes/upgrade.php')) {
+            require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+        }
 
-        require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+        global $wpdb;
 
         $table = $wpdb->base_prefix . 'rmmigrate_jobs';
         $charset_collate = $wpdb->get_charset_collate();
@@ -94,8 +96,13 @@ class Rmmigrate_Activator
         Rmmigrate_Setup_Wizard::queue_post_activation_redirect();
 
         require_once RMMIGRATE_PATH . 'includes/class-engine-config.php';
+        // Activation runs before plugins_loaded — Scheduler is not loaded yet.
+        require_once RMMIGRATE_PATH . 'includes/class-scheduler.php';
 
         self::ensure_backup_root();
+
+        // Register 5-minute interval before scheduling (Plugin::add_cron_schedules not hooked yet).
+        add_filter('cron_schedules', array(__CLASS__, 'register_cron_schedules'));
 
         if (!wp_next_scheduled('rmmigrate_deferred_hosting_detect')) {
             wp_schedule_single_event(time() + 30, 'rmmigrate_deferred_hosting_detect');
@@ -103,6 +110,24 @@ class Rmmigrate_Activator
         if (!wp_next_scheduled(Rmmigrate_Scheduler::HOOK)) {
             wp_schedule_event(time(), 'rmmigrate_5min', Rmmigrate_Scheduler::HOOK);
         }
+    }
+
+    /**
+     * Cron interval used on activation (Plugin cron_schedules filter not registered yet).
+     *
+     * @param array<string,array{interval:int,display:string}> $schedules
+     * @return array<string,array{interval:int,display:string}>
+     */
+    public static function register_cron_schedules(array $schedules): array
+    {
+        $interval = defined('MINUTE_IN_SECONDS') ? (5 * MINUTE_IN_SECONDS) : 300;
+        $schedules['rmmigrate_5min'] = array(
+            'interval' => $interval,
+            // Do not translate — can run before init (WP 6.7+ JIT notice).
+            'display'  => 'Every 5 Minutes',
+        );
+
+        return $schedules;
     }
 
     private static function ensure_backup_root(): bool

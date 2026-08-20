@@ -41,7 +41,13 @@ final class Rmmigrate_OAuth_Bearer_Auth
 
         $row = Rmmigrate_OAuth_Store::find_token($token, 'access');
         if ($row === null) {
-            return $result;
+            // Opaque Bearer that is not a known MM access token must fail closed.
+            // JWT-shaped tokens already returned above so other plugins keep working.
+            return new WP_Error(
+                'rmmigrate_oauth_invalid_token',
+                __('Invalid OAuth access token.', 'rosenheinrich-multisite-migrate'),
+                array('status' => 401)
+            );
         }
 
         $user_id = (int) $row['user_id'];

@@ -28,7 +28,9 @@ final class Rmmigrate_OAuth_Store
         $tokens = self::tokens_table();
         $charset = $wpdb->get_charset_collate();
 
-        require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+        if (!function_exists('dbDelta') && file_exists(ABSPATH . 'wp-admin/includes/upgrade.php')) {
+            require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+        }
 
         $sql_clients = "CREATE TABLE {$clients} (
             id bigint(20) unsigned NOT NULL AUTO_INCREMENT,

@@ -210,6 +210,9 @@ class Rmmigrate_Settings
         if (!isset($merged['email_blogs']) || !is_array($merged['email_blogs'])) {
             $merged['email_blogs'] = array();
         }
+        if (!isset($merged['exclude_paths']) || !is_array($merged['exclude_paths'])) {
+            $merged['exclude_paths'] = array();
+        }
         if (class_exists('Rmmigrate_Schedules', false)) {
             $merged = Rmmigrate_Schedules::normalize($merged);
         }
