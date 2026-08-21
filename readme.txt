@@ -366,7 +366,11 @@ First public release.
 
 == Screenshots ==
 
-1. Backups: protect the network - list complete archives with status, size, scope, and filters.
-2. Import & Restore: upload a .zip, .daf, or .enc backup; large files upload in chunks.
-3. Health: hosting checks for disk space, PHP limits, ZipArchive, and the backup engine.
-4. AI Agents (MCP): connect Cursor, Claude, or ChatGPT to backup status, health, and archives.
+1. Backups: protect the network — list complete archives with status, size, scope, and filters.
+2. Backup wizard: choose Full profile, DAF or ZIP archive format, and optional WordPress core files.
+3. AI Agents (MCP): connect Cursor, Claude, or ChatGPT to backup status, health, and archives.
+4. Import & Restore: upload a .zip, .daf, or .enc backup; large files upload in chunks.
+5. Schedules: one local Free schedule — interval, time, full profile, and retention.
+6. Settings: encrypt archives at rest, safety snapshot before restore, exclusions, retention, and database export mode.
+7. Activity Log: filter plugin events by type and date; on-disk logs rotate automatically.
+8. Health: hosting checks for disk space, PHP limits, ZipArchive, mysqldump, and the backup engine.

@@ -47,11 +47,15 @@ Free est un outil **manuel** complet de sauvegarde, restauration et migration lo
 
 ## Captures d’écran
 
-| Sauvegardes | Import et restauration |
+| Sauvegardes | Assistant de sauvegarde |
 |:---:|:---:|
-| ![Backups](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-1.png) | ![Import](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-2.png) |
-| **Health** | **AI / MCP** |
-| ![Health](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-3.png) | ![AI Agents](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-4.png) |
+| ![Sauvegardes](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-1.png) | ![Assistant de sauvegarde](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-2.png) |
+| **AI / MCP** | **Import et restauration** |
+| ![AI / MCP](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-3.png) | ![Import et restauration](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-4.png) |
+| **Planifications** | **Réglages** |
+| ![Planifications](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-5.png) | ![Réglages](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-6.png) |
+| **Journal d’activité** | **Health** |
+| ![Journal d’activité](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-7.png) | ![Health](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-8.png) |
 
 ## Installation
 

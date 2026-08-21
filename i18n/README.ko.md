@@ -47,11 +47,15 @@ Free는 완전한 **수동** 백업, 복원, 로컬 이전 도구(전체 네트�
 
 ## Screenshots
 
-| Backups | Import & Restore |
+| Backups | Backup wizard |
 |:---:|:---:|
-| ![Backups](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-1.png) | ![Import](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-2.png) |
-| **Health** | **AI / MCP** |
-| ![Health](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-3.png) | ![AI Agents](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-4.png) |
+| ![Backups](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-1.png) | ![Backup wizard](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-2.png) |
+| **AI / MCP** | **Import & Restore** |
+| ![AI / MCP](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-3.png) | ![Import & Restore](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-4.png) |
+| **Schedules** | **Settings** |
+| ![Schedules](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-5.png) | ![Settings](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-6.png) |
+| **Activity Log** | **Health** |
+| ![Activity Log](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-7.png) | ![Health](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-8.png) |
 
 ## Install
 

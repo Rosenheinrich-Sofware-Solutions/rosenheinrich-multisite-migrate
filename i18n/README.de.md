@@ -47,11 +47,15 @@ Free ist ein vollständiges **manuelles** Tool für Backup, Restore und lokale M
 
 ## Screenshots
 
-| Backups | Import & Restore |
+| Backups | Backup-Assistent |
 |:---:|:---:|
-| ![Backups](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-1.png) | ![Import](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-2.png) |
-| **Health** | **AI / MCP** |
-| ![Health](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-3.png) | ![AI Agents](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-4.png) |
+| ![Backups](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-1.png) | ![Backup-Assistent](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-2.png) |
+| **AI / MCP** | **Import & Restore** |
+| ![AI / MCP](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-3.png) | ![Import & Restore](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-4.png) |
+| **Zeitpläne** | **Einstellungen** |
+| ![Zeitpläne](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-5.png) | ![Einstellungen](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-6.png) |
+| **Aktivitätsprotokoll** | **Health** |
+| ![Aktivitätsprotokoll](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-7.png) | ![Health](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-8.png) |
 
 ## Installation
 

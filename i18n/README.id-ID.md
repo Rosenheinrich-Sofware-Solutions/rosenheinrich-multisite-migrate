@@ -47,11 +47,15 @@ Free adalah alat **manual** lengkap untuk backup, restore, dan migrasi lokal (te
 
 ## Tangkapan layar
 
-| Backup | Impor & Restore |
+| Backup | Wizard backup |
 |:---:|:---:|
-| ![Backups](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-1.png) | ![Import](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-2.png) |
-| **Health** | **AI / MCP** |
-| ![Health](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-3.png) | ![AI Agents](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-4.png) |
+| ![Backup](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-1.png) | ![Wizard backup](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-2.png) |
+| **AI / MCP** | **Impor & Restore** |
+| ![AI / MCP](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-3.png) | ![Impor & Restore](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-4.png) |
+| **Jadwal** | **Pengaturan** |
+| ![Jadwal](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-5.png) | ![Pengaturan](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-6.png) |
+| **Log aktivitas** | **Health** |
+| ![Log aktivitas](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-7.png) | ![Health](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-8.png) |
 
 ## Instalasi
 

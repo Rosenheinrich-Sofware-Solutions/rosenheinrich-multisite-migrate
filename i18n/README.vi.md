@@ -47,11 +47,15 @@ Free là công cụ **thủ công** đầy đủ cho sao lưu, khôi phục và 
 
 ## Ảnh chụp màn hình
 
-| Sao lưu | Nhập & Khôi phục |
+| Sao lưu | Trình hướng dẫn sao lưu |
 |:---:|:---:|
-| ![Backups](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-1.png) | ![Import](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-2.png) |
-| **Health** | **AI / MCP** |
-| ![Health](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-3.png) | ![AI Agents](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-4.png) |
+| ![Sao lưu](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-1.png) | ![Trình hướng dẫn sao lưu](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-2.png) |
+| **AI / MCP** | **Nhập & Khôi phục** |
+| ![AI / MCP](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-3.png) | ![Nhập & Khôi phục](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-4.png) |
+| **Lịch trình** | **Cài đặt** |
+| ![Lịch trình](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-5.png) | ![Cài đặt](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-6.png) |
+| **Nhật ký hoạt động** | **Health** |
+| ![Nhật ký hoạt động](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-7.png) | ![Health](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-8.png) |
 
 ## Cài đặt
 

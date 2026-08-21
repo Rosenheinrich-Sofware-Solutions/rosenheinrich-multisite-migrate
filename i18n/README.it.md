@@ -47,11 +47,15 @@ Free è uno strumento **manuale** completo per backup, ripristino e migrazione l
 
 ## Screenshot
 
-| Backup | Import e ripristino |
+| Backup | Procedura guidata backup |
 |:---:|:---:|
-| ![Backups](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-1.png) | ![Import](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-2.png) |
-| **Health** | **AI / MCP** |
-| ![Health](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-3.png) | ![AI Agents](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-4.png) |
+| ![Backup](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-1.png) | ![Procedura guidata backup](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-2.png) |
+| **AI / MCP** | **Import e ripristino** |
+| ![AI / MCP](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-3.png) | ![Import e ripristino](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-4.png) |
+| **Pianificazioni** | **Impostazioni** |
+| ![Pianificazioni](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-5.png) | ![Impostazioni](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-6.png) |
+| **Registro attività** | **Health** |
+| ![Registro attività](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-7.png) | ![Health](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-8.png) |
 
 ## Installazione
 

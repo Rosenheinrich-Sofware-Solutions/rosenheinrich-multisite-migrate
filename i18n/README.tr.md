@@ -47,11 +47,15 @@ Free, tam ağ yedeği dahil eksiksiz bir **manuel** yedekleme, geri yükleme ve 
 
 ## Ekran görüntüleri
 
-| Yedekler | İçe aktarma ve geri yükleme |
+| Yedekler | Yedek sihirbazı |
 |:---:|:---:|
-| ![Backups](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-1.png) | ![Import](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-2.png) |
-| **Health** | **AI / MCP** |
-| ![Health](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-3.png) | ![AI Agents](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-4.png) |
+| ![Yedekler](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-1.png) | ![Yedek sihirbazı](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-2.png) |
+| **AI / MCP** | **İçe aktarma ve geri yükleme** |
+| ![AI / MCP](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-3.png) | ![İçe aktarma ve geri yükleme](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-4.png) |
+| **Zamanlamalar** | **Ayarlar** |
+| ![Zamanlamalar](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-5.png) | ![Ayarlar](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-6.png) |
+| **Etkinlik günlüğü** | **Health** |
+| ![Etkinlik günlüğü](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-7.png) | ![Health](https://ps.w.org/rosenheinrich-multisite-migrate/assets/screenshot-8.png) |
 
 ## Kurulum
 
