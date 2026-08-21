@@ -23,7 +23,7 @@ Faça backup, restaure e migre **sites individuais** e **redes multisite complet
 | **2. Site** | [multisitemigrate.rosenheinrich.com](https://multisitemigrate.rosenheinrich.com/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=website) |
 | **3. Preços / Pro** | [Comparar planos](https://multisitemigrate.rosenheinrich.com/pricing/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=pricing) |
 | Documentação | [Documentação](https://multisitemigrate.rosenheinrich.com/docs/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=docs) |
-| Vídeo | [Tutorial no YouTube](https://www.youtube.com/watch?v=k51_xB2_eo0) |
+| Vídeo | [Tutorial no YouTube](https://www.youtube.com/watch?v=olr5PbskjS0) |
 | Traduzir | [translate.wordpress.org](https://translate.wordpress.org/projects/wp-plugins/rosenheinrich-multisite-migrate/) |
 
 ## Recursos Free

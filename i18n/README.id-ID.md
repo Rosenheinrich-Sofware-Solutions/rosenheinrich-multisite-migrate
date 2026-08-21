@@ -23,7 +23,7 @@ Backup, restore, dan migrasi **situs tunggal** serta **jaringan multisite penuh*
 | **2. Situs web** | [multisitemigrate.rosenheinrich.com](https://multisitemigrate.rosenheinrich.com/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=website) |
 | **3. Harga / Pro** | [Bandingkan paket](https://multisitemigrate.rosenheinrich.com/pricing/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=pricing) |
 | Dokumentasi | [Dokumentasi](https://multisitemigrate.rosenheinrich.com/docs/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=docs) |
-| Video | [Walkthrough di YouTube](https://www.youtube.com/watch?v=k51_xB2_eo0) |
+| Video | [Walkthrough di YouTube](https://www.youtube.com/watch?v=olr5PbskjS0) |
 | Terjemahkan | [translate.wordpress.org](https://translate.wordpress.org/projects/wp-plugins/rosenheinrich-multisite-migrate/) |
 
 ## Fitur Free

@@ -23,7 +23,7 @@ Copie de seguridad, restauración y migración de **sitios individuales** y **re
 | **2. Sitio web** | [multisitemigrate.rosenheinrich.com](https://multisitemigrate.rosenheinrich.com/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=website) |
 | **3. Precios / Pro** | [Comparar planes](https://multisitemigrate.rosenheinrich.com/pricing/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=pricing) |
 | Documentación | [Documentación](https://multisitemigrate.rosenheinrich.com/docs/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=docs) |
-| Vídeo | [Tutorial en YouTube](https://www.youtube.com/watch?v=k51_xB2_eo0) |
+| Vídeo | [Tutorial en YouTube](https://www.youtube.com/watch?v=olr5PbskjS0) |
 | Traducir | [translate.wordpress.org](https://translate.wordpress.org/projects/wp-plugins/rosenheinrich-multisite-migrate/) |
 
 ## Funciones Free

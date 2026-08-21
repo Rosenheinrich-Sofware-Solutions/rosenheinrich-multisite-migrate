@@ -23,7 +23,7 @@ Einzelne Sites und **komplette Multisite-Netzwerke** sichern, wiederherstellen u
 | **2. Website** | [multisitemigrate.rosenheinrich.com/de/](https://multisitemigrate.rosenheinrich.com/de/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=website) |
 | **3. Preise / Pro** | [Tarife vergleichen](https://multisitemigrate.rosenheinrich.com/de/preise/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=pricing) |
 | Dokumentation | [Dokumentation](https://multisitemigrate.rosenheinrich.com/de/dokumentation/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=docs) |
-| Video | [Walkthrough auf YouTube](https://www.youtube.com/watch?v=k51_xB2_eo0) |
+| Video | [Walkthrough auf YouTube](https://www.youtube.com/watch?v=olr5PbskjS0) |
 | Übersetzen | [translate.wordpress.org](https://translate.wordpress.org/projects/wp-plugins/rosenheinrich-multisite-migrate/) |
 
 ## Free-Funktionen

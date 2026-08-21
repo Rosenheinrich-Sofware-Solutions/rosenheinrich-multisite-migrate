@@ -23,7 +23,7 @@ Sao lưu, khôi phục và di chuyển **site đơn lẻ** cùng **toàn bộ m�
 | **2. Website** | [multisitemigrate.rosenheinrich.com](https://multisitemigrate.rosenheinrich.com/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=website) |
 | **3. Bảng giá / Pro** | [So sánh gói](https://multisitemigrate.rosenheinrich.com/pricing/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=pricing) |
 | Tài liệu | [Tài liệu](https://multisitemigrate.rosenheinrich.com/docs/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=docs) |
-| Video | [Hướng dẫn trên YouTube](https://www.youtube.com/watch?v=k51_xB2_eo0) |
+| Video | [Hướng dẫn trên YouTube](https://www.youtube.com/watch?v=olr5PbskjS0) |
 | Dịch | [translate.wordpress.org](https://translate.wordpress.org/projects/wp-plugins/rosenheinrich-multisite-migrate/) |
 
 ## Tính năng Free
