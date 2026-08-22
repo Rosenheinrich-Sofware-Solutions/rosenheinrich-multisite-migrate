@@ -223,15 +223,6 @@ Only when you explicitly opt in:
 
 No analytics or advertising trackers run without your opt-in. See the [privacy policy](https://multisitemigrate.rosenheinrich.com/privacy-policy/#plugin-opt-in) (optional plugin services).
 
-== External services ==
-
-The plugin works offline for local backups. It contacts external servers only when you take a specific action:
-
-* **Usage telemetry API** — `https://multisitemigrate.rosenheinrich.com/wp-json/multisite-migrate-portal/v1/telemetry/` — only when you opt in on the setup wizard finish step (telemetry checkbox) or in **Settings → Privacy**. Sends pseudonymous wizard progress, backup/import/restore outcomes (error categories, not file contents), and basic environment snapshots. Data: pseudonymous `install_id`, `site_hash` (SHA-256 of site URL + WordPress salt — not your raw URL), plugin/WP/PHP versions, locale, event props. No visitor analytics, no backup files, no site URL in event payloads.
-* **Product update email** — same host — `…/multisite-migrate-portal/v1/newsletter/subscribe` — only when you opt in on the setup wizard finish step (email checkbox, skippable). Sends admin email, display name, **full site URL**, site title, and basic site/plugin environment details. Where double opt-in is required by law, confirmation links expire after **48 hours**.
-* **In-plugin feedback** — same host — `…/multisite-migrate-portal/v1/feedback/submit` — only when you submit the optional feedback dialog or deactivate survey. Sends sentiment, optional message, versions, and `site_hash` (not your site URL); failed-job reports may include the last sanitized error message. Optional contact email on deactivate only.
-* **WordPress.org** — standard plugin update API — for installs without a Pro license.
-
 == Changelog ==
 
 = 1.1.8 =
