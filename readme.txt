@@ -213,16 +213,6 @@ No. Backup, restore, and local migration are driven from the WordPress admin UI.
 
 Backup and restore run as background-style chunked jobs. They are designed not to hold a single request open for the entire archive build. See [shared hosting guidance](https://multisitemigrate.rosenheinrich.com/features/shared-hosting/?utm_source=wprepo&utm_medium=link&utm_content=shared_hosting&utm_campaign=multisite_migrate_free).
 
-= Does the plugin send my email or site data anywhere? =
-
-Only when you explicitly opt in:
-
-1. **Setup wizard finish** — optional checkboxes for product update emails and usage telemetry (both default on; uncheck either before **Create Your First Backup** to decline). Product emails send your admin email, display name, **full site URL**, and basic site/plugin environment details (double opt-in where required; confirmation links expire after 48 hours). Telemetry sends pseudonymous wizard progress, backup/import/restore outcomes (error categories only), and basic environment snapshots to multisitemigrate.rosenheinrich.com. No visitor analytics, no backup files, no site URL in telemetry events (only a hashed `site_hash` identifier).
-2. **Usage telemetry** in **Settings → Privacy** — change your telemetry choice after setup.
-3. **Send feedback** in the in-plugin feedback dialog or deactivate survey — sends a sentiment rating, optional free-text message, plugin/WP/PHP versions, and `site_hash` (not your site URL). When you use **Report a problem** after a failed job, the last sanitized error message is included. Optional contact email on deactivate only. No backup files are uploaded.
-
-No analytics or advertising trackers run without your opt-in. See the [privacy policy](https://multisitemigrate.rosenheinrich.com/privacy-policy/#plugin-opt-in) (optional plugin services).
-
 == Changelog ==
 
 = 1.1.8 =
