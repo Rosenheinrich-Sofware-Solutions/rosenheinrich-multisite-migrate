@@ -34,6 +34,8 @@
 - **[Локальний експорт і імпорт](https://multisitemigrate.rosenheinrich.com/docs-backup/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=docs_backup)** із переносними архівами
 - **[Пошук і заміна](https://multisitemigrate.rosenheinrich.com/docs-restore/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=search_replace)**, включно з серіалізованими даними
 - Додаткове шифрування архівів **AES-256**
+- **Один локальний запланований бекап** — щодня, щотижня або щомісяця в локальне зберігання (один розклад на контекст адміністратора).
+- **Сповіщення e-mail** — оповіщення про ручні, заплановані бекапи, відновлення та імпорти.
 - Панель **Health** для перевірки хостингу та статусу
 - **[AI Backup Tools & MCP](https://multisitemigrate.rosenheinrich.com/docs/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=mcp_connect)** — статус, архіви, Health, підтверджений backup-now (без ключа)
 - Резервне копіювання та відновлення адміністратором subsite на власному сайті
@@ -41,9 +43,9 @@
 
 ## Free vs Pro
 
-Free — повноцінний **ручний** інструмент резервного копіювання, відновлення та локального перенесення (включно з повним резервним копіюванням мережі).
+Free — повноцінний інструмент резервного копіювання, відновлення та локального перенесення, включно з повним резервним копіюванням мережі та одним локальним запланованим бекапом.
 
-[Multisite Migrate Pro](https://multisitemigrate.rosenheinrich.com/pricing/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=get_pro) додає планування, [хмарне сховище](https://multisitemigrate.rosenheinrich.com/features/cloud-backup/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=cloud_backup), [перенесення на порожній сервер](https://multisitemigrate.rosenheinrich.com/features/empty-server-migration/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=empty_server), [Staging](https://multisitemigrate.rosenheinrich.com/features/staging/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=staging), [WP-CLI](https://multisitemigrate.rosenheinrich.com/docs-wp-cli/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=docs_wp_cli), [розділення мережі](https://multisitemigrate.rosenheinrich.com/docs-network-split/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=docs_network_split), ліцензійні місця та розширені можливості AI.
+[Multisite Migrate Pro](https://multisitemigrate.rosenheinrich.com/pricing/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=get_pro) додає **облачні, множинні та інкрементні розклади**, [хмарне сховище](https://multisitemigrate.rosenheinrich.com/features/cloud-backup/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=cloud_backup), [перенесення на порожній сервер](https://multisitemigrate.rosenheinrich.com/features/empty-server-migration/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=empty_server), [Staging](https://multisitemigrate.rosenheinrich.com/features/staging/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=staging), [WP-CLI](https://multisitemigrate.rosenheinrich.com/docs-wp-cli/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=docs_wp_cli), [розділення мережі](https://multisitemigrate.rosenheinrich.com/docs-network-split/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=docs_network_split), ліцензійні місця та розширені можливості AI.
 
 ## Screenshots
 

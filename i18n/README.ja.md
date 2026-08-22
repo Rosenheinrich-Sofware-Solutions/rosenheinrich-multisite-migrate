@@ -34,6 +34,8 @@
 - ポータブルアーカイブによる**[ローカルエクスポートとインポート](https://multisitemigrate.rosenheinrich.com/docs-backup/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=docs_backup)**
 - シリアライズデータ対応の**[検索と置換](https://multisitemigrate.rosenheinrich.com/docs-restore/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=search_replace)**
 - 任意の **AES-256** アーカイブ暗号化
+- **1件のローカルスケジュールバックアップ** — 日次・週次・月次でローカルストレージへ（管理コンテキストごとに1スケジュール）。
+- **メール通知** — 手動バックアップ、スケジュールバックアップ、復元、インポートのアラート。
 - ホスティングチェックとステータス用 **Health** ダッシュボード
 - **[AI Backup Tools & MCP](https://multisitemigrate.rosenheinrich.com/docs/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=mcp_connect)** — ステータス、アーカイブ、Health、確認付き backup-now（キー不要）
 - サブサイト管理者による自サイトのバックアップと復元
@@ -41,9 +43,9 @@
 
 ## Free vs Pro
 
-Free は完全な**手動**バックアップ、復元、ローカル移行ツール（ネットワーク全体のバックアップを含む）です。
+Free は、完全なネットワークバックアップと 1 件のローカルスケジュールバックアップを含む、バックアップ・復元・ローカル移行の完全なツールです。
 
-[Multisite Migrate Pro](https://multisitemigrate.rosenheinrich.com/pricing/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=get_pro) はスケジューリング、[クラウドストレージ](https://multisitemigrate.rosenheinrich.com/features/cloud-backup/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=cloud_backup)、[空サーバーへの移行](https://multisitemigrate.rosenheinrich.com/features/empty-server-migration/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=empty_server)、[Staging](https://multisitemigrate.rosenheinrich.com/features/staging/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=staging)、[WP-CLI](https://multisitemigrate.rosenheinrich.com/docs-wp-cli/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=docs_wp_cli)、[ネットワーク分割](https://multisitemigrate.rosenheinrich.com/docs-network-split/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=docs_network_split)、ライセンス枠、拡張 AI 機能を追加します。
+[Multisite Migrate Pro](https://multisitemigrate.rosenheinrich.com/pricing/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=get_pro) は**クラウド・複数・増分スケジュール**、[クラウドストレージ](https://multisitemigrate.rosenheinrich.com/features/cloud-backup/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=cloud_backup)、[空サーバーへの移行](https://multisitemigrate.rosenheinrich.com/features/empty-server-migration/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=empty_server)、[Staging](https://multisitemigrate.rosenheinrich.com/features/staging/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=staging)、[WP-CLI](https://multisitemigrate.rosenheinrich.com/docs-wp-cli/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=docs_wp_cli)、[ネットワーク分割](https://multisitemigrate.rosenheinrich.com/docs-network-split/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=docs_network_split)、ライセンス枠、拡張 AI 機能を追加します。
 
 ## Screenshots
 

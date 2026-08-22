@@ -61,6 +61,7 @@ class Rmmigrate_Uninstaller
     {
         $storage_dir = self::resolve_storage_dir();
 
+        self::clear_maintenance();
         self::clear_crons();
 
         if (!empty($plan['delete_settings'])) {
@@ -88,14 +89,49 @@ class Rmmigrate_Uninstaller
 
         if ($custom === '') {
             $dir_name = defined('RMMIGRATE_DIR_NAME') ? RMMIGRATE_DIR_NAME : 'multisite-migrate-archives';
-            return wp_normalize_path(trailingslashit(self::uploads_basedir()) . $dir_name);
+            $basedir = self::uploads_basedir();
+            if ($basedir === '') {
+                return '';
+            }
+            return wp_normalize_path(trailingslashit($basedir) . $dir_name);
         }
 
         if ($custom[0] === '/' || preg_match('#^[A-Za-z]:[\\\\/]#', $custom)) {
             return wp_normalize_path($custom);
         }
 
-        return wp_normalize_path(trailingslashit(self::uploads_basedir()) . ltrim($custom, '/'));
+        $basedir = self::uploads_basedir();
+        if ($basedir === '') {
+            return '';
+        }
+        return wp_normalize_path(trailingslashit($basedir) . ltrim($custom, '/'));
+    }
+
+    /**
+     * Verify that a storage directory is safe to delete and not a WordPress or system root folder.
+     */
+    public static function is_safe_to_delete_storage_dir(string $storage_dir): bool
+    {
+        $dir = function_exists('wp_normalize_path') ? wp_normalize_path(rtrim($storage_dir, '/\\')) : rtrim(str_replace('\\', '/', $storage_dir), '/');
+        if ($dir === '' || $dir === '/' || $dir === '.') {
+            return false;
+        }
+
+        require_once dirname(__DIR__) . '/includes/class-filesystem.php';
+        if (Rmmigrate_Filesystem::is_forbidden_root_directory($dir)) {
+            return false;
+        }
+
+        // Must not be identical to uploads basedir itself
+        $basedir = self::uploads_basedir();
+        if ($basedir !== '') {
+            $norm_basedir = function_exists('wp_normalize_path') ? wp_normalize_path(rtrim($basedir, '/\\')) : rtrim(str_replace('\\', '/', $basedir), '/');
+            if ($dir === $norm_basedir) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /**
@@ -118,6 +154,16 @@ class Rmmigrate_Uninstaller
         return '';
     }
 
+    private static function clear_maintenance(): void
+    {
+        delete_site_option('rmmigrate_maintenance');
+        delete_option('rmmigrate_maintenance');
+        $maintenance_file = (defined('ABSPATH') ? ABSPATH : '') . '.maintenance';
+        if ($maintenance_file !== '.maintenance' && file_exists($maintenance_file)) {
+            wp_delete_file($maintenance_file);
+        }
+    }
+
     private static function clear_crons(): void
     {
         wp_clear_scheduled_hook('rmmigrate_worker_cron');
@@ -125,6 +171,9 @@ class Rmmigrate_Uninstaller
         wp_clear_scheduled_hook('rmmigrate_deferred_hosting_detect');
         wp_clear_scheduled_hook('rmmigrate_deferred_retention_prune');
         wp_clear_scheduled_hook('rmmigrate_tick');
+        wp_clear_scheduled_hook('rmmigrate_telemetry_flush');
+        wp_clear_scheduled_hook('rmmigrate_daily_telemetry_snapshot');
+        wp_clear_scheduled_hook('rmmigrate_telemetry_snapshot_oneshot');
     }
 
     private static function delete_settings(): void
@@ -143,10 +192,14 @@ class Rmmigrate_Uninstaller
             'rmmigrate_upgrade_notice',
             'rmmigrate_dismiss_multisite_upgrade',
             'rmmigrate_first_activated_at',
+            'rmmigrate_maintenance',
+            'rmmigrate_telemetry',
+            'rmmigrate_telemetry_queue',
         );
 
         foreach ($site_options as $option_name) {
             delete_site_option($option_name);
+            delete_option($option_name);
         }
 
         global $wpdb;
@@ -187,6 +240,8 @@ class Rmmigrate_Uninstaller
 
         if (class_exists('Rmmigrate_Snap_DB', false)) {
             Rmmigrate_Snap_DB::drop_table_if_exists($wpdb->base_prefix . 'rmmigrate_jobs');
+            Rmmigrate_Snap_DB::drop_table_if_exists($wpdb->base_prefix . 'mm_oauth_clients');
+            Rmmigrate_Snap_DB::drop_table_if_exists($wpdb->base_prefix . 'mm_oauth_tokens');
         }
 
         if (is_multisite()) {
@@ -211,7 +266,7 @@ class Rmmigrate_Uninstaller
      */
     private static function delete_storage(string $storage_dir, array $plan): void
     {
-        if ($storage_dir === '' || !is_dir($storage_dir)) {
+        if ($storage_dir === '' || !is_dir($storage_dir) || !self::is_safe_to_delete_storage_dir($storage_dir)) {
             return;
         }
 

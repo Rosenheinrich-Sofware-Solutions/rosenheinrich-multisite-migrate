@@ -34,6 +34,8 @@
 - 휴대용 아카이브로 **[로컬 내보내기 및 가져오기](https://multisitemigrate.rosenheinrich.com/docs-backup/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=docs_backup)**
 - 직렬화 데이터 포함 **[검색 및 바꾸기](https://multisitemigrate.rosenheinrich.com/docs-restore/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=search_replace)**
 - 선택적 **AES-256** 아카이브 암호화
+- **로컬 예약 백업 1건** — 일/주/월 단위로 로컬 스토리지에 (관리자 컨텍스트당 스케줄 1개).
+- **이메일 알림** — 수동 백업, 예약 백업, 복원, 가져오기 알림.
 - 호스팅 점검 및 상태용 **Health** 대시보드
 - **[AI Backup Tools & MCP](https://multisitemigrate.rosenheinrich.com/docs/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=mcp_connect)** — 상태, 아카이브, Health, 확인 후 backup-now(키 불필요)
 - 서브사이트 관리자의 자체 사이트 백업 및 복원
@@ -41,9 +43,9 @@
 
 ## Free vs Pro
 
-Free는 완전한 **수동** 백업, 복원, 로컬 이전 도구(전체 네트워크 백업 포함)입니다.
+Free는 전체 네트워크 백업과 로컬 예약 백업 1건을 포함한 완전한 백업, 복원, 로컬 이전 도구입니다.
 
-[Multisite Migrate Pro](https://multisitemigrate.rosenheinrich.com/pricing/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=get_pro)는 스케줄링, [클라우드 스토리지](https://multisitemigrate.rosenheinrich.com/features/cloud-backup/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=cloud_backup), [빈 서버 이전](https://multisitemigrate.rosenheinrich.com/features/empty-server-migration/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=empty_server), [Staging](https://multisitemigrate.rosenheinrich.com/features/staging/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=staging), [WP-CLI](https://multisitemigrate.rosenheinrich.com/docs-wp-cli/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=docs_wp_cli), [네트워크 분할](https://multisitemigrate.rosenheinrich.com/docs-network-split/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=docs_network_split), 라이선스 할당량, 확장 AI 기능을 추가합니다.
+[Multisite Migrate Pro](https://multisitemigrate.rosenheinrich.com/pricing/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=get_pro)는 **클라우드·다중·증분 스케줄**, [클라우드 스토리지](https://multisitemigrate.rosenheinrich.com/features/cloud-backup/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=cloud_backup), [빈 서버 이전](https://multisitemigrate.rosenheinrich.com/features/empty-server-migration/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=empty_server), [Staging](https://multisitemigrate.rosenheinrich.com/features/staging/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=staging), [WP-CLI](https://multisitemigrate.rosenheinrich.com/docs-wp-cli/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=docs_wp_cli), [네트워크 분할](https://multisitemigrate.rosenheinrich.com/docs-network-split/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=docs_network_split), 라이선스 할당량, 확장 AI 기능을 추가합니다.
 
 ## Screenshots
 

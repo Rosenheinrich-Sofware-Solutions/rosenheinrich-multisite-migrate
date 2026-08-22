@@ -507,11 +507,53 @@ class Rmmigrate_Filesystem
     }
 
     /**
+     * Check if a directory is a protected core/system directory that must never be deleted.
+     */
+    public static function is_forbidden_root_directory(string $dir): bool
+    {
+        $normalized = function_exists('wp_normalize_path') ? wp_normalize_path(rtrim($dir, '/\\')) : rtrim(str_replace('\\', '/', $dir), '/');
+        if ($normalized === '' || $normalized === '/' || $normalized === '.') {
+            return true;
+        }
+
+        $forbidden = array();
+        if (defined('ABSPATH')) {
+            $forbidden[] = function_exists('wp_normalize_path') ? wp_normalize_path(rtrim(ABSPATH, '/\\')) : rtrim(str_replace('\\', '/', ABSPATH), '/');
+        }
+        if (defined('WP_CONTENT_DIR')) {
+            $forbidden[] = function_exists('wp_normalize_path') ? wp_normalize_path(rtrim(WP_CONTENT_DIR, '/\\')) : rtrim(str_replace('\\', '/', WP_CONTENT_DIR), '/');
+        }
+        if (defined('WP_PLUGIN_DIR')) {
+            $forbidden[] = function_exists('wp_normalize_path') ? wp_normalize_path(rtrim(WP_PLUGIN_DIR, '/\\')) : rtrim(str_replace('\\', '/', WP_PLUGIN_DIR), '/');
+        }
+        if (function_exists('wp_upload_dir')) {
+            $uploads = wp_upload_dir(null, false);
+            if (is_array($uploads) && !empty($uploads['basedir'])) {
+                $forbidden[] = function_exists('wp_normalize_path') ? wp_normalize_path(rtrim($uploads['basedir'], '/\\')) : rtrim(str_replace('\\', '/', (string) $uploads['basedir']), '/');
+            }
+        }
+        if (function_exists('get_theme_root')) {
+            $theme_root = get_theme_root();
+            if (is_string($theme_root) && $theme_root !== '') {
+                $forbidden[] = function_exists('wp_normalize_path') ? wp_normalize_path(rtrim($theme_root, '/\\')) : rtrim(str_replace('\\', '/', $theme_root), '/');
+            }
+        }
+        if (function_exists('get_home_path')) {
+            $home = get_home_path();
+            if (is_string($home) && $home !== '') {
+                $forbidden[] = function_exists('wp_normalize_path') ? wp_normalize_path(rtrim($home, '/\\')) : rtrim(str_replace('\\', '/', $home), '/');
+            }
+        }
+
+        return in_array($normalized, array_filter($forbidden), true);
+    }
+
+    /**
      * Recursively delete a directory and all its contents.
      */
     public static function delete_directory(string $dir): bool
     {
-        if ($dir === '' || $dir === '/' || $dir === ABSPATH) {
+        if (self::is_forbidden_root_directory($dir)) {
             return false;
         }
 

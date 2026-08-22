@@ -91,6 +91,7 @@ final class Rmmigrate_Review_Nudge
     {
         self::verify_ajax();
         self::set_user_state('dismissed');
+        Rmmigrate_Telemetry::record_event('review_nudge', array('action' => 'dismiss'));
         wp_send_json_success();
     }
 
@@ -100,6 +101,7 @@ final class Rmmigrate_Review_Nudge
         $feedback = Rmmigrate_Request_Input::post_text('feedback');
         if ($feedback === 'reviewed' || $feedback === 'negative') {
             self::set_user_state($feedback);
+            Rmmigrate_Telemetry::record_event('review_nudge', array('action' => $feedback));
             wp_send_json_success();
         }
 

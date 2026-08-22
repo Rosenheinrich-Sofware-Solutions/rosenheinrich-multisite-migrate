@@ -34,6 +34,8 @@ Backup, restore, dan migrasi **situs tunggal** serta **jaringan multisite penuh*
 - **[Ekspor & impor lokal](https://multisitemigrate.rosenheinrich.com/docs-backup/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=docs_backup)** dengan arsip portabel
 - **[Cari & ganti](https://multisitemigrate.rosenheinrich.com/docs-restore/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=search_replace)** termasuk data terserialisasi
 - Enkripsi arsip **AES-256** opsional
+- **Satu backup terjadwal lokal** — harian, mingguan, atau bulanan ke penyimpanan lokal (satu jadwal per konteks admin).
+- **Notifikasi email** — peringatan untuk backup manual, terjadwal, restore, dan impor.
 - Dashboard **Health** untuk pemeriksaan hosting dan status
 - **[AI Backup Tools & MCP](https://multisitemigrate.rosenheinrich.com/docs/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=mcp_connect)** — status, arsip, health, backup-now terkonfirmasi (tanpa kunci)
 - Backup & restore admin subsite di situs administrator sendiri
@@ -41,9 +43,9 @@ Backup, restore, dan migrasi **situs tunggal** serta **jaringan multisite penuh*
 
 ## Free vs Pro
 
-Free adalah alat **manual** lengkap untuk backup, restore, dan migrasi lokal (termasuk backup jaringan penuh).
+Free adalah alat lengkap untuk backup, restore, dan migrasi lokal — termasuk backup jaringan penuh dan satu backup terjadwal lokal.
 
-[Multisite Migrate Pro](https://multisitemigrate.rosenheinrich.com/pricing/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=get_pro) menambahkan penjadwalan, [penyimpanan cloud](https://multisitemigrate.rosenheinrich.com/features/cloud-backup/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=cloud_backup), [migrasi ke server kosong](https://multisitemigrate.rosenheinrich.com/features/empty-server-migration/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=empty_server), [Staging](https://multisitemigrate.rosenheinrich.com/features/staging/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=staging), [WP-CLI](https://multisitemigrate.rosenheinrich.com/docs-wp-cli/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=docs_wp_cli), [pemisahan jaringan](https://multisitemigrate.rosenheinrich.com/docs-network-split/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=docs_network_split), lisensi, dan kemampuan AI lanjutan.
+[Multisite Migrate Pro](https://multisitemigrate.rosenheinrich.com/pricing/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=get_pro) menambahkan **jadwal cloud, ganda, dan inkremental**, [penyimpanan cloud](https://multisitemigrate.rosenheinrich.com/features/cloud-backup/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=cloud_backup), [migrasi ke server kosong](https://multisitemigrate.rosenheinrich.com/features/empty-server-migration/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=empty_server), [Staging](https://multisitemigrate.rosenheinrich.com/features/staging/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=staging), [WP-CLI](https://multisitemigrate.rosenheinrich.com/docs-wp-cli/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=docs_wp_cli), [pemisahan jaringan](https://multisitemigrate.rosenheinrich.com/docs-network-split/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=docs_network_split), lisensi, dan kemampuan AI lanjutan.
 
 ## Tangkapan layar
 

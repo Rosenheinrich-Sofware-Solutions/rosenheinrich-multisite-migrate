@@ -34,6 +34,8 @@ Multisite Migrate size yardımcı oluyorsa **bu repoya yıldız verin** — GitH
 - Taşınabilir arşivlerle **[yerel dışa aktarma ve içe aktarma](https://multisitemigrate.rosenheinrich.com/docs-backup/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=docs_backup)**
 - Serileştirilmiş veriler dahil **[ara ve değiştir](https://multisitemigrate.rosenheinrich.com/docs-restore/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=search_replace)**
 - İsteğe bağlı **AES-256** arşiv şifrelemesi
+- **Bir yerel zamanlanmış yedekleme** — günlük, haftalık veya aylık yerel depolamaya (yönetici bağlamı için bir zamanlama).
+- **E-posta bildirimleri** — manuel, zamanlanmış yedeklemeler, geri yüklemeler ve içe aktarmalar için uyarılar.
 - Barındırma kontrolleri ve durum için **Health** panosu
 - **[AI Backup Tools & MCP](https://multisitemigrate.rosenheinrich.com/docs/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=mcp_connect)** — durum, arşivler, health, onaylı backup-now (anahtarsız)
 - Alt site yöneticisi için kendi sitesinde yedekleme ve geri yükleme
@@ -41,9 +43,9 @@ Multisite Migrate size yardımcı oluyorsa **bu repoya yıldız verin** — GitH
 
 ## Free vs Pro
 
-Free, tam ağ yedeği dahil eksiksiz bir **manuel** yedekleme, geri yükleme ve yerel taşıma aracıdır.
+Free, tam ağ yedeği ve bir yerel zamanlanmış yedeklemeyi içeren eksiksiz yedekleme, geri yükleme ve yerel taşıma aracıdır.
 
-[Multisite Migrate Pro](https://multisitemigrate.rosenheinrich.com/pricing/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=get_pro); zamanlama, [bulut depolama](https://multisitemigrate.rosenheinrich.com/features/cloud-backup/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=cloud_backup), [boş sunucuya taşıma](https://multisitemigrate.rosenheinrich.com/features/empty-server-migration/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=empty_server), [Staging](https://multisitemigrate.rosenheinrich.com/features/staging/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=staging), [WP-CLI](https://multisitemigrate.rosenheinrich.com/docs-wp-cli/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=docs_wp_cli), [ağ bölme](https://multisitemigrate.rosenheinrich.com/docs-network-split/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=docs_network_split), lisanslar ve genişletilmiş AI yetenekleri ekler.
+[Multisite Migrate Pro](https://multisitemigrate.rosenheinrich.com/pricing/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=get_pro); **bulut, çoklu ve artımlı zamanlamalar**, [bulut depolama](https://multisitemigrate.rosenheinrich.com/features/cloud-backup/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=cloud_backup), [boş sunucuya taşıma](https://multisitemigrate.rosenheinrich.com/features/empty-server-migration/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=empty_server), [Staging](https://multisitemigrate.rosenheinrich.com/features/staging/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=staging), [WP-CLI](https://multisitemigrate.rosenheinrich.com/docs-wp-cli/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=docs_wp_cli), [ağ bölme](https://multisitemigrate.rosenheinrich.com/docs-network-split/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=docs_network_split), lisanslar ve genişletilmiş AI yetenekleri ekler.
 
 ## Ekran görüntüleri
 

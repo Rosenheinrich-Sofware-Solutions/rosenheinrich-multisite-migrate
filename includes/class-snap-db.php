@@ -149,6 +149,7 @@ class Rmmigrate_Snap_DB
     public static function quote_identifier(string $name): string
     {
         if ($name === '' || !preg_match('/^[a-zA-Z0-9_]+$/', $name)) {
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal driver exception.
             throw new InvalidArgumentException('Invalid SQL identifier.');
         }
         return '`' . str_replace('`', '``', $name) . '`';

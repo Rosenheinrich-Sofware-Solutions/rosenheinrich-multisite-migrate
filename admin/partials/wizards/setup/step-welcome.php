@@ -10,7 +10,7 @@ if (!defined('ABSPATH')) {
         </div>
         <h2 class="mm-setup-card__title"><?php esc_html_e('Never miss an important update', 'rosenheinrich-multisite-migrate'); ?></h2>
         <p class="mm-setup-card__body">
-            <?php esc_html_e('Opt in to get email notifications for security & feature updates, educational content, and occasional offers. This helps us keep Multisite Migrate compatible with your site.', 'rosenheinrich-multisite-migrate'); ?>
+            <?php esc_html_e('Opt in to get email notifications for security & feature updates, weekly product tips, and occasional offers. This helps us keep Multisite Migrate compatible with your site.', 'rosenheinrich-multisite-migrate'); ?>
         </p>
         <div class="mm-setup-card__actions"<?php echo !empty($rmmigrate_newsletter_done) ? ' hidden' : ''; ?>>
             <button type="button" class="button button-primary mm-btn-teal mm-setup-allow-continue">

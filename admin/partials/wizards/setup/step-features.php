@@ -5,7 +5,11 @@ if (!defined('ABSPATH')) {
 ?>
 <section class="mm-setup-section mm-setup-features" id="mm-setup-features" data-step="features">
     <header class="mm-setup-section__head">
-        <h2><?php esc_html_e('Built for WordPress Multisite', 'rosenheinrich-multisite-migrate'); ?></h2>
+        <h2 class="mm-setup-slogan">
+            <span class="mm-setup-slogan__line"><?php esc_html_e('Single site', 'rosenheinrich-multisite-migrate'); ?></span>
+            <span class="mm-setup-slogan__line"><?php esc_html_e('or Multisite.', 'rosenheinrich-multisite-migrate'); ?></span>
+            <span class="mm-setup-slogan__line"><?php esc_html_e('Backup in minutes.', 'rosenheinrich-multisite-migrate'); ?></span>
+        </h2>
         <p><?php esc_html_e('Everything you need to back up, move, and restore networks — without the clutter.', 'rosenheinrich-multisite-migrate'); ?></p>
     </header>
     <div class="mm-setup-feature-grid">

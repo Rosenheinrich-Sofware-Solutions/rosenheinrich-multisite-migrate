@@ -60,6 +60,8 @@ final class Rmmigrate_Plugin
         require_once $includes . 'class-process.php';
         require_once $includes . 'class-io-helpers.php';
         require_once $includes . 'class-user-error-messages.php';
+        require_once $includes . 'class-error-codes.php';
+        require_once $includes . 'class-job-exception.php';
         require_once $includes . 'class-hosting-detection.php';
         require_once $includes . 'class-post-migration.php';
         require_once $includes . 'class-engine-maintenance.php';
@@ -115,6 +117,7 @@ final class Rmmigrate_Plugin
         require_once $includes . 'admin/class-admin-save.php';
         require_once $includes . 'admin/class-review-nudge.php';
         require_once $includes . 'admin/class-feedback.php';
+        require_once $includes . 'admin/class-telemetry.php';
         require_once $includes . 'admin/class-ajax-base.php';
         require_once $includes . 'admin/class-ajax-backup.php';
         require_once $includes . 'admin/class-ajax-restore.php';
@@ -195,6 +198,7 @@ final class Rmmigrate_Plugin
         Rmmigrate_Setup_Wizard::register();
         Rmmigrate_Review_Nudge::register();
         Rmmigrate_Feedback::register();
+        Rmmigrate_Telemetry::register();
         Rmmigrate_Plugin_Links::register();
         Rmmigrate_Plugin_Uninstall::register();
         Rmmigrate_Upgrade_Page::register();

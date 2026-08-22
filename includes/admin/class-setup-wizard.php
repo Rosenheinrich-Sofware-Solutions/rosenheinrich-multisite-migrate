@@ -8,6 +8,7 @@ class Rmmigrate_Setup_Wizard
 {
     const OPTION_KEY = 'rmmigrate_setup_wizard';
     const PENDING_REDIRECT_OPTION = 'rmmigrate_pending_setup';
+    const COMPLETED_EVENT_OPTION = 'rmmigrate_setup_wizard_completed_emitted';
 
     /**
      * @return array<string,mixed>
@@ -170,7 +171,27 @@ class Rmmigrate_Setup_Wizard
             return;
         }
         $rmmigrate_state = self::get_state();
+        if (!empty($rmmigrate_state['steps'][$rmmigrate_step])) {
+            return;
+        }
         $rmmigrate_state['steps'][$rmmigrate_step] = true;
+        self::save_state($rmmigrate_state);
+        Rmmigrate_Telemetry::record_event('wizard_step', array(
+            'step'   => sanitize_key($rmmigrate_step),
+            'action' => 'completed',
+        ));
+    }
+
+    /**
+     * Newsletter opt-in moved off Welcome — mark progress without a newsletter choice.
+     */
+    public static function auto_complete_welcome_step(): void
+    {
+        $rmmigrate_state = self::get_state();
+        if (!empty($rmmigrate_state['steps']['welcome'])) {
+            return;
+        }
+        $rmmigrate_state['steps']['welcome'] = true;
         self::save_state($rmmigrate_state);
     }
 
@@ -186,12 +207,21 @@ class Rmmigrate_Setup_Wizard
     public static function complete(): void
     {
         $rmmigrate_state = self::get_state();
+        if (!empty($rmmigrate_state['complete'])) {
+            return;
+        }
+        $emit_completed = add_site_option(self::COMPLETED_EVENT_OPTION, time());
         $rmmigrate_state['complete'] = true;
         $rmmigrate_state['steps']['welcome'] = true;
         $rmmigrate_state['steps']['features'] = true;
         $rmmigrate_state['steps']['finish'] = true;
         self::save_state($rmmigrate_state);
         self::clear_pending_post_activation_redirect();
+        if ($emit_completed) {
+            Rmmigrate_Telemetry::record_event('wizard_completed', array(
+                'newsletter_opted_in' => !empty($rmmigrate_state['newsletter_opted_in']),
+            ));
+        }
     }
 
     public static function should_redirect(): bool
@@ -302,6 +332,15 @@ class Rmmigrate_Setup_Wizard
     public static function ajax_complete(): void
     {
         self::verify_setup_ajax();
+        if (self::is_complete()) {
+            wp_send_json_success(array(
+                'redirect' => Rmmigrate_Admin_Router::admin_url(
+                    'multisite-migrate-archives',
+                    array(),
+                    is_multisite() && is_network_admin()
+                ),
+            ));
+        }
         self::complete();
         wp_send_json_success(array(
             'redirect' => Rmmigrate_Admin_Router::admin_url(

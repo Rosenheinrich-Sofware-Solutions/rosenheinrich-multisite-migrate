@@ -115,7 +115,17 @@
             .text(t('surveyDetails', 'Anything else? (optional)'));
         var $msg = $('<textarea id="mm-deactivate-reason-message" class="mm-deactivate-survey-message" rows="3" maxlength="1000"></textarea>')
             .attr('placeholder', t('surveyDetailsPlaceholder', ''));
-        $details.append($msgLabel, $msg);
+        var defaultEmail = (cfg.defaultContactEmail || '').toString();
+        var $emailLabel = $('<label class="mm-deactivate-survey-message-label"></label>')
+            .attr('for', 'mm-deactivate-contact-email')
+            .text(t('surveyContactLabel', 'Email for follow-up (optional)'));
+        var $emailHint = $('<p class="mm-deactivate-survey-contact-hint"></p>')
+            .text(t('surveyContactHint', 'We may contact you if we need more details about a problem.'));
+        var $email = $('<input type="email" id="mm-deactivate-contact-email" class="mm-deactivate-survey-email" maxlength="100" autocomplete="email">')
+            .val(defaultEmail);
+        var $contact = $('<div class="mm-deactivate-survey-contact"></div>');
+        $contact.append($emailLabel, $email, $emailHint);
+        $details.append($msgLabel, $msg, $contact);
         $el.append($title, $list, $details);
 
         return {
@@ -123,12 +133,13 @@
             read: function () {
                 var reason = ($el.find('input[name="' + radioName + '"]:checked').val() || '').toString();
                 var message = ($msg.val() || '').toString().replace(/^\s+|\s+$/g, '');
-                return { reason: reason, message: message };
+                var contactEmail = ($email.val() || '').toString().replace(/^\s+|\s+$/g, '');
+                return { reason: reason, message: message, contact_email: contactEmail };
             }
         };
     }
 
-    function postDeactivateFeedback(reason, message) {
+    function postDeactivateFeedback(reason, message, contactEmail) {
         if (!cfg.feedbackAction || !cfg.feedbackNonce || !reason) {
             return $.Deferred().resolve().promise();
         }
@@ -145,7 +156,8 @@
                 action: cfg.feedbackAction,
                 nonce: cfg.feedbackNonce,
                 reason: reason,
-                message: message
+                message: message,
+                contact_email: contactEmail || ''
             }
         });
     }
@@ -344,7 +356,7 @@
             }
 
             window.setTimeout(finishSurveyThenAct, 3000);
-            postDeactivateFeedback(surveyData.reason, surveyData.message)
+            postDeactivateFeedback(surveyData.reason, surveyData.message, surveyData.contact_email)
                 .always(finishSurveyThenAct);
         });
     }

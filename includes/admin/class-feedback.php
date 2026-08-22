@@ -272,6 +272,11 @@ final class Rmmigrate_Feedback
         if ($context !== 'deactivate') {
             self::mark_cooldown('submitted');
         }
+        Rmmigrate_Telemetry::record_event('feedback_modal', array(
+            'action'  => 'submit',
+            'context' => $context,
+            'type'    => $type,
+        ));
         wp_send_json_success(array('ok' => true));
     }
 
@@ -305,6 +310,11 @@ final class Rmmigrate_Feedback
             wp_send_json_success(array('ok' => false, 'skipped' => 'other_empty'));
         }
 
+        $contact_email = sanitize_email(Rmmigrate_Request_Input::post_text('contact_email'));
+        if ($contact_email !== '' && !is_email($contact_email)) {
+            $contact_email = '';
+        }
+
         $sentiment = ($reason === 'temporary') ? 'neutral' : 'negative';
 
         $payload = array(
@@ -322,6 +332,9 @@ final class Rmmigrate_Feedback
             'site_hash'      => self::site_hash(),
             'product_build'  => 'free',
         );
+        if ($contact_email !== '') {
+            $payload['contact_email'] = $contact_email;
+        }
 
         $response = wp_remote_post(self::submit_url(), array(
             'timeout' => 3,
@@ -337,6 +350,7 @@ final class Rmmigrate_Feedback
     {
         self::verify_ajax();
         self::mark_cooldown('dismissed');
+        Rmmigrate_Telemetry::record_event('feedback_modal', array('action' => 'dismiss'));
         wp_send_json_success();
     }
 
@@ -355,6 +369,7 @@ final class Rmmigrate_Feedback
         }
 
         self::mark_cooldown('shown');
+        Rmmigrate_Telemetry::record_event('feedback_modal', array('action' => 'shown'));
         $state = self::get_user_state();
         wp_send_json_success(array(
             'cooldown_until' => (int) ($state['cooldown_until'] ?? 0),

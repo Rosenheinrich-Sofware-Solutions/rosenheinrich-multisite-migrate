@@ -533,8 +533,8 @@ class Rmmigrate_Schedules
             return sprintf(__('Daily at %s', 'rosenheinrich-multisite-migrate'), $time);
         }
         if ($interval === 'monthly') {
-            /* translators: 1: day of month, 2: time */
             return sprintf(
+                /* translators: 1: day of month, 2: time */
                 __('Monthly on day %1$d at %2$s', 'rosenheinrich-multisite-migrate'),
                 max(1, min(28, (int) ($schedule['day_of_month'] ?? 1))),
                 $time

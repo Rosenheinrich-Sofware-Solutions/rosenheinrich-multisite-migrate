@@ -321,7 +321,7 @@ class Rmmigrate_Admin_Router
 
         if ($rmmigrate_page_slug === 'multisite-migrate-advanced') {
             $rmmigrate_advanced_tab = Rmmigrate_Request_Input::get_key('tab', 'engine');
-            if (!in_array($rmmigrate_advanced_tab, array('engine', 'notifications', 'system'), true)) {
+            if (!in_array($rmmigrate_advanced_tab, array('engine', 'notifications', 'privacy', 'system'), true)) {
                 $rmmigrate_advanced_tab = 'engine';
             }
         }

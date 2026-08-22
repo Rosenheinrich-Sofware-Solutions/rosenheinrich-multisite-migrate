@@ -130,6 +130,9 @@ class Rmmigrate_Admin_Assets
                 break;
             }
         }
+        if (strpos($hook, 'multisite-migrate-advanced') !== false) {
+            $needs_wizard_css = true;
+        }
         wp_enqueue_style(
             'rmmigrate-components',
             RMMIGRATE_URL . 'assets/css/multisite-migrate-components.css',
@@ -245,6 +248,14 @@ class Rmmigrate_Admin_Assets
                 self::asset_ver('assets/js/admin-tools.js'),
                 true
             );
+            wp_enqueue_script(
+                'rmmigrate-settings-privacy',
+                RMMIGRATE_URL . 'assets/js/settings-privacy.js',
+                array('jquery', 'rmmigrate-ui'),
+                self::asset_ver('assets/js/settings-privacy.js'),
+                true
+            );
+            wp_set_script_translations('rmmigrate-settings-privacy', 'rosenheinrich-multisite-migrate', $lang_path);
         }
         if (in_array('activity-log', $needs, true)) {
             wp_enqueue_script(
@@ -335,6 +346,9 @@ class Rmmigrate_Admin_Assets
                 'failed'              => __('Failed', 'rosenheinrich-multisite-migrate'),
                 'done'                => __('Done', 'rosenheinrich-multisite-migrate'),
                 'requestFailed'       => __('Request failed', 'rosenheinrich-multisite-migrate'),
+                'saving'              => __('Saving…', 'rosenheinrich-multisite-migrate'),
+                'telemetryEnabled'    => __('Telemetry enabled.', 'rosenheinrich-multisite-migrate'),
+                'telemetryDisabled'   => __('Telemetry disabled.', 'rosenheinrich-multisite-migrate'),
                 'saveFailed'          => __('Save failed', 'rosenheinrich-multisite-migrate'),
                 'setupComplete'       => __('Setup complete', 'rosenheinrich-multisite-migrate'),
                 'activityDetails'     => __('Activity details', 'rosenheinrich-multisite-migrate'),

@@ -1210,7 +1210,9 @@ class Rmmigrate_DB_Dumper
                 if (self::row_value_exceeds_php_budget($val, $type)) {
                     Rmmigrate_Snap_DB::free_result($result);
                     $fh->close();
-                    throw new RuntimeException(
+                    // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+                    throw Rmmigrate_Job_Exception::raise(
+                        sanitize_key(Rmmigrate_Error_Codes::ROW_TOO_LARGE),
                         esc_html(
                             sprintf(
                                 /* translators: 1: table name, 2: column name. */

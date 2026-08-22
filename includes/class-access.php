@@ -104,6 +104,7 @@ class Rmmigrate_Access
         if ($source->get_scope() !== Rmmigrate_Multisite_Scope::SCOPE_SUBSITE
             || $source->get_blog_id() !== get_current_blog_id()
         ) {
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Structured exception payload.
             throw Rmmigrate_Service_Exception::forbidden(
                 esc_html(__('You can only restore backups created for this site.', 'rosenheinrich-multisite-migrate'))
             );
@@ -126,6 +127,7 @@ class Rmmigrate_Access
             || $blog_id !== get_current_blog_id()
         ) {
             Rmmigrate_Filesystem::delete($path);
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Structured exception payload.
             throw Rmmigrate_Service_Exception::forbidden(
                 esc_html(__('You can only import backups created for this site.', 'rosenheinrich-multisite-migrate'))
             );

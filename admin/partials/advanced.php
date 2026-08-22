@@ -8,6 +8,7 @@ $rmmigrate_base_url = Rmmigrate_Admin_Router::admin_url('multisite-migrate-advan
 $rmmigrate_tabs = array(
     'engine'        => __('Backup Settings', 'rosenheinrich-multisite-migrate'),
     'notifications' => __('Notifications', 'rosenheinrich-multisite-migrate'),
+    'privacy'       => __('Privacy', 'rosenheinrich-multisite-migrate'),
     'system'        => __('Tools & logs', 'rosenheinrich-multisite-migrate'),
 );
 $rmmigrate_active_tab = $rmmigrate_advanced_tab;
@@ -57,6 +58,8 @@ if ($rmmigrate_advanced_tab === 'engine') {
         </div>
     </form>
     <?php
+} elseif ($rmmigrate_advanced_tab === 'privacy') {
+    include RMMIGRATE_PATH . 'admin/partials/settings/tab-privacy.php';
 } else {
     include RMMIGRATE_PATH . 'admin/partials/tools-system.php';
 }

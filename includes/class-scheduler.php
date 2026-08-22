@@ -164,11 +164,25 @@ class Rmmigrate_Scheduler
 
     public static function record_schedule_failure(string $message): void
     {
+        $clean_msg = sanitize_text_field($message);
         Rmmigrate_Logger::log_system(
-            'Scheduled backup failure: ' . sanitize_text_field($message),
+            'Scheduled backup failure: ' . $clean_msg,
             array('triggered_by' => 'cron'),
             'error'
         );
+        if (class_exists('Rmmigrate_Telemetry', false)) {
+            Rmmigrate_Telemetry::record_operation_error(
+                'schedule',
+                $clean_msg,
+                0,
+                array(
+                    'phase'        => 'cron_tick',
+                    'service_code' => class_exists('Rmmigrate_Error_Codes', false)
+                        ? Rmmigrate_Error_Codes::from_message($clean_msg)
+                        : 'schedule_failed',
+                )
+            );
+        }
         $count = (int) get_site_option(self::FAIL_COUNT_OPTION, 0) + 1;
         update_site_option(self::FAIL_COUNT_OPTION, $count);
         if ($count >= self::FAIL_NOTIFY_THRESHOLD) {

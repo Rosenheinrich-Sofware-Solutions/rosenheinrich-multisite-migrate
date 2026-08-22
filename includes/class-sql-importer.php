@@ -31,7 +31,10 @@ class Rmmigrate_SQL_Importer
         $sql_path = $extract_dir . 'database.sql';
 
         if (!Rmmigrate_Filesystem::exists($sql_path)) {
-            throw new RuntimeException( esc_html__('database.sql not found in backup.', 'rosenheinrich-multisite-migrate'));
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+            throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::DATABASE_SQL_MISSING),
+                esc_html__('database.sql not found in backup.', 'rosenheinrich-multisite-migrate')
+            );
         }
 
         $progress = $this->job->get_progress();
@@ -65,7 +68,10 @@ class Rmmigrate_SQL_Importer
 
         $handle = Rmmigrate_Filesystem::open($sql_path, 'rb');
         if ($handle === false) {
-            throw new RuntimeException( esc_html__('Cannot read database.sql.', 'rosenheinrich-multisite-migrate'));
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+            throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::DATABASE_SQL_UNREADABLE),
+                esc_html__('Cannot read database.sql.', 'rosenheinrich-multisite-migrate')
+            );
         }
         $handle->seek($offset);
 
@@ -357,9 +363,13 @@ class Rmmigrate_SQL_Importer
         if ($result === false) {
             $error = $wpdb->last_error ?: __('Unknown database error.', 'rosenheinrich-multisite-migrate');
             Rmmigrate_Logger::log('SQL error: ' . $error);
-            throw new RuntimeException(
-                /* translators: %s: database error message */
-                sprintf(esc_html__('Database restore failed: %1$s', 'rosenheinrich-multisite-migrate'), esc_html($error))
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+            throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::SQL_IMPORT_FAILED),
+                sprintf(
+                    /* translators: %s: database error message */
+                    esc_html__('Database restore failed: %1$s', 'rosenheinrich-multisite-migrate'),
+                    esc_html($error)
+                )
             );
         }
     }

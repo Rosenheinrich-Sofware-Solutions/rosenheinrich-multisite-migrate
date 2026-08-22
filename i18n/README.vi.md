@@ -34,6 +34,8 @@ Sao lưu, khôi phục và di chuyển **site đơn lẻ** cùng **toàn bộ m�
 - **[Xuất & nhập cục bộ](https://multisitemigrate.rosenheinrich.com/docs-backup/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=docs_backup)** với kho lưu trữ di động
 - **[Tìm & thay thế](https://multisitemigrate.rosenheinrich.com/docs-restore/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=search_replace)** bao gồm dữ liệu đã serialize
 - Mã hóa kho lưu trữ **AES-256** tùy chọn
+- **Một sao lưu theo lịch cục bộ** — hàng ngày, hàng tuần hoặc hàng tháng vào lưu trữ cục bộ (một lịch cho mỗi ngữ cảnh quản trị).
+- **Thông báo email** — cảnh báo cho sao lưu thủ công, theo lịch, khôi phục và nhập.
 - Bảng **Health** kiểm tra hosting và trạng thái
 - **[AI Backup Tools & MCP](https://multisitemigrate.rosenheinrich.com/docs/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=mcp_connect)** — trạng thái, kho lưu trữ, health, backup-now đã xác nhận (không cần khóa)
 - Sao lưu & khôi phục cho quản trị subsite trên site của chính họ
@@ -41,9 +43,9 @@ Sao lưu, khôi phục và di chuyển **site đơn lẻ** cùng **toàn bộ m�
 
 ## Free vs Pro
 
-Free là công cụ **thủ công** đầy đủ cho sao lưu, khôi phục và di chuyển cục bộ (bao gồm sao lưu toàn mạng).
+Free là công cụ sao lưu, khôi phục và di chuyển cục bộ đầy đủ — bao gồm sao lưu toàn mạng và một sao lưu theo lịch cục bộ.
 
-[Multisite Migrate Pro](https://multisitemigrate.rosenheinrich.com/pricing/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=get_pro) bổ sung lập lịch, [lưu trữ đám mây](https://multisitemigrate.rosenheinrich.com/features/cloud-backup/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=cloud_backup), [di chuyển lên server trống](https://multisitemigrate.rosenheinrich.com/features/empty-server-migration/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=empty_server), [Staging](https://multisitemigrate.rosenheinrich.com/features/staging/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=staging), [WP-CLI](https://multisitemigrate.rosenheinrich.com/docs-wp-cli/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=docs_wp_cli), [tách mạng](https://multisitemigrate.rosenheinrich.com/docs-network-split/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=docs_network_split), giấy phép và khả năng AI mở rộng.
+[Multisite Migrate Pro](https://multisitemigrate.rosenheinrich.com/pricing/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=get_pro) bổ sung **lịch đám mây, nhiều lịch và lịch gia tăng**, [lưu trữ đám mây](https://multisitemigrate.rosenheinrich.com/features/cloud-backup/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=cloud_backup), [di chuyển lên server trống](https://multisitemigrate.rosenheinrich.com/features/empty-server-migration/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=empty_server), [Staging](https://multisitemigrate.rosenheinrich.com/features/staging/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=staging), [WP-CLI](https://multisitemigrate.rosenheinrich.com/docs-wp-cli/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=docs_wp_cli), [tách mạng](https://multisitemigrate.rosenheinrich.com/docs-network-split/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=docs_network_split), giấy phép và khả năng AI mở rộng.
 
 ## Ảnh chụp màn hình
 

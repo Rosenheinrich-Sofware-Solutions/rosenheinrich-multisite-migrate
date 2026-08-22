@@ -147,7 +147,11 @@ class Rmmigrate_Runner
                 Rmmigrate_Job::STATUS_CANCELLED,
             ), true)) {
                 Rmmigrate_Logger::log('Error: ' . sanitize_text_field($e->getMessage()));
-                $job->set_status(Rmmigrate_Job::STATUS_ERROR, sanitize_text_field($e->getMessage()));
+                $job->set_status(
+                    Rmmigrate_Job::STATUS_ERROR,
+                    sanitize_text_field($e->getMessage()),
+                    Rmmigrate_Error_Codes::from_throwable($e)
+                );
             }
             if ($job->is_restore()) {
                 Rmmigrate_Restore_Runner::disable_maintenance();
@@ -273,7 +277,10 @@ class Rmmigrate_Runner
         }
 
         if ($elapsed > $max) {
-            throw new RuntimeException(esc_html(__('Backup build exceeded maximum time limit.', 'rosenheinrich-multisite-migrate')));
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+            throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::TIME_LIMIT),
+                esc_html(__('Backup build exceeded maximum time limit.', 'rosenheinrich-multisite-migrate'))
+            );
         }
     }
 
@@ -289,7 +296,10 @@ class Rmmigrate_Runner
         Rmmigrate_Plugin::ensure_backup_root();
 
         if (!self::check_disk_space()) {
-            throw new RuntimeException(esc_html(__('Insufficient disk space for backup.', 'rosenheinrich-multisite-migrate')));
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+            throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::DISK_SPACE),
+                esc_html(__('Insufficient disk space for backup.', 'rosenheinrich-multisite-migrate'))
+            );
         }
 
         $work_dir = Rmmigrate_Local_Storage::ensure_job_work_dir($job, true);
@@ -453,7 +463,13 @@ class Rmmigrate_Runner
                 if ($ext === 'zip') {
                     $readable = Rmmigrate_Validator::validate_archive_readable($archive_path);
                     if (is_wp_error($readable)) {
-                        throw new RuntimeException(esc_html($readable->get_error_message()));
+                        $wp_code = sanitize_key($readable->get_error_code());
+                        // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Structured service exception payload.
+                        throw new Rmmigrate_Service_Exception(
+                            esc_html($readable->get_error_message()),
+                            array(),
+                            sanitize_key($wp_code !== '' ? $wp_code : Rmmigrate_Service_Exception::CODE_VALIDATION)
+                        );
                     }
                 }
             }
@@ -545,7 +561,10 @@ class Rmmigrate_Runner
         $offset = (int) ($fin['encrypt_offset'] ?? 0);
         $result = Rmmigrate_Archive_Encryption::encrypt_slice($local, $encrypted, $offset, max(1, $budget_sec));
         if ($result === null) {
-            throw new RuntimeException(esc_html__('Could not encrypt backup archive.', 'rosenheinrich-multisite-migrate'));
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+            throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::ENCRYPT_FAILED),
+                esc_html__('Could not encrypt backup archive.', 'rosenheinrich-multisite-migrate')
+            );
         }
 
         $job->update_progress(array(
@@ -1119,11 +1138,13 @@ class Rmmigrate_Runner
                         $exception = new RuntimeException(
                             __('PHP ran out of memory during the backup. Use Settings → Database → mysqldump or raise memory_limit.', 'rosenheinrich-multisite-migrate')
                         );
+                        $service_code = 'memory_limit';
                     } else {
                         $exception = new RuntimeException(__('Worker stopped unexpectedly. Check the activity log or try again.', 'rosenheinrich-multisite-migrate'));
+                        $service_code = 'worker_stopped';
                     }
                     $message = Rmmigrate_User_Error_Messages::format($exception);
-                    $job->set_status(Rmmigrate_Job::STATUS_ERROR, $message);
+                    $job->set_status(Rmmigrate_Job::STATUS_ERROR, $message, $service_code);
                     if ($job->is_restore()) {
                         Rmmigrate_Restore_Runner::disable_maintenance();
                     }

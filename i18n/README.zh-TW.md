@@ -34,6 +34,8 @@
 - 使用可攜式封存的**[本機匯出與匯入](https://multisitemigrate.rosenheinrich.com/docs-backup/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=docs_backup)**
 - 含序列化資料的**[搜尋與取代](https://multisitemigrate.rosenheinrich.com/docs-restore/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=search_replace)**
 - 選用 **AES-256** 封存加密
+- **一項本機排程備份** — 每日/每週/每月寫入本機儲存（每個管理內容一項排程）。
+- **電子郵件通知** — 手動備份、排程備份、還原與匯入的提醒。
 - 用於主機檢查與狀態的 **Health** 控制台
 - **[AI Backup Tools & MCP](https://multisitemigrate.rosenheinrich.com/docs/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=mcp_connect)** — 狀態、封存、Health、確認後立即備份（無需金鑰）
 - 子站點管理員可在自有網站備份與還原
@@ -41,7 +43,7 @@
 
 ## Free vs Pro
 
-Free 是完整的**手動**備份、還原與本機遷移工具（含完整網路備份）。
+Free 是完整的備份、還原與本機遷移工具 — 含完整網路備份與一項本機排程備份。
 
 [Multisite Migrate Pro](https://multisitemigrate.rosenheinrich.com/pricing/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=get_pro) 新增排程、[雲端儲存](https://multisitemigrate.rosenheinrich.com/features/cloud-backup/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=cloud_backup)、[空伺服器遷移](https://multisitemigrate.rosenheinrich.com/features/empty-server-migration/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=empty_server)、[Staging](https://multisitemigrate.rosenheinrich.com/features/staging/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=staging)、[WP-CLI](https://multisitemigrate.rosenheinrich.com/docs-wp-cli/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=docs_wp_cli)、[網路拆分](https://multisitemigrate.rosenheinrich.com/docs-network-split/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=docs_network_split)、授權名額及擴充 AI 能力。
 

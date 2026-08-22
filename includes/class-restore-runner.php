@@ -61,13 +61,19 @@ class Rmmigrate_Restore_Runner
 
         $source_job = Rmmigrate_Job::get($job->get_source_job_id()) ?? $job;
         if ($source_job->get_backup_type() === 'incremental') {
-            throw new RuntimeException(esc_html(__('Incremental backups can only be restored in Multisite Migrate Pro.', 'rosenheinrich-multisite-migrate')));
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+            throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::INCREMENTAL_PRO_ONLY),
+                esc_html(__('Incremental backups can only be restored in Multisite Migrate Pro.', 'rosenheinrich-multisite-migrate'))
+            );
         }
 
         $progress = $job->get_progress();
         $extract_plan = self::build_extract_plan($source_job);
         if ($extract_plan === array()) {
-            throw new RuntimeException(esc_html(__('No backup archives found for restore.', 'rosenheinrich-multisite-migrate')));
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+            throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::ARCHIVE_MISSING),
+                esc_html(__('No backup archives found for restore.', 'rosenheinrich-multisite-migrate'))
+            );
         }
 
         $source_path = $progress['source']['zip_path'] ?? Rmmigrate_Runner::resolve_local_path($source_job);
@@ -83,7 +89,10 @@ class Rmmigrate_Restore_Runner
             }
             if (!Rmmigrate_Archive_Encryption::decrypt_file($source_path, $plain_path)) {
                 Rmmigrate_Archive_Encryption::clear_runtime_passphrase();
-                throw new RuntimeException(esc_html(__('Failed to decrypt backup archive. Enter the correct passphrase in Restore.', 'rosenheinrich-multisite-migrate')));
+                // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+                throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::DECRYPT_PASSPHRASE),
+                    esc_html(__('Failed to decrypt backup archive. Enter the correct passphrase in Restore.', 'rosenheinrich-multisite-migrate'))
+                );
             }
             Rmmigrate_Archive_Encryption::clear_runtime_passphrase();
             $source_path = $plain_path;
@@ -562,7 +571,10 @@ class Rmmigrate_Restore_Runner
         );
         $gate = Rmmigrate_Restore_Topology_Compatibility::validate_gates($state, $manifest, $destination, false);
         if ($gate !== null) {
-            throw new RuntimeException(esc_html((string) $gate['message']));
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+            throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::RESTORE_GATE_BLOCKED),
+                esc_html((string) $gate['message'])
+            );
         }
     }
 

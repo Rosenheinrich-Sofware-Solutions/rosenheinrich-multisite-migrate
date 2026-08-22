@@ -47,7 +47,10 @@ class Rmmigrate_Job
         global $wpdb;
 
         if (self::get_active() !== null) {
-            throw new RuntimeException(esc_html(__('A backup or restore is already in progress.', 'rosenheinrich-multisite-migrate')));
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Structured service exception payload.
+            throw new Rmmigrate_Service_Exception(
+                esc_html(__('A backup or restore is already in progress.', 'rosenheinrich-multisite-migrate')),
+                array(), sanitize_key(Rmmigrate_Error_Codes::ACTIVE_JOB_CONFLICT));
         }
 
         $now = current_time('mysql', true);
@@ -133,14 +136,23 @@ class Rmmigrate_Job
                 );
             }
             if ($db_error !== '' && stripos($db_error, 'doesn\'t exist') !== false) {
-                throw new RuntimeException(esc_html(__('Backup database table is missing. Deactivate and reactivate Multisite Migrate, then try again.', 'rosenheinrich-multisite-migrate')));
+                // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Structured service exception payload.
+                throw new Rmmigrate_Service_Exception(
+                    esc_html(__('Backup database table is missing. Deactivate and reactivate Multisite Migrate, then try again.', 'rosenheinrich-multisite-migrate')),
+                    array(), sanitize_key(Rmmigrate_Error_Codes::JOB_TABLE_MISSING));
             }
-            throw new RuntimeException(esc_html(__('Failed to create backup job.', 'rosenheinrich-multisite-migrate')));
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Structured service exception payload.
+            throw new Rmmigrate_Service_Exception(
+                esc_html(__('Failed to create backup job.', 'rosenheinrich-multisite-migrate')),
+                array(), sanitize_key(Rmmigrate_Error_Codes::JOB_CREATE_FAILED));
         }
 
         $job = self::get((int) $wpdb->insert_id);
         if ($job === null) {
-            throw new RuntimeException(esc_html(__('Failed to create backup job.', 'rosenheinrich-multisite-migrate')));
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Structured service exception payload.
+            throw new Rmmigrate_Service_Exception(
+                esc_html(__('Failed to create backup job.', 'rosenheinrich-multisite-migrate')),
+                array(), sanitize_key(Rmmigrate_Error_Codes::JOB_CREATE_FAILED));
         }
 
         $triggered_by = (string) ($args['triggered_by'] ?? 'manual');
@@ -207,7 +219,10 @@ class Rmmigrate_Job
         );
         $job = self::get((int) $wpdb->insert_id);
         if ($job === null) {
-            throw new RuntimeException(esc_html(__('Failed to register import.', 'rosenheinrich-multisite-migrate')));
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Structured service exception payload.
+            throw new Rmmigrate_Service_Exception(
+                esc_html(__('Failed to register import.', 'rosenheinrich-multisite-migrate')),
+                array(), sanitize_key(Rmmigrate_Error_Codes::IMPORT_REGISTER_FAILED));
         }
         return $job;
     }
@@ -220,32 +235,50 @@ class Rmmigrate_Job
         global $wpdb;
 
         if (self::get_active() !== null) {
-            throw new RuntimeException(esc_html(__('A backup or restore is already in progress.', 'rosenheinrich-multisite-migrate')));
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Structured service exception payload.
+            throw new Rmmigrate_Service_Exception(
+                esc_html(__('A backup or restore is already in progress.', 'rosenheinrich-multisite-migrate')),
+                array(), sanitize_key(Rmmigrate_Error_Codes::ACTIVE_JOB_CONFLICT));
         }
 
         $source = self::get($source_job_id);
         if ($source === null) {
-            throw new RuntimeException(esc_html(__('Source backup not found.', 'rosenheinrich-multisite-migrate')));
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Structured service exception payload.
+            throw new Rmmigrate_Service_Exception(
+                esc_html(__('Source backup not found.', 'rosenheinrich-multisite-migrate')),
+                array(), sanitize_key(Rmmigrate_Error_Codes::SOURCE_NOT_FOUND));
         }
         if ($source->get_status() !== self::STATUS_COMPLETE) {
-            throw new RuntimeException(esc_html(__('Source backup is not complete.', 'rosenheinrich-multisite-migrate')));
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Structured service exception payload.
+            throw new Rmmigrate_Service_Exception(
+                esc_html(__('Source backup is not complete.', 'rosenheinrich-multisite-migrate')),
+                array(), sanitize_key(Rmmigrate_Error_Codes::SOURCE_NOT_COMPLETE));
         }
         if ($source->get_job_type() !== self::JOB_TYPE_BACKUP) {
-            throw new RuntimeException(esc_html(__('Invalid source job.', 'rosenheinrich-multisite-migrate')));
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Structured service exception payload.
+            throw new Rmmigrate_Service_Exception(
+                esc_html(__('Invalid source job.', 'rosenheinrich-multisite-migrate')),
+                array(), sanitize_key(Rmmigrate_Error_Codes::INVALID_SOURCE_JOB));
         }
 
         $zip_path = Rmmigrate_Runner::resolve_local_path($source);
         if (!Rmmigrate_Filesystem::exists($zip_path)) {
             $fetched = Rmmigrate_Local_Archive::ensure_local_archive($source);
             if (is_wp_error($fetched)) {
-                throw new RuntimeException( esc_html( $fetched->get_error_message() ) );
+                // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Structured service exception payload.
+                throw new Rmmigrate_Service_Exception(
+                    esc_html($fetched->get_error_message()),
+                    array(), sanitize_key(Rmmigrate_Error_Codes::from_wp_error($fetched)));
             }
             $zip_path = $fetched;
         }
 
         $allowed_modes = array(self::RESTORE_MODE_DB, self::RESTORE_MODE_FILES, self::RESTORE_MODE_BOTH);
         if (!in_array($mode, $allowed_modes, true)) {
-            throw new RuntimeException(esc_html(__('Invalid restore mode.', 'rosenheinrich-multisite-migrate')));
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Structured service exception payload.
+            throw new Rmmigrate_Service_Exception(
+                esc_html(__('Invalid restore mode.', 'rosenheinrich-multisite-migrate')),
+                array(), sanitize_key(Rmmigrate_Error_Codes::INVALID_RESTORE_MODE));
         }
 
         $restore_type = $options['restore_type'] ?? self::RESTORE_TYPE_SAME_SERVER;
@@ -255,18 +288,27 @@ class Rmmigrate_Job
 
         $migration_map = $options['migration_map'] ?? array();
         if ($restore_type === self::RESTORE_TYPE_MIGRATION && empty($migration_map)) {
-            throw new RuntimeException(esc_html(__('Migration requires URL mapping.', 'rosenheinrich-multisite-migrate')));
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Structured service exception payload.
+            throw new Rmmigrate_Service_Exception(
+                esc_html(__('Migration requires URL mapping.', 'rosenheinrich-multisite-migrate')),
+                array(), sanitize_key(Rmmigrate_Error_Codes::MIGRATION_MAP_REQUIRED));
         }
 
         if ($source->get_scope() === Rmmigrate_Multisite_Scope::SCOPE_SUBSITE) {
             if (is_multisite() && $source->get_blog_id() !== get_current_blog_id()) {
-                throw new RuntimeException(esc_html(__('Cannot restore another subsite backup here.', 'rosenheinrich-multisite-migrate')));
+                // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Structured service exception payload.
+                throw new Rmmigrate_Service_Exception(
+                    esc_html(__('Cannot restore another subsite backup here.', 'rosenheinrich-multisite-migrate')),
+                    array(), sanitize_key(Rmmigrate_Error_Codes::RESTORE_SCOPE_DENIED));
             }
         }
 
         if ($restore_type === self::RESTORE_TYPE_MIGRATION && is_multisite() && !current_user_can('manage_network')) {
             if ($source->get_scope() !== Rmmigrate_Multisite_Scope::SCOPE_SUBSITE) {
-                throw new RuntimeException(esc_html(__('Network migration requires super admin.', 'rosenheinrich-multisite-migrate')));
+                // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Structured service exception payload.
+                throw new Rmmigrate_Service_Exception(
+                    esc_html(__('Network migration requires super admin.', 'rosenheinrich-multisite-migrate')),
+                    array(), sanitize_key(Rmmigrate_Error_Codes::NETWORK_MIGRATION_DENIED));
             }
         }
 
@@ -311,7 +353,10 @@ class Rmmigrate_Job
 
         $job = self::get((int) $wpdb->insert_id);
         if ($job === null) {
-            throw new RuntimeException(esc_html(__('Failed to create restore job.', 'rosenheinrich-multisite-migrate')));
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Structured service exception payload.
+            throw new Rmmigrate_Service_Exception(
+                esc_html(__('Failed to create restore job.', 'rosenheinrich-multisite-migrate')),
+                array(), sanitize_key(Rmmigrate_Error_Codes::JOB_CREATE_FAILED));
         }
 
         $message = sprintf(
@@ -418,7 +463,7 @@ class Rmmigrate_Job
 
         $message = __('Worker stopped responding. The job was marked as failed. You can start a new backup or restore.', 'rosenheinrich-multisite-migrate');
         Rmmigrate_Logger::log_job($job->get_id(), $message);
-        $job->set_status(self::STATUS_ERROR, $message);
+        $job->set_status(self::STATUS_ERROR, $message, 'stale_worker');
         Rmmigrate_Runner::force_release_lock($job->get_id());
         if ($job->is_restore()) {
             Rmmigrate_Restore_Runner::disable_maintenance();
@@ -843,7 +888,7 @@ class Rmmigrate_Job
         return true;
     }
 
-    public function set_status(int $status, ?string $error = null): void
+    public function set_status(int $status, ?string $error = null, ?string $service_code = null): void
     {
         global $wpdb;
         $previous = $this->get_status();
@@ -865,6 +910,13 @@ class Rmmigrate_Job
         if ($error !== null) {
             $fields['error_message'] = $error;
             $formats[] = '%s';
+            $resolved_code = sanitize_key((string) ($service_code ?? ''));
+            if ($resolved_code === '') {
+                $resolved_code = Rmmigrate_Error_Codes::from_message($error);
+            }
+            if ($resolved_code !== '') {
+                $this->update_progress(array('service_code' => $resolved_code));
+            }
         }
         if ($status === self::STATUS_COMPLETE) {
             $fields['completed_at'] = current_time('mysql', true);
@@ -937,6 +989,14 @@ class Rmmigrate_Job
                     }
                 }
                 Rmmigrate_Notifications::maybe_send_job($this, $status, $error);
+                /**
+                 * Fires when a backup or restore job reaches a terminal state.
+                 *
+                 * @param Rmmigrate_Job $job    Job object.
+                 * @param int           $status Terminal status code.
+                 * @param string|null   $error  Optional error or warning message.
+                 */
+                do_action('rmmigrate_job_terminal', $this, $status, $error);
             }
         }
 
@@ -968,14 +1028,21 @@ class Rmmigrate_Job
         if ((string) ($this->data['triggered_by'] ?? '') === 'import') {
             $job_type = 'import';
         }
+        $progress = $this->get_progress();
+        $code     = sanitize_key((string) ($progress['service_code'] ?? ''));
+        if ($code === '') {
+            $code = Rmmigrate_Error_Codes::from_message($error);
+        }
 
         return array(
-            'job_id'   => $this->get_id(),
-            'message'  => $error,
-            'job_type' => $job_type,
-            'time'     => current_time('mysql', true),
-            'scope'    => $this->get_scope(),
-            'blog_id'  => $this->get_blog_id(),
+            'job_id'     => $this->get_id(),
+            'message'    => $error,
+            'job_type'   => $job_type,
+            'time'       => current_time('mysql', true),
+            'scope'      => $this->get_scope(),
+            'blog_id'    => $this->get_blog_id(),
+            'code'       => $code,
+            'error_code' => $code,
         );
     }
 

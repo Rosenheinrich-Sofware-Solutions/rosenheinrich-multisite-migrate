@@ -213,7 +213,7 @@ trait Rmmigrate_Ajax_Base
             $payload['gate'] = $ctx['gate'];
             $payload['recovery_hint'] = $ctx['recovery_hint'] ?? '';
         }
-        self::log_operation_failure($type, $payload['message'], $job_id, array_merge($context, $ctx));
+        self::log_operation_failure($type, $payload['message'], $job_id, array_merge($context, $ctx, array('service_code' => $e->get_code_key())));
         $status = $e->get_http_status();
         if (isset($ctx['capability'])) {
             $status = 403;
@@ -232,6 +232,10 @@ trait Rmmigrate_Ajax_Base
      */
     private static function log_operation_failure(string $type, string $message, int $job_id = 0, array $context = array()): void
     {
+        if (empty($context['service_code']) && $message !== '') {
+            $context['service_code'] = Rmmigrate_Error_Codes::from_message($message);
+        }
+        Rmmigrate_Telemetry::record_operation_error($type, $message, $job_id, $context);
         Rmmigrate_Logger::log_activity($type, $message, 'error', array(
             'job_id'  => $job_id,
             'context' => $context,

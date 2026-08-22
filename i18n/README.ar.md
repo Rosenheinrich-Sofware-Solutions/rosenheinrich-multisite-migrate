@@ -34,6 +34,8 @@
 - **[تصدير واستيراد محلي](https://multisitemigrate.rosenheinrich.com/docs-backup/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=docs_backup)** بأرشيفات محمولة
 - **[بحث واستبدال](https://multisitemigrate.rosenheinrich.com/docs-restore/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=search_replace)** بما في ذلك البيانات المسلسلة
 - تشفير أرشيف اختياري **AES-256**
+- **نسخة احتياطية محلية مجدولة واحدة** — يوميًا أو أسبوعيًا أو شهريًا إلى التخزين المحلي (جدول واحد لكل سياق إدارة).
+- **إشعارات البريد الإلكتروني** — تنبيهات للنسخ اليدوية والمجدولة والاستعادة والاستيراد.
 - لوحة **Health** لفحص الاستضافة والحالة
 - **[AI Backup Tools & MCP](https://multisitemigrate.rosenheinrich.com/docs/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=mcp_connect)** — الحالة، الأرشيفات، Health، backup-now بعد التأكيد (بدون مفتاح)
 - نسخ احتياطي واستعادة من مسؤول subsite على موقعه
@@ -41,9 +43,9 @@
 
 ## Free vs Pro
 
-Free أداة **يدوية** كاملة للنسخ الاحتياطي والاستعادة والترحيل المحلي (بما في ذلك النسخ الاحتياطي للشبكة بالكامل).
+Free أداة كاملة للنسخ الاحتياطي والاستعادة والترحيل المحلي — بما في ذلك النسخ الاحتياطي للشبكة بالكامل ونسخة احتياطية محلية مجدولة واحدة.
 
-[Multisite Migrate Pro](https://multisitemigrate.rosenheinrich.com/pricing/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=get_pro) يضيف الجدولة، [التخزين السحابي](https://multisitemigrate.rosenheinrich.com/features/cloud-backup/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=cloud_backup)، [الترحيل إلى خادم فارغ](https://multisitemigrate.rosenheinrich.com/features/empty-server-migration/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=empty_server)، [Staging](https://multisitemigrate.rosenheinrich.com/features/staging/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=staging)، [WP-CLI](https://multisitemigrate.rosenheinrich.com/docs-wp-cli/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=docs_wp_cli)، [تقسيم الشبكة](https://multisitemigrate.rosenheinrich.com/docs-network-split/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=docs_network_split)، حصص الترخيص، وقدرات AI موسّعة.
+[Multisite Migrate Pro](https://multisitemigrate.rosenheinrich.com/pricing/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=get_pro) يضيف **جدولة سحابية ومتعددة وتزايدية**, [التخزين السحابي](https://multisitemigrate.rosenheinrich.com/features/cloud-backup/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=cloud_backup)، [الترحيل إلى خادم فارغ](https://multisitemigrate.rosenheinrich.com/features/empty-server-migration/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=empty_server)، [Staging](https://multisitemigrate.rosenheinrich.com/features/staging/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=staging)، [WP-CLI](https://multisitemigrate.rosenheinrich.com/docs-wp-cli/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=docs_wp_cli)، [تقسيم الشبكة](https://multisitemigrate.rosenheinrich.com/docs-network-split/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=docs_network_split)، حصص الترخيص، وقدرات AI موسّعة.
 
 ## Screenshots
 

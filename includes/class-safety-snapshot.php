@@ -30,7 +30,10 @@ class Rmmigrate_Safety_Snapshot
 
         $validation = Rmmigrate_Validator::validate_backup_start($args);
         if (is_wp_error($validation)) {
-            throw new RuntimeException( esc_html( $validation->get_error_message() ) );
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Structured service exception payload.
+            throw new Rmmigrate_Service_Exception(
+                esc_html($validation->get_error_message()),
+                array(), sanitize_key(Rmmigrate_Error_Codes::from_wp_error($validation)));
         }
 
         $job = Rmmigrate_Job::create($args);

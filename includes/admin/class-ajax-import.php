@@ -235,7 +235,7 @@ class Rmmigrate_Ajax_Import
             }
             wp_send_json_success($result);
         } catch (Rmmigrate_Service_Exception $e) {
-            wp_send_json_error(array('message' => $e->getMessage()));
+            self::restore_error($e->getMessage(), $job_id, array('phase' => 'start', 'service_code' => $e->get_code_key()));
         }
     }
 }

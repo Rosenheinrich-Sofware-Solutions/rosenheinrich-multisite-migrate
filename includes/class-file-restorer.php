@@ -23,7 +23,10 @@ class Rmmigrate_File_Restorer
         $files_root = $extract_dir . 'files/';
 
         if (!Rmmigrate_Filesystem::is_dir($files_root)) {
-            throw new RuntimeException( esc_html__('No files/ directory in backup.', 'rosenheinrich-multisite-migrate'));
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+            throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::FILES_TREE_MISSING),
+                esc_html__('No files/ directory in backup.', 'rosenheinrich-multisite-migrate')
+            );
         }
 
         $progress = $this->job->get_progress();
@@ -261,11 +264,13 @@ class Rmmigrate_File_Restorer
             $missing = $missing_so_far + 1;
             if ($missing >= self::MISSING_ABORT_THRESHOLD) {
                 $count = (int) $missing;
-                throw new RuntimeException(
+                // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+                throw Rmmigrate_Job_Exception::raise(
+                    sanitize_key(Rmmigrate_Error_Codes::FILE_RESTORE_FAILED),
                     esc_html(
                         sprintf(
                             /* translators: %d: number of missing files before abort. */
-                            __( 'Too many missing files in backup (%d). Restore aborted.', 'rosenheinrich-multisite-migrate' ),
+                            __('Too many missing files in backup (%d). Restore aborted.', 'rosenheinrich-multisite-migrate'),
                             $count
                         )
                     )
@@ -296,12 +301,14 @@ class Rmmigrate_File_Restorer
         }
 
         if (!Rmmigrate_Filesystem::copy($src, $dest)) {
-            throw new RuntimeException(
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+            throw Rmmigrate_Job_Exception::raise(
+                sanitize_key(Rmmigrate_Error_Codes::FILE_RESTORE_FAILED),
                 esc_html(
                     sprintf(
                         /* translators: %s: file name */
-                        __( 'Failed to restore file: %1$s', 'rosenheinrich-multisite-migrate' ),
-                        basename( $src )
+                        __('Failed to restore file: %1$s', 'rosenheinrich-multisite-migrate'),
+                        basename($src)
                     )
                 )
             );

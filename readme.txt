@@ -4,7 +4,7 @@ Tags: backup, migration, wordpress-backup, restore, multisite
 Requires at least: 6.9
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.1.7
+Stable tag: 1.1.8
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -217,12 +217,25 @@ Backup and restore run as background-style chunked jobs. They are designed not t
 
 Only when you explicitly opt in:
 
-1. **Allow & Continue** in the optional setup wizard — sends your admin email and basic site/plugin environment details so we can email product updates. You can **Skip**.
-2. **Send feedback** in the in-plugin feedback dialog — sends a sentiment rating, optional free-text message, plugin/WP/PHP versions, and a hashed site identifier (not your site URL). When you use **Report a problem** after a failed job, the last error message is included so we can diagnose the issue. No backup files are uploaded.
+1. **Setup wizard finish** — optional checkboxes for product update emails and usage telemetry (both default on; uncheck either before **Create Your First Backup** to decline). Product emails send your admin email, display name, **full site URL**, and basic site/plugin environment details (double opt-in where required; confirmation links expire after 48 hours). Telemetry sends pseudonymous wizard progress, backup/import/restore outcomes (error categories only), and basic environment snapshots to multisitemigrate.rosenheinrich.com. No visitor analytics, no backup files, no site URL in telemetry events (only a hashed `site_hash` identifier).
+2. **Usage telemetry** in **Settings → Privacy** — change your telemetry choice after setup.
+3. **Send feedback** in the in-plugin feedback dialog or deactivate survey — sends a sentiment rating, optional free-text message, plugin/WP/PHP versions, and `site_hash` (not your site URL). When you use **Report a problem** after a failed job, the last sanitized error message is included. Optional contact email on deactivate only. No backup files are uploaded.
 
-No analytics or advertising trackers are included. See the [privacy policy](https://multisitemigrate.rosenheinrich.com/privacy-policy/).
+No analytics or advertising trackers run without your opt-in. See the [privacy policy](https://multisitemigrate.rosenheinrich.com/privacy-policy/#plugin-opt-in) (optional plugin services).
+
+== External services ==
+
+The plugin works offline for local backups. It contacts external servers only when you take a specific action:
+
+* **Usage telemetry API** — `https://multisitemigrate.rosenheinrich.com/wp-json/multisite-migrate-portal/v1/telemetry/` — only when you opt in on the setup wizard finish step (telemetry checkbox) or in **Settings → Privacy**. Sends pseudonymous wizard progress, backup/import/restore outcomes (error categories, not file contents), and basic environment snapshots. Data: pseudonymous `install_id`, `site_hash` (SHA-256 of site URL + WordPress salt — not your raw URL), plugin/WP/PHP versions, locale, event props. No visitor analytics, no backup files, no site URL in event payloads.
+* **Product update email** — same host — `…/multisite-migrate-portal/v1/newsletter/subscribe` — only when you opt in on the setup wizard finish step (email checkbox, skippable). Sends admin email, display name, **full site URL**, site title, and basic site/plugin environment details. Where double opt-in is required by law, confirmation links expire after **48 hours**.
+* **In-plugin feedback** — same host — `…/multisite-migrate-portal/v1/feedback/submit` — only when you submit the optional feedback dialog or deactivate survey. Sends sentiment, optional message, versions, and `site_hash` (not your site URL); failed-job reports may include the last sanitized error message. Optional contact email on deactivate only.
+* **WordPress.org** — standard plugin update API — for installs without a Pro license.
 
 == Changelog ==
+
+= 1.1.8 =
+* Bug fixes.
 
 = 1.1.7 =
 * Bug fixes: activation no longer fatals when registering cron schedules.
@@ -306,6 +319,9 @@ No analytics or advertising trackers are included. See the [privacy policy](http
 * Initial public release of the free edition: multisite-aware backups, restore, local import/export, search & replace, AES-256 encryption and a health dashboard.
 
 == Upgrade Notice ==
+
+= 1.1.8 =
+Bug fixes. Recommended update.
 
 = 1.1.7 =
 Bug fixes for activation, settings, delete/uninstall cleanup, archive extraction, and OAuth Bearer. Recommended update.

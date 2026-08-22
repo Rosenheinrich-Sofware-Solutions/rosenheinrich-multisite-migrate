@@ -14,12 +14,18 @@ class Rmmigrate_Local_Storage
     public static function ensure_job_work_dir(Rmmigrate_Job $job, bool $prepare_fresh = false): string
     {
         if (!Rmmigrate_Plugin::ensure_backup_root()) {
-            throw new RuntimeException(esc_html(__('Could not initialize backup storage directory.', 'rosenheinrich-multisite-migrate')));
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+            throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::WORK_DIR_FAILED),
+                esc_html(__('Could not initialize backup storage directory.', 'rosenheinrich-multisite-migrate'))
+            );
         }
 
         $job_id = $job->get_id();
         if ($job_id <= 0) {
-            throw new RuntimeException(esc_html(__('Invalid backup job.', 'rosenheinrich-multisite-migrate')));
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+            throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::JOB_CREATE_FAILED),
+                esc_html(__('Invalid backup job.', 'rosenheinrich-multisite-migrate'))
+            );
         }
 
         $work_rel = self::normalize_work_dir_rel($job);
@@ -30,7 +36,10 @@ class Rmmigrate_Local_Storage
         }
 
         if (!Rmmigrate_Filesystem::ensure_directory($work_dir)) {
-            throw new RuntimeException(esc_html(__('Could not create backup working directory.', 'rosenheinrich-multisite-migrate')));
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+            throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::WORK_DIR_FAILED),
+                esc_html(__('Could not create backup working directory.', 'rosenheinrich-multisite-migrate'))
+            );
         }
 
         $progress = $job->get_progress();

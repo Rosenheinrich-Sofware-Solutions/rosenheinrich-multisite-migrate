@@ -32,6 +32,7 @@ class Rmmigrate_Ajax_Backup
         try {
             wp_send_json_success(Rmmigrate_Backup_Service::test_destination());
         } catch (Rmmigrate_Service_Exception $e) {
+            self::log_operation_failure('storage', $e->getMessage(), 0, array('phase' => 'test_destination', 'service_code' => $e->get_code_key()));
             wp_send_json_error(array('message' => $e->getMessage()));
         }
     }
@@ -44,6 +45,7 @@ class Rmmigrate_Ajax_Backup
             $result = Rmmigrate_Backup_Service::test_hosting();
             wp_send_json_success($result);
         } catch (Rmmigrate_Service_Exception $e) {
+            self::log_operation_failure('backup', $e->getMessage(), 0, array('phase' => 'test_hosting', 'service_code' => $e->get_code_key()));
             wp_send_json_error(array('message' => $e->getMessage()));
         }
     }

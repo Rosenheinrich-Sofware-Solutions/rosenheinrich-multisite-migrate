@@ -34,6 +34,8 @@ Copie de seguridad, restauración y migración de **sitios individuales** y **re
 - **[Exportación e importación local](https://multisitemigrate.rosenheinrich.com/docs-backup/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=docs_backup)** con archivos portátiles
 - **[Buscar y reemplazar](https://multisitemigrate.rosenheinrich.com/docs-restore/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=search_replace)** incluidos datos serializados
 - Cifrado opcional de archivos con **AES-256**
+- **Una copia de seguridad programada local** — diaria, semanal o mensual en almacenamiento local (un programa por contexto de administración).
+- **Notificaciones por correo electrónico** — alertas para copias manuales, programadas, restauraciones e importaciones.
 - Panel **Health** para comprobaciones de hosting y estado
 - **[AI Backup Tools & MCP](https://multisitemigrate.rosenheinrich.com/docs/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=mcp_connect)** — estado, archivos, health, backup-now confirmado (sin clave)
 - Copia de seguridad y restauración para administradores de subsitio en su propio sitio
@@ -41,9 +43,9 @@ Copie de seguridad, restauración y migración de **sitios individuales** y **re
 
 ## Free vs Pro
 
-Free es una herramienta **manual** completa de copia de seguridad, restauración y migración local (incluida copia de red completa).
+Free es una herramienta completa de copia de seguridad, restauración y migración local — incluida copia de red completa y una copia programada local.
 
-[Multisite Migrate Pro](https://multisitemigrate.rosenheinrich.com/pricing/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=get_pro) añade programación, [almacenamiento en la nube](https://multisitemigrate.rosenheinrich.com/features/cloud-backup/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=cloud_backup), [migración a servidor vacío](https://multisitemigrate.rosenheinrich.com/features/empty-server-migration/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=empty_server), [Staging](https://multisitemigrate.rosenheinrich.com/features/staging/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=staging), [WP-CLI](https://multisitemigrate.rosenheinrich.com/docs-wp-cli/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=docs_wp_cli), [división de red](https://multisitemigrate.rosenheinrich.com/docs-network-split/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=docs_network_split), cupos y capacidades ampliadas de IA.
+[Multisite Migrate Pro](https://multisitemigrate.rosenheinrich.com/pricing/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=get_pro) añade **programaciones en la nube, múltiples e incrementales**, [almacenamiento en la nube](https://multisitemigrate.rosenheinrich.com/features/cloud-backup/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=cloud_backup), [migración a servidor vacío](https://multisitemigrate.rosenheinrich.com/features/empty-server-migration/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=empty_server), [Staging](https://multisitemigrate.rosenheinrich.com/features/staging/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=staging), [WP-CLI](https://multisitemigrate.rosenheinrich.com/docs-wp-cli/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=docs_wp_cli), [división de red](https://multisitemigrate.rosenheinrich.com/docs-network-split/?utm_source=github&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=docs_network_split), cupos y capacidades ampliadas de IA.
 
 ## Capturas de pantalla
 

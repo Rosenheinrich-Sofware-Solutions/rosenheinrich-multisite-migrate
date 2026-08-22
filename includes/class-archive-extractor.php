@@ -36,7 +36,8 @@ class Rmmigrate_Archive_Extractor
         }
 
         if ($zip_path === '' || !Rmmigrate_Filesystem::exists($zip_path)) {
-            throw new RuntimeException(esc_html__('Backup archive not found.', 'rosenheinrich-multisite-migrate'));
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+            throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::ARCHIVE_MISSING), esc_html__('Backup archive not found.', 'rosenheinrich-multisite-migrate'));
         }
 
         if ($format === 'daf') {
@@ -169,12 +170,14 @@ class Rmmigrate_Archive_Extractor
         $archive_size = (int) Rmmigrate_Filesystem::filesize($daf_path);
         $fh = Rmmigrate_Filesystem::open($daf_path, 'rb');
         if ($fh === false) {
-            throw new RuntimeException(esc_html__('Cannot open DAF archive.', 'rosenheinrich-multisite-migrate'));
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+            throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::EXTRACT_FAILED), esc_html__('Cannot open DAF archive.', 'rosenheinrich-multisite-migrate'));
         }
 
         if ($fh->read(8) !== Rmmigrate_Daf_Archiver::MAGIC) {
             $fh->close();
-            throw new RuntimeException(esc_html__('Invalid DAF archive.', 'rosenheinrich-multisite-migrate'));
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+            throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::DAF_CORRUPT), esc_html__('Invalid DAF archive.', 'rosenheinrich-multisite-migrate'));
         }
 
         $byte_offset = (int) ($extract['byte_offset'] ?? 0);
@@ -207,12 +210,14 @@ class Rmmigrate_Archive_Extractor
                 $path_len = (int) unpack('N', $header)[1];
                 if ($path_len <= 0 || $path_len > 4096) {
                     $fh->close();
-                    throw new RuntimeException(esc_html__('Invalid DAF archive entry.', 'rosenheinrich-multisite-migrate'));
+                    // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+                    throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::DAF_CORRUPT), esc_html__('Invalid DAF archive entry.', 'rosenheinrich-multisite-migrate'));
                 }
                 $archive_path = $fh->read($path_len);
                 if ($archive_path === false || strlen($archive_path) < $path_len) {
                     $fh->close();
-                    throw new RuntimeException(esc_html__('Invalid DAF archive entry.', 'rosenheinrich-multisite-migrate'));
+                    // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+                    throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::DAF_CORRUPT), esc_html__('Invalid DAF archive entry.', 'rosenheinrich-multisite-migrate'));
                 }
 
                 // Entry header: [uint8 flag][uint64 uncomp_len]. The per-entry flag is
@@ -221,13 +226,15 @@ class Rmmigrate_Archive_Extractor
                 $sh = $fh->read(9);
                 if ($sh === false || strlen($sh) < 9) {
                     $fh->close();
-                    throw new RuntimeException(esc_html__('Invalid DAF archive entry.', 'rosenheinrich-multisite-migrate'));
+                    // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+                    throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::DAF_CORRUPT), esc_html__('Invalid DAF archive entry.', 'rosenheinrich-multisite-migrate'));
                 }
                 $u = unpack('Cflag/Juncomp', $sh);
                 $uncomp_len = (int) $u['uncomp'];
                 if ($uncomp_len < 0) {
                     $fh->close();
-                    throw new RuntimeException(esc_html__('Invalid DAF archive entry.', 'rosenheinrich-multisite-migrate'));
+                    // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+                    throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::DAF_CORRUPT), esc_html__('Invalid DAF archive entry.', 'rosenheinrich-multisite-migrate'));
                 }
 
                 $dest = null;
@@ -236,7 +243,8 @@ class Rmmigrate_Archive_Extractor
                     $skip = true;
                 } elseif (strpos($archive_path, "\0") !== false) {
                     $fh->close();
-                    throw new RuntimeException(esc_html__('Invalid DAF archive entry (unsafe path).', 'rosenheinrich-multisite-migrate'));
+                    // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+                    throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::DAF_CORRUPT), esc_html__('Invalid DAF archive entry (unsafe path).', 'rosenheinrich-multisite-migrate'));
                 } else {
                     $dest = Rmmigrate_Path_Safety::resolve_extract_dest($extract_dir, $archive_path);
                     if ($dest === null) {
@@ -271,7 +279,8 @@ class Rmmigrate_Archive_Extractor
                 $out_fh = Rmmigrate_Filesystem::open($dest, 'ab');
                 if ($out_fh === false) {
                     $fh->close();
-                    throw new RuntimeException(esc_html__('Cannot write extracted file.', 'rosenheinrich-multisite-migrate'));
+                    // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+                    throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::EXTRACT_FAILED), esc_html__('Cannot write extracted file.', 'rosenheinrich-multisite-migrate'));
                 }
             }
 
@@ -303,7 +312,8 @@ class Rmmigrate_Archive_Extractor
                         $out_fh->close();
                     }
                     $fh->close();
-                    throw new RuntimeException(esc_html__('Invalid DAF archive entry.', 'rosenheinrich-multisite-migrate'));
+                    // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+                    throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::DAF_CORRUPT), esc_html__('Invalid DAF archive entry.', 'rosenheinrich-multisite-migrate'));
                 }
                 $bu = unpack('Cflag/Ncomp/Nuncomp', $bh);
                 $block_flag = (int) $bu['flag'];
@@ -315,7 +325,8 @@ class Rmmigrate_Archive_Extractor
                         $out_fh->close();
                     }
                     $fh->close();
-                    throw new RuntimeException(esc_html__('DAF archive block is corrupt.', 'rosenheinrich-multisite-migrate'));
+                    // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+                    throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::DAF_CORRUPT), esc_html__('DAF archive block is corrupt.', 'rosenheinrich-multisite-migrate'));
                 }
 
                 if ($dest === null) {
@@ -325,18 +336,21 @@ class Rmmigrate_Archive_Extractor
                     if ($blob === false || strlen($blob) < $block_comp) {
                         $out_fh->close();
                         $fh->close();
-                        throw new RuntimeException(esc_html__('Invalid DAF archive entry.', 'rosenheinrich-multisite-migrate'));
+                        // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+                        throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::DAF_CORRUPT), esc_html__('Invalid DAF archive entry.', 'rosenheinrich-multisite-migrate'));
                     }
                     if ($block_flag === 1 && !function_exists('gzinflate')) {
                         $out_fh->close();
                         $fh->close();
-                        throw new RuntimeException(esc_html__('This DAF archive uses compression but the PHP zlib extension (gzinflate) is not available on this server. Enable zlib and try again.', 'rosenheinrich-multisite-migrate'));
+                        // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+                        throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::EXTRACT_FAILED), esc_html__('This DAF archive uses compression but the PHP zlib extension (gzinflate) is not available on this server. Enable zlib and try again.', 'rosenheinrich-multisite-migrate'));
                     }
                     $out = $block_flag === 1 ? gzinflate($blob) : $blob;
                     if ($out === false) {
                         $out_fh->close();
                         $fh->close();
-                        throw new RuntimeException(esc_html__('DAF archive block is corrupt.', 'rosenheinrich-multisite-migrate'));
+                        // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+                        throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::DAF_CORRUPT), esc_html__('DAF archive block is corrupt.', 'rosenheinrich-multisite-migrate'));
                     }
                     $out_fh->write($out);
                 }

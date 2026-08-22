@@ -23,8 +23,16 @@ class Rmmigrate_Service_Exception extends RuntimeException
     public function __construct(string $message, array $context = array(), string $code_key = self::CODE_VALIDATION)
     {
         parent::__construct($message);
-        $this->code_key = $code_key;
+        $this->code_key = sanitize_key($code_key);
         $this->context = $context;
+    }
+
+    /**
+     * Sanitize stable code_key for safe throw sites (Plugin Check ExceptionNotEscaped).
+     */
+    public static function code(string $code_key): string
+    {
+        return sanitize_key($code_key);
     }
 
     /**

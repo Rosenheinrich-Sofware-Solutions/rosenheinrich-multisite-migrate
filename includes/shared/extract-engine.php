@@ -137,6 +137,13 @@ class Rmmigrate_Extract_Engine
             return self::ENGINE_ZIP_CHUNK;
         }
 
+        if ( ! self::blocking_engine_unsafe( $archive_path ) && self::is_shell_unzip_available() ) {
+            return self::ENGINE_SHELL;
+        }
+        if ( ! self::blocking_engine_unsafe( $archive_path ) && self::can_oneshot_zip( $archive_path, $state ) ) {
+            return self::ENGINE_ZIP_ONESHOT;
+        }
+
         return self::ENGINE_ZIP_CHUNK;
     }
 
@@ -247,7 +254,10 @@ class Rmmigrate_Extract_Engine
 
         $binary = self::resolve_unzip_binary();
         if ( $binary === '' ) {
-            throw new RuntimeException( esc_html__('Shell unzip is not available.', 'rosenheinrich-multisite-migrate') );
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+            throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::EXTRACT_FAILED),
+                esc_html__('Shell unzip is not available.', 'rosenheinrich-multisite-migrate')
+            );
         }
 
         $command = escapeshellarg( $binary ) . ' -o -qq';
@@ -259,11 +269,15 @@ class Rmmigrate_Extract_Engine
         $exit_code = 1;
         $output = self::run_shell_command( $command, $exit_code );
         if ( $output === null ) {
-            throw new RuntimeException( esc_html__('Shell unzip command could not be executed.', 'rosenheinrich-multisite-migrate') );
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+            throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::EXTRACT_FAILED),
+                esc_html__('Shell unzip command could not be executed.', 'rosenheinrich-multisite-migrate')
+            );
         }
 
         if ( $exit_code !== 0 && ! self::shell_extract_looks_complete( $dest ) ) {
-            throw new RuntimeException(
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+            throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::EXTRACT_FAILED),
                 esc_html(
                     trim($output) !== ''
                         ? trim($output)
@@ -276,7 +290,10 @@ class Rmmigrate_Extract_Engine
     public static function extract_oneshot( string $archive, string $dest, bool $only_sql = false, string $password = '' ): void
     {
         if ( ! class_exists( 'ZipArchive' ) ) {
-            throw new RuntimeException( esc_html__('ZipArchive PHP extension is required.', 'rosenheinrich-multisite-migrate') );
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+            throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::ZIP_EXTENSION),
+                esc_html__('ZipArchive PHP extension is required.', 'rosenheinrich-multisite-migrate')
+            );
         }
         if ( ! is_dir( $dest ) ) {
             wp_mkdir_p( $dest );
@@ -284,7 +301,10 @@ class Rmmigrate_Extract_Engine
 
         $zip = new ZipArchive();
         if ( $zip->open( $archive ) !== true ) {
-            throw new RuntimeException( esc_html__('Cannot open backup archive.', 'rosenheinrich-multisite-migrate') );
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+            throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::EXTRACT_FAILED),
+                esc_html__('Cannot open backup archive.', 'rosenheinrich-multisite-migrate')
+            );
         }
         if ( $password !== '' ) {
             $zip->setPassword( $password );
@@ -301,7 +321,10 @@ class Rmmigrate_Extract_Engine
                 }
                 if ( $zip->extractTo( $dest, array( $name ) ) === false ) {
                     $zip->close();
-                    throw new RuntimeException( esc_html__('Cannot extract archive entry.', 'rosenheinrich-multisite-migrate') );
+                    // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+                    throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::EXTRACT_FAILED),
+                        esc_html__('Cannot extract archive entry.', 'rosenheinrich-multisite-migrate')
+                    );
                 }
             }
         } else {
@@ -315,7 +338,10 @@ class Rmmigrate_Extract_Engine
                 }
                 if ( $zip->extractTo( $dest, array( $name ) ) === false ) {
                     $zip->close();
-                    throw new RuntimeException( esc_html__('Cannot extract backup archive.', 'rosenheinrich-multisite-migrate') );
+                    // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+                    throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::EXTRACT_FAILED),
+                        esc_html__('Cannot extract backup archive.', 'rosenheinrich-multisite-migrate')
+                    );
                 }
             }
         }
@@ -434,7 +460,10 @@ class Rmmigrate_Extract_Engine
     private static function assert_archive_entries_path_safe( string $archive, string $dest ): void
     {
         if ( ! class_exists( 'ZipArchive' ) ) {
-            throw new RuntimeException( esc_html__('ZipArchive PHP extension is required to validate archive paths before shell unzip.', 'rosenheinrich-multisite-migrate') );
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+            throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::ZIP_EXTENSION),
+                esc_html__('ZipArchive PHP extension is required to validate archive paths before shell unzip.', 'rosenheinrich-multisite-migrate')
+            );
         }
         if ( ! class_exists( 'Rmmigrate_Path_Safety_Core', false ) ) {
             $core = __DIR__ . '/path-safety-core.php';
@@ -443,12 +472,18 @@ class Rmmigrate_Extract_Engine
             }
         }
         if ( ! class_exists( 'Rmmigrate_Path_Safety_Core', false ) ) {
-            throw new RuntimeException( esc_html__('Path safety core is unavailable.', 'rosenheinrich-multisite-migrate') );
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+            throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::EXTRACT_FAILED),
+                esc_html__('Path safety core is unavailable.', 'rosenheinrich-multisite-migrate')
+            );
         }
 
         $zip = new ZipArchive();
         if ( $zip->open( $archive ) !== true ) {
-            throw new RuntimeException( esc_html__('Cannot open backup archive.', 'rosenheinrich-multisite-migrate') );
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+            throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::EXTRACT_FAILED),
+                esc_html__('Cannot open backup archive.', 'rosenheinrich-multisite-migrate')
+            );
         }
 
         for ( $i = 0; $i < $zip->numFiles; $i++ ) {
@@ -458,7 +493,10 @@ class Rmmigrate_Extract_Engine
             }
             if ( Rmmigrate_Path_Safety_Core::resolve_extract_dest( $dest, $name ) === null ) {
                 $zip->close();
-                throw new RuntimeException( esc_html__('Archive contains an unsafe path.', 'rosenheinrich-multisite-migrate') );
+                // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+                throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::EXTRACT_FAILED),
+                    esc_html__('Archive contains an unsafe path.', 'rosenheinrich-multisite-migrate')
+                );
             }
         }
         $zip->close();
@@ -468,7 +506,10 @@ class Rmmigrate_Extract_Engine
 
     {
         if ( $path === '' || strpbrk( $path, "\0\r\n" ) !== false ) {
-            throw new RuntimeException( esc_html__('Invalid path for shell extraction.', 'rosenheinrich-multisite-migrate') );
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+            throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::EXTRACT_FAILED),
+                esc_html__('Invalid path for shell extraction.', 'rosenheinrich-multisite-migrate')
+            );
         }
     }
 

@@ -61,7 +61,10 @@ class Rmmigrate_Zip_Extract_Core
     public static function extract_slice( string $zip_path, string $extract_dir, array $progress, int $budget_sec, bool $only_sql = false, bool $throttle = false, string $password = '' ): array
     {
         if ( ! class_exists( 'ZipArchive' ) ) {
-            throw new RuntimeException( esc_html__('ZipArchive PHP extension is required.', 'rosenheinrich-multisite-migrate') );
+            self::raise_pipeline(
+                Rmmigrate_Error_Codes::ZIP_EXTENSION,
+                __('ZipArchive PHP extension is required.', 'rosenheinrich-multisite-migrate')
+            );
         }
         if ( ! is_dir( $extract_dir ) ) {
             wp_mkdir_p( $extract_dir );
@@ -71,7 +74,10 @@ class Rmmigrate_Zip_Extract_Core
 
         $zip = new ZipArchive();
         if ( $zip->open( $zip_path ) !== true ) {
-            throw new RuntimeException( esc_html__('Cannot open backup archive.', 'rosenheinrich-multisite-migrate') );
+            self::raise_pipeline(
+                Rmmigrate_Error_Codes::EXTRACT_FAILED,
+                __('Cannot open backup archive.', 'rosenheinrich-multisite-migrate')
+            );
         }
         if ( $password !== '' ) {
             $zip->setPassword( $password );
@@ -225,7 +231,10 @@ class Rmmigrate_Zip_Extract_Core
         if ( $zip->extractTo( $extract_dir, $names ) === false ) {
             foreach ( $names as $name ) {
                 if ( $zip->extractTo( $extract_dir, array( $name ) ) === false ) {
-                    throw new RuntimeException( esc_html__('Cannot extract archive entry.', 'rosenheinrich-multisite-migrate') );
+                    self::raise_pipeline(
+                        Rmmigrate_Error_Codes::EXTRACT_FAILED,
+                        __('Cannot extract archive entry.', 'rosenheinrich-multisite-migrate')
+                    );
                 }
             }
         }
@@ -303,5 +312,22 @@ class Rmmigrate_Zip_Extract_Core
         }
 
         return $progress;
+    }
+
+    /**
+     * Worker pipeline uses Job_Exception; installer context falls back to RuntimeException.
+     */
+    private static function raise_pipeline(string $service_code, string $message): void
+    {
+        if (class_exists('Rmmigrate_Job_Exception', false)) {
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+            throw Rmmigrate_Job_Exception::raise(
+                sanitize_key($service_code),
+                esc_html($message)
+            );
+        }
+
+        // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+        throw new RuntimeException(esc_html($message));
     }
 }

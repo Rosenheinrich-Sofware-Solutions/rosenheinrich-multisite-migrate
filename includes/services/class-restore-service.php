@@ -29,7 +29,10 @@ final class Rmmigrate_Restore_Service
         Rmmigrate_Job_Preflight::assert_can_view_job($job);
         $path = Rmmigrate_Local_Archive::ensure_local_archive($job);
         if (is_wp_error($path)) {
-            throw new Rmmigrate_Service_Exception(esc_html($path->get_error_message()), array('phase' => 'prefetch'));
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Structured service exception payload.
+            throw new Rmmigrate_Service_Exception(
+                esc_html($path->get_error_message()),
+                array('phase' => 'prefetch'), sanitize_key(Rmmigrate_Error_Codes::from_wp_error($path)));
         }
         return array('ready' => true);
     }
@@ -45,7 +48,10 @@ final class Rmmigrate_Restore_Service
 
         $archive_path = Rmmigrate_Runner::resolve_local_path($job);
         if (!Rmmigrate_Filesystem::exists($archive_path)) {
-            throw new Rmmigrate_Service_Exception(esc_html(__('Archive file is missing on this server. Import the backup archive first.', 'rosenheinrich-multisite-migrate')));
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Structured service exception payload.
+            throw new Rmmigrate_Service_Exception(
+                esc_html(__('Archive file is missing on this server. Import the backup archive first.', 'rosenheinrich-multisite-migrate')),
+                array(), sanitize_key(Rmmigrate_Error_Codes::ARCHIVE_MISSING));
         }
 
         $manifest = self::resolve_job_manifest($job, $archive_path);
@@ -94,6 +100,7 @@ final class Rmmigrate_Restore_Service
     public static function migration_preview(string $old_url, string $new_url): array
     {
         if ($new_url === '') {
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Structured service exception payload.
             throw new Rmmigrate_Service_Exception(esc_html(__('Enter a new URL.', 'rosenheinrich-multisite-migrate')));
         }
         $pairs = Rmmigrate_Search_Replace::preview_url_pairs($old_url, $new_url);
@@ -118,6 +125,7 @@ final class Rmmigrate_Restore_Service
             : true;
 
         if (!$confirm) {
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Structured service exception payload.
             throw new Rmmigrate_Service_Exception(esc_html(__('Check the confirmation box to continue — restore will overwrite existing data.', 'rosenheinrich-multisite-migrate')));
         }
 
@@ -125,6 +133,7 @@ final class Rmmigrate_Restore_Service
         if ($restore_type === Rmmigrate_Job::RESTORE_TYPE_MIGRATION) {
             $migration_map = self::parse_migration_map($params);
             if (empty($migration_map['site_url']['new'])) {
+                // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Structured service exception payload.
                 throw new Rmmigrate_Service_Exception(esc_html(__('Enter the new site URL for migration.', 'rosenheinrich-multisite-migrate')));
             }
         }
@@ -138,7 +147,10 @@ final class Rmmigrate_Restore_Service
         $archive_path = Rmmigrate_Runner::resolve_local_path($source);
         $disk = Rmmigrate_Validator::validate_restore_disk_space($archive_path);
         if (is_wp_error($disk)) {
-            throw new Rmmigrate_Service_Exception(esc_html($disk->get_error_message()), array('phase' => 'disk_space'));
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Structured service exception payload.
+            throw new Rmmigrate_Service_Exception(
+                esc_html($disk->get_error_message()),
+                array('phase' => 'disk_space'), sanitize_key(Rmmigrate_Error_Codes::from_wp_error($disk)));
         }
 
         $manifest = self::resolve_job_manifest($source, $archive_path);
@@ -160,10 +172,13 @@ final class Rmmigrate_Restore_Service
                 false
             );
             if ($gate !== null) {
-                throw new Rmmigrate_Service_Exception(esc_html($gate['message']), array(
-                    'gate'          => esc_html((string) $gate['gate']),
-                    'recovery_hint' => esc_html((string) $gate['recovery_hint']),
-                ));
+                // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Structured service exception payload.
+                throw new Rmmigrate_Service_Exception(
+                    esc_html($gate['message']),
+                    array(
+                        'gate'          => esc_html((string) $gate['gate']),
+                        'recovery_hint' => esc_html((string) $gate['recovery_hint']),
+                    ), sanitize_key(Rmmigrate_Error_Codes::RESTORE_GATE_BLOCKED));
             }
 
             $topology = self::apply_topology_extras($topology, $params, $manifest);
@@ -357,11 +372,17 @@ final class Rmmigrate_Restore_Service
     private static function require_job(int $job_id): Rmmigrate_Job
     {
         if ($job_id <= 0) {
-            throw new Rmmigrate_Service_Exception(esc_html(__('Source backup not found. It may have been deleted.', 'rosenheinrich-multisite-migrate')));
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Structured service exception payload.
+            throw new Rmmigrate_Service_Exception(
+                esc_html(__('Source backup not found. It may have been deleted.', 'rosenheinrich-multisite-migrate')),
+                array(), sanitize_key(Rmmigrate_Error_Codes::SOURCE_NOT_FOUND));
         }
         $job = Rmmigrate_Job::get($job_id);
         if ($job === null) {
-            throw new Rmmigrate_Service_Exception(esc_html(__('Source backup not found. It may have been deleted.', 'rosenheinrich-multisite-migrate')));
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Structured service exception payload.
+            throw new Rmmigrate_Service_Exception(
+                esc_html(__('Source backup not found. It may have been deleted.', 'rosenheinrich-multisite-migrate')),
+                array(), sanitize_key(Rmmigrate_Error_Codes::SOURCE_NOT_FOUND));
         }
         return $job;
     }
@@ -370,7 +391,10 @@ final class Rmmigrate_Restore_Service
     {
         $job = self::require_job($job_id);
         if ($job->get_status() !== Rmmigrate_Job::STATUS_COMPLETE) {
-            throw new Rmmigrate_Service_Exception(esc_html(__('Backup not found or not complete yet.', 'rosenheinrich-multisite-migrate')));
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Structured service exception payload.
+            throw new Rmmigrate_Service_Exception(
+                esc_html(__('Backup not found or not complete yet.', 'rosenheinrich-multisite-migrate')),
+                array(), sanitize_key(Rmmigrate_Error_Codes::SOURCE_NOT_COMPLETE));
         }
         return $job;
     }

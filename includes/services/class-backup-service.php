@@ -77,11 +77,17 @@ final class Rmmigrate_Backup_Service
         }
 
         if (!$is_cron && is_multisite() && !current_user_can('manage_network') && $scope !== Rmmigrate_Multisite_Scope::SCOPE_SUBSITE) {
-            throw new Rmmigrate_Service_Exception(esc_html(__('Network backup requires super admin.', 'rosenheinrich-multisite-migrate')));
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Structured service exception payload.
+            throw new Rmmigrate_Service_Exception(
+                esc_html(__('Network backup requires super admin.', 'rosenheinrich-multisite-migrate')),
+                array(), sanitize_key(Rmmigrate_Error_Codes::PERMISSION_DENIED));
         }
         $resolved = Rmmigrate_Multisite_Scope::resolve_backup_scope($scope, $excluded, $included, $is_cron);
         if (is_wp_error($resolved)) {
-            throw new Rmmigrate_Service_Exception(esc_html($resolved->get_error_message()));
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Structured service exception payload.
+            throw new Rmmigrate_Service_Exception(
+                esc_html($resolved->get_error_message()),
+                array(), sanitize_key(Rmmigrate_Error_Codes::from_wp_error($resolved)));
         }
         $scope = $resolved['scope'];
         $excluded = $resolved['excluded_blogs'];
@@ -127,7 +133,10 @@ final class Rmmigrate_Backup_Service
 
         $validation = Rmmigrate_Validator::validate_backup_start($args);
         if (is_wp_error($validation)) {
-            throw new Rmmigrate_Service_Exception(esc_html($validation->get_error_message()));
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Structured service exception payload.
+            throw new Rmmigrate_Service_Exception(
+                esc_html($validation->get_error_message()),
+                array('phase' => 'start'), sanitize_key(Rmmigrate_Error_Codes::from_wp_error($validation)));
         }
 
         $job = Rmmigrate_Job::create($args);
@@ -174,6 +183,7 @@ final class Rmmigrate_Backup_Service
     {
         $job = Rmmigrate_Job::get($job_id);
         if ($job === null) {
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Structured service exception payload.
             throw Rmmigrate_Service_Exception::not_found(esc_html(__('Job not found.', 'rosenheinrich-multisite-migrate')));
         }
         Rmmigrate_Job_Preflight::assert_can_view_job($job);
@@ -190,6 +200,7 @@ final class Rmmigrate_Backup_Service
             return $id > 0;
         })));
         if ($job_ids === array()) {
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Structured service exception payload.
             throw new Rmmigrate_Service_Exception(esc_html(__('Select at least one backup to delete.', 'rosenheinrich-multisite-migrate')));
         }
 
@@ -225,6 +236,7 @@ final class Rmmigrate_Backup_Service
         }
 
         if ($deleted === 0) {
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Structured service exception payload.
             throw new Rmmigrate_Service_Exception(esc_html(__('No backups were deleted. Active or inaccessible jobs were skipped.', 'rosenheinrich-multisite-migrate')));
         }
 
@@ -263,6 +275,7 @@ final class Rmmigrate_Backup_Service
         Rmmigrate_Job_Preflight::assert_can_view_job($job);
         $result = self::delete_job_record($job);
         if (!$result['ok']) {
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Structured service exception payload.
             throw new Rmmigrate_Service_Exception(esc_html($result['message']));
         }
         return array(
@@ -299,6 +312,7 @@ final class Rmmigrate_Backup_Service
     {
         $result = Rmmigrate_Destination_Probe::run();
         if (is_wp_error($result)) {
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Structured service exception payload.
             throw new Rmmigrate_Service_Exception(esc_html($result->get_error_message()));
         }
         return array('message' => $result);

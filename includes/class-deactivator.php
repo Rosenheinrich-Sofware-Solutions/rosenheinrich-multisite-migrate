@@ -20,5 +20,12 @@ class Rmmigrate_Deactivator
         wp_clear_scheduled_hook('rmmigrate_tick');
         delete_transient('rmmigrate_lock');
         delete_transient('rmmigrate_preflight');
+
+        delete_site_option('rmmigrate_maintenance');
+        delete_option('rmmigrate_maintenance');
+        $maintenance_file = (defined('ABSPATH') ? ABSPATH : '') . '.maintenance';
+        if ($maintenance_file !== '.maintenance' && file_exists($maintenance_file)) {
+            wp_delete_file($maintenance_file);
+        }
     }
 }

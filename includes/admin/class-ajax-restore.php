@@ -30,6 +30,7 @@ class Rmmigrate_Ajax_Restore
             );
             wp_send_json_success($result);
         } catch (Rmmigrate_Service_Exception $e) {
+            self::log_operation_failure('restore', $e->getMessage(), 0, array('phase' => 'search_replace_preview', 'service_code' => $e->get_code_key()));
             wp_send_json_error(array('message' => $e->getMessage()));
         }
     }
@@ -113,7 +114,10 @@ class Rmmigrate_Ajax_Restore
         } catch (Throwable $e) {
             self::rethrow_test_ajax_exit($e);
             $message = self::json_error_message($e);
-            self::log_operation_failure('restore', $message, (int) $params['source_job_id'], array('phase' => 'start'));
+            self::log_operation_failure('restore', $message, (int) $params['source_job_id'], array(
+                'phase'        => 'start',
+                'service_code' => Rmmigrate_Error_Codes::from_throwable($e),
+            ));
             wp_send_json_error(array('message' => $message));
         }
     }
@@ -128,6 +132,7 @@ class Rmmigrate_Ajax_Restore
         try {
             wp_send_json_success(Rmmigrate_Restore_Service::get_manifest($job_id));
         } catch (Rmmigrate_Service_Exception $e) {
+            self::log_operation_failure('restore', $e->getMessage(), $job_id, array('phase' => 'manifest', 'service_code' => $e->get_code_key()));
             wp_send_json_error(array('message' => $e->getMessage()));
         }
     }

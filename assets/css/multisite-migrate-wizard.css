@@ -1368,6 +1368,14 @@ a.multisite-migrate-wizard-card {
     background: var(--mm-teal);
 }
 
+.mm-setup-slogan {
+    display: block;
+}
+
+.mm-setup-slogan__line {
+    display: block;
+}
+
 .mm-setup-section__head p {
     margin: 0 auto;
     max-width: 36rem;
@@ -1588,6 +1596,11 @@ a.multisite-migrate-wizard-card {
     color: var(--mm-navy);
 }
 
+.mm-setup-finish .mm-setup-pro-panel__copy h2,
+.mm-setup-finish .mm-setup-pro-panel__copy > p {
+    text-align: center;
+}
+
 .mm-setup-pro-panel__copy > p {
     margin: 0 0 var(--mm-space-4);
     color: var(--mm-text-muted);
@@ -1626,31 +1639,97 @@ a.multisite-migrate-wizard-card {
     align-self: center;
 }
 
+.mm-setup-finish .mm-setup-optin {
+    max-width: none;
+    width: 100%;
+    margin: var(--mm-space-5) 0;
+    text-align: left;
+    box-sizing: border-box;
+}
+
+.mm-setup-finish .mm-setup-optin .mm-setup-card__title,
+.mm-setup-finish .mm-setup-optin .mm-setup-card__body {
+    text-align: center;
+}
+
+.mm-setup-finish .mm-setup-optin .mm-setup-card__privacy,
+.mm-setup-finish .mm-setup-optin .mm-setup-optin-choice {
+    text-align: left;
+}
+
+.mm-setup-finish .mm-setup-optin .mm-setup-card__actions,
+.mm-setup-finish .mm-setup-optin .mm-setup-optin__choices {
+    justify-content: flex-start;
+    align-items: stretch;
+    flex-direction: column;
+    gap: var(--mm-space-3);
+}
+
+.mm-setup-optin-choice {
+    display: flex;
+    gap: 0.5rem;
+    align-items: flex-start;
+    cursor: pointer;
+    line-height: 1.45;
+    font-size: var(--mm-text-sm);
+}
+
+.mm-setup-optin-choice input {
+    margin-top: 0.15rem;
+    flex: 0 0 auto;
+}
+
+.mm-setup-optin.is-submitting .mm-setup-create-backup {
+    cursor: wait;
+}
+
+.mm-setup-disclosure__section {
+    margin-top: var(--mm-space-4);
+}
+
+.mm-setup-disclosure__section:first-child {
+    margin-top: 0;
+}
+
+.mm-setup-disclosure__heading {
+    margin: 0 0 var(--mm-space-2);
+    font-size: var(--mm-text-sm);
+    font-weight: var(--mm-font-semibold);
+    color: var(--mm-navy);
+}
+
 .mm-setup-finish__bar {
     display: flex;
     flex-wrap: wrap;
+    flex-direction: column;
     align-items: center;
-    justify-content: space-between;
+    justify-content: center;
+    text-align: center;
     gap: var(--mm-space-4);
-    padding: var(--mm-space-5);
+    padding: var(--mm-space-6) var(--mm-space-5);
     border-radius: 14px;
     background: linear-gradient(180deg, rgba(13, 148, 136, 0.06) 0%, var(--mm-surface) 55%);
     border: 1px solid #e4e8ee;
 }
 
 .mm-setup-finish__lead {
-    flex: 1 1 14rem;
+    flex: none;
+    width: 100%;
+    max-width: 32rem;
     min-width: 0;
 }
 
 .mm-setup-finish__lead h2 {
     margin: 0 0 var(--mm-space-1);
-    font-size: var(--mm-text-lg);
+    text-align: center;
+    font-weight: var(--mm-font-bold, 700);
+    font-size: var(--mm-text-xl, 1.25rem);
     color: var(--mm-navy);
 }
 
 .mm-setup-finish__lead p {
     margin: 0;
+    text-align: center;
     color: var(--mm-text-muted);
     font-size: var(--mm-text-sm);
     line-height: 1.5;
@@ -1659,8 +1738,17 @@ a.multisite-migrate-wizard-card {
 .mm-setup-finish__actions {
     display: flex;
     flex-direction: column;
-    align-items: flex-end;
+    align-items: center;
+    width: 100%;
     gap: var(--mm-space-2);
+}
+
+.mm-setup-finish__actions .mm-setup-create-backup {
+    font-weight: 700;
+    font-size: 1rem;
+    padding: 12px 28px;
+    min-height: 44px;
+    min-width: 12rem;
 }
 
 
@@ -1671,24 +1759,28 @@ a.multisite-migrate-wizard-card {
         grid-template-columns: 1fr;
     }
 
-    .mm-setup-pro-panel,
-    .mm-setup-finish__bar {
+    .mm-setup-pro-panel {
         flex-direction: column;
         align-items: stretch;
     }
 
-    .mm-setup-pro-panel__cta,
-    .mm-setup-finish__actions {
+    .mm-setup-pro-panel__cta {
         align-items: stretch;
         width: 100%;
     }
 
-    .mm-setup-finish__actions .button-primary {
-        width: 100%;
-        text-align: center;
+    .mm-setup-finish__bar {
+        flex-direction: column;
+        align-items: center;
     }
 
     .mm-setup-finish__actions {
         align-items: center;
+        width: 100%;
+    }
+
+    .mm-setup-finish__actions .mm-setup-create-backup {
+        width: auto;
+        text-align: center;
     }
 }

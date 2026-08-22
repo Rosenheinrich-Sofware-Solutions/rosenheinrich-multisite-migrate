@@ -25,7 +25,10 @@ class Rmmigrate_Zip_Extractor
         $zip_path = $progress['source']['zip_path'] ?? '';
 
         if ($zip_path === '' || !Rmmigrate_Filesystem::exists($zip_path)) {
-            throw new RuntimeException(esc_html__('Backup archive not found.', 'rosenheinrich-multisite-migrate'));
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+            throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::ARCHIVE_MISSING),
+                esc_html__('Backup archive not found.', 'rosenheinrich-multisite-migrate')
+            );
         }
 
         $extract_dir = trailingslashit($this->job->get_work_dir()) . 'extracted/';

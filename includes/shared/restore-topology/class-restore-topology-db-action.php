@@ -71,7 +71,8 @@ class Rmmigrate_Restore_Topology_Db_Action
             )
         );
         if (Rmmigrate_Restore_Topology_Compatibility::is_subsite_full_overwrite_scenario($gate_state, $manifest, $destination)) {
-            throw new RuntimeException(
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+            throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::NETWORK_OVERWRITE_DB_ACTION),
                 esc_html__('Replacing an entire multisite installation requires Empty entire database.', 'rosenheinrich-multisite-migrate')
             );
         }

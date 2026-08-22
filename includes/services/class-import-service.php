@@ -28,12 +28,18 @@ final class Rmmigrate_Import_Service
     public static function import_local_path(string $source_path, string $passphrase = ''): array
     {
         if ($source_path === '' || !Rmmigrate_Filesystem::exists($source_path)) {
-            throw new Rmmigrate_Service_Exception(esc_html(__('File not found.', 'rosenheinrich-multisite-migrate')));
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Structured service exception payload.
+            throw new Rmmigrate_Service_Exception(
+                esc_html(__('File not found.', 'rosenheinrich-multisite-migrate')),
+                array('phase' => 'import'), sanitize_key(Rmmigrate_Error_Codes::ARCHIVE_MISSING));
         }
         $name = basename($source_path);
         $ext = strtolower(pathinfo($name, PATHINFO_EXTENSION));
         if (!in_array($ext, array('zip', 'daf', 'venc'), true)) {
-            throw new Rmmigrate_Service_Exception(esc_html(__('Invalid file extension. Only .zip, .daf, and .venc files are allowed.', 'rosenheinrich-multisite-migrate')));
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Structured service exception payload.
+            throw new Rmmigrate_Service_Exception(
+                esc_html(__('Invalid file extension. Only .zip, .daf, and .venc files are allowed.', 'rosenheinrich-multisite-migrate')),
+                array('phase' => 'import'), sanitize_key(Rmmigrate_Error_Codes::VALIDATION));
         }
 
         Rmmigrate_Plugin::ensure_backup_root();
@@ -48,11 +54,17 @@ final class Rmmigrate_Import_Service
         $size = (int) Rmmigrate_Filesystem::filesize($source_path);
         $disk = Rmmigrate_Validator::validate_import_disk_space($dest, $size);
         if (is_wp_error($disk)) {
-            throw new Rmmigrate_Service_Exception(esc_html($disk->get_error_message()));
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Structured service exception payload.
+            throw new Rmmigrate_Service_Exception(
+                esc_html($disk->get_error_message()),
+                array(), sanitize_key(Rmmigrate_Error_Codes::from_wp_error($disk)));
         }
 
         if (!copy($source_path, $dest)) {
-            throw new Rmmigrate_Service_Exception(esc_html(__('Import copy failed.', 'rosenheinrich-multisite-migrate')));
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Structured service exception payload.
+            throw new Rmmigrate_Service_Exception(
+                esc_html(__('Import copy failed.', 'rosenheinrich-multisite-migrate')),
+                array('phase' => 'import'), sanitize_key(Rmmigrate_Error_Codes::IMPORT_REGISTER_FAILED));
         }
 
         return self::register_validated_import($dest, $passphrase);
@@ -66,7 +78,10 @@ final class Rmmigrate_Import_Service
     {
         $job = Rmmigrate_Job::get($job_id);
         if ($job === null) {
-            throw new Rmmigrate_Service_Exception(esc_html(__('Imported backup not found.', 'rosenheinrich-multisite-migrate')));
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Structured service exception payload.
+            throw new Rmmigrate_Service_Exception(
+                esc_html(__('Imported backup not found.', 'rosenheinrich-multisite-migrate')),
+                array('phase' => 'import'), sanitize_key(Rmmigrate_Error_Codes::ARCHIVE_MISSING));
         }
         Rmmigrate_Job_Preflight::assert_can_view_job($job);
 
@@ -132,7 +147,10 @@ final class Rmmigrate_Import_Service
     ): array {
         $validated = self::validate_import_file($path, $passphrase);
         if (is_wp_error($validated)) {
-            throw new Rmmigrate_Service_Exception(esc_html($validated->get_error_message()));
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Structured service exception payload.
+            throw new Rmmigrate_Service_Exception(
+                esc_html($validated->get_error_message()),
+                array(), sanitize_key(Rmmigrate_Error_Codes::from_wp_error($validated)));
         }
 
         Rmmigrate_Access::assert_subsite_import_archive($path);
@@ -160,6 +178,12 @@ final class Rmmigrate_Import_Service
         );
         Rmmigrate_Logger::log_system(sprintf('Import job #%d registered successfully (%d bytes)', $job->get_id(), $job->get_file_size()));
         Rmmigrate_Logger::log_job($job->get_id(), sprintf('Import archive registered: %s (%d bytes)', $job->get_local_path(), $job->get_file_size()));
+        /**
+         * Fires after an import archive is registered as a completed job.
+         *
+         * @param Rmmigrate_Job $job Import job.
+         */
+        do_action('rmmigrate_import_registered', $job);
         Rmmigrate_Notifications::maybe_send_event(
             'import',
             sprintf(

@@ -57,13 +57,16 @@ class Rmmigrate_Plugin_Uninstall
                 'pluginBasenames' => self::visible_plugin_basenames(),
                 'networkScope'    => is_multisite() && is_network_admin(),
                 'canDelete'       => current_user_can('delete_plugins'),
-                'reasons'         => self::deactivate_survey_reasons(),
-                'i18n'            => array(
+                'defaultContactEmail' => self::resolve_current_user_email(),
+                'reasons'             => self::deactivate_survey_reasons(),
+                'i18n'                => array(
                     'deactivateTitle'         => __('Deactivate Multisite Migrate', 'rosenheinrich-multisite-migrate'),
                     'deactivateIntro'         => __('You are about to deactivate Multisite Migrate. Would you like to delete its data or keep it in place?', 'rosenheinrich-multisite-migrate'),
                     'surveyTitle'             => __('Why are you deactivating? (optional)', 'rosenheinrich-multisite-migrate'),
                     'surveyDetails'           => __('Anything else? (optional)', 'rosenheinrich-multisite-migrate'),
                     'surveyDetailsPlaceholder' => __('A short note helps us improve.', 'rosenheinrich-multisite-migrate'),
+                    'surveyContactLabel'      => __('Email for follow-up (optional)', 'rosenheinrich-multisite-migrate'),
+                    'surveyContactHint'       => __('We may contact you if we need more details about a problem.', 'rosenheinrich-multisite-migrate'),
                     'deleteTitle'             => __('Delete Multisite Migrate', 'rosenheinrich-multisite-migrate'),
                     'deleteIntro'             => __('Choose which local data to delete before removing the plugin.', 'rosenheinrich-multisite-migrate'),
                     'keepAllData'             => __('Keep all Multisite Migrate data', 'rosenheinrich-multisite-migrate'),
@@ -85,6 +88,22 @@ class Rmmigrate_Plugin_Uninstall
                 ),
             )
         );
+    }
+
+    private static function resolve_current_user_email(): string
+    {
+        if (!function_exists('wp_get_current_user')) {
+            return '';
+        }
+        try {
+            $user = wp_get_current_user();
+            if (is_object($user) && !empty($user->user_email)) {
+                return (string) $user->user_email;
+            }
+        } catch (\Throwable $e) {
+            return '';
+        }
+        return '';
     }
 
     /**

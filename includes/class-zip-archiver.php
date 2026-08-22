@@ -77,7 +77,10 @@ class Rmmigrate_Zip_Archiver
     public function run_slice(int $budget_sec): bool
     {
         if (!class_exists('ZipArchive')) {
-            throw new RuntimeException( esc_html__('ZipArchive PHP extension is required.', 'rosenheinrich-multisite-migrate'));
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+            throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::ZIP_EXTENSION),
+                esc_html__('ZipArchive PHP extension is required.', 'rosenheinrich-multisite-migrate')
+            );
         }
 
         $progress = $this->job->get_progress();
@@ -97,7 +100,10 @@ class Rmmigrate_Zip_Archiver
         $total = count($queue);
 
         if ($total === 0) {
-            throw new RuntimeException( esc_html__('Backup archive queue is empty.', 'rosenheinrich-multisite-migrate'));
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+            throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::ARCHIVE_VALIDATION_FAILED),
+                esc_html__('Backup archive queue is empty.', 'rosenheinrich-multisite-migrate')
+            );
         }
 
         $resume = false;
@@ -117,7 +123,10 @@ class Rmmigrate_Zip_Archiver
         $zip = new ZipArchive();
         $open_flags = $resume ? ZipArchive::CREATE : (ZipArchive::CREATE | ZipArchive::OVERWRITE);
         if ($zip->open($zip_path, $open_flags) !== true) {
-            throw new RuntimeException( esc_html__('Cannot open backup archive for writing.', 'rosenheinrich-multisite-migrate'));
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+            throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::EXTRACT_FAILED),
+                esc_html__('Cannot open backup archive for writing.', 'rosenheinrich-multisite-migrate')
+            );
         }
 
         $start = microtime(true);
@@ -149,8 +158,17 @@ class Rmmigrate_Zip_Archiver
 
         if ($zip->close() !== true) {
             $status = $zip->getStatusString() ?: 'Unknown error';
-            /* translators: %s: ZipArchive error status string */
-            throw new RuntimeException( esc_html( sprintf( __('Cannot finalize backup archive. Reason: %s', 'rosenheinrich-multisite-migrate'), $status ) ) );
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+            throw Rmmigrate_Job_Exception::raise(
+                sanitize_key(Rmmigrate_Error_Codes::EXTRACT_FAILED),
+                esc_html(
+                    sprintf(
+                        /* translators: %s: ZipArchive error status string */
+                        __('Cannot finalize backup archive. Reason: %s', 'rosenheinrich-multisite-migrate'),
+                        $status
+                    )
+                )
+            );
         }
 
         $this->job->update_progress(array('archive' => array(

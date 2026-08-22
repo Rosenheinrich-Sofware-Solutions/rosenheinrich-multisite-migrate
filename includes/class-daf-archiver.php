@@ -113,7 +113,10 @@ class Rmmigrate_Daf_Archiver
         $start = microtime(true);
         $fh = Rmmigrate_Filesystem::fopen_raw($daf_path, 'c+b');
         if ($fh === false) {
-            throw new RuntimeException(esc_html__('Cannot open DAF archive for writing.', 'rosenheinrich-multisite-migrate'));
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+            throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::EXTRACT_FAILED),
+                esc_html__('Cannot open DAF archive for writing.', 'rosenheinrich-multisite-migrate')
+            );
         }
         
         $byte_checkpoint = max(strlen(self::MAGIC), (int) ($archive['byte_offset'] ?? strlen(self::MAGIC)));
@@ -337,12 +340,18 @@ class Rmmigrate_Daf_Archiver
     {
         $head = Rmmigrate_Filesystem::get_contents($daf_path, 0, strlen(self::MAGIC));
         if ($head !== self::MAGIC) {
-            throw new RuntimeException(esc_html__('DAF archive failed its integrity check (bad header). The backup may be incomplete — please try again.', 'rosenheinrich-multisite-migrate'));
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+            throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::DAF_CORRUPT),
+                esc_html__('DAF archive failed its integrity check (bad header). The backup may be incomplete — please try again.', 'rosenheinrich-multisite-migrate')
+            );
         }
 
         $actual_size = (int) Rmmigrate_Filesystem::filesize($daf_path);
         if ($actual_size !== $byte_offset) {
-            throw new RuntimeException(esc_html__('DAF archive failed its integrity check (size mismatch). The backup may be incomplete — please try again.', 'rosenheinrich-multisite-migrate'));
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+            throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::DAF_CORRUPT),
+                esc_html__('DAF archive failed its integrity check (size mismatch). The backup may be incomplete — please try again.', 'rosenheinrich-multisite-migrate')
+            );
         }
     }
 
