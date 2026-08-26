@@ -163,8 +163,8 @@ if (!defined('ABSPATH')) {
                 <div class="mm-restore-step" data-restore-step="4">
                     <p class="mm-restore-step-lead"><?php esc_html_e('Review your configuration summary below. Confirm your restore options to begin the process.', 'rosenheinrich-multisite-migrate'); ?></p>
                     <dl class="multisite-migrate-wizard-review" id="mm-restore-review-summary"></dl>
-                    <p>
-                        <label>
+                    <p class="mm-restore-confirm-row">
+                        <label class="mm-restore-confirm-label" for="mm-restore-confirm">
                             <input type="checkbox" id="mm-restore-confirm" value="1">
                             <?php esc_html_e('I understand this will overwrite existing data.', 'rosenheinrich-multisite-migrate'); ?>
                         </label>

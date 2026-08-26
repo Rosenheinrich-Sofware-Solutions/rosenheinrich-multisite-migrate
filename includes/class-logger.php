@@ -47,7 +47,8 @@ class Rmmigrate_Logger
         string $type = 'backup',
         string $status = 'info',
         array $context = array(),
-        int $activity_ttl = 60
+        int $activity_ttl = 60,
+        bool $activity_log = true
     ): void {
         $key = 'rmmigrate_milestone_' . $transient_suffix . '_' . $job_id;
         if (get_transient($key)) {
@@ -56,6 +57,10 @@ class Rmmigrate_Logger
         set_transient($key, 1, max(15, $activity_ttl));
 
         self::log_job($job_id, $message);
+
+        if (!$activity_log) {
+            return;
+        }
 
         Rmmigrate_Activity_Log::record($type, $message, $status, array(
             'job_id'  => $job_id,

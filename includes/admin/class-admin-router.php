@@ -264,6 +264,10 @@ class Rmmigrate_Admin_Router
             $rmmigrate_is_network,
             $rmmigrate_highlight_job_id
         );
+        $rmmigrate_restore_success = Rmmigrate_Job::resolve_admin_restore_success_job(
+            $rmmigrate_is_network,
+            $rmmigrate_highlight_job_id
+        );
         $rmmigrate_last = Rmmigrate_Job::get_last_completed();
         $rmmigrate_last_error = Rmmigrate_Job::resolve_admin_last_error($rmmigrate_is_network);
         $rmmigrate_migration_notice = get_site_option('rmmigrate_migration_notice', array());
@@ -315,7 +319,14 @@ class Rmmigrate_Admin_Router
                 $rmmigrate_highlight_job_id = (int) $rmmigrate_last_error['job_id'];
             }
             if ($rmmigrate_highlight_job_id > 0) {
-                $rmmigrate_jobs = Rmmigrate_Job::ensure_job_in_list($rmmigrate_jobs, $rmmigrate_highlight_job_id);
+                $rmmigrate_highlight_job = Rmmigrate_Job::get($rmmigrate_highlight_job_id);
+                // Keep restore / safety snapshots out of the backups table entirely.
+                if ($rmmigrate_highlight_job !== null
+                    && !$rmmigrate_highlight_job->is_restore()
+                    && !$rmmigrate_highlight_job->is_safety()
+                ) {
+                    $rmmigrate_jobs = Rmmigrate_Job::ensure_job_in_list($rmmigrate_jobs, $rmmigrate_highlight_job_id);
+                }
             }
         }
 

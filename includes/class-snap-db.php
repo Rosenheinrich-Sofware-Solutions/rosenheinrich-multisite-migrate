@@ -357,6 +357,18 @@ class Rmmigrate_Snap_DB
         if (!empty($filters['job_type'])) {
             $where[] = 'job_type = %s';
             $params[] = $filters['job_type'];
+        } elseif (empty($filters['include_restore'])) {
+            // Archives / dashboard list real backups only — restore jobs stay out.
+            $where[] = 'job_type = %s';
+            $params[] = Rmmigrate_Job::JOB_TYPE_BACKUP;
+        }
+
+        if (array_key_exists('is_safety', $filters)) {
+            $where[] = 'is_safety = %d';
+            $params[] = !empty($filters['is_safety']) ? 1 : 0;
+        } elseif (empty($filters['include_safety'])) {
+            // Pre-restore safety snapshots are not shown as normal backups.
+            $where[] = 'is_safety = 0';
         }
 
         if (!empty($filters['scope'])) {

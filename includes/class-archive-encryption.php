@@ -164,12 +164,17 @@ class Rmmigrate_Archive_Encryption
         );
     }
 
-    public static function decrypt_slice(string $source, string $dest, int $byte_offset, int $budget_sec): bool
+    /**
+     * Resumable decrypt slice. Returns null on hard failure.
+     *
+     * @return array{done:bool,byte_offset:int}|null
+     */
+    public static function decrypt_slice(string $source, string $dest, int $byte_offset, int $budget_sec): ?array
     {
         self::load_crypto_core();
         $probe = Rmmigrate_Filesystem::open($source, 'rb');
         if ($probe === false) {
-            return false;
+            return null;
         }
         $magic = $probe->read(strlen(Rmmigrate_Crypto_Core::MAGIC_V2));
         $probe->close();
@@ -185,8 +190,10 @@ class Rmmigrate_Archive_Encryption
      * Resumable v2 decrypt. v2 chunks are self-contained (per-chunk nonce + GCM
      * tag), so a slice can resume at any chunk boundary; the salt/key are always
      * re-derived from the header.
+     *
+     * @return array{done:bool,byte_offset:int}|null
      */
-    private static function decrypt_slice_v2(string $source, string $dest, int $byte_offset, int $budget_sec): bool
+    private static function decrypt_slice_v2(string $source, string $dest, int $byte_offset, int $budget_sec): ?array
     {
         if ($byte_offset === 0 && Rmmigrate_Filesystem::exists($dest)) {
             Rmmigrate_Filesystem::delete($dest);
@@ -194,7 +201,7 @@ class Rmmigrate_Archive_Encryption
 
         $in = Rmmigrate_Filesystem::open($source, 'rb');
         if ($in === false) {
-            return false;
+            return null;
         }
         $in->read(strlen(Rmmigrate_Crypto_Core::MAGIC_V2));
         $salt = $in->read(Rmmigrate_Crypto_Core::V2_SALT_LEN);
@@ -211,10 +218,11 @@ class Rmmigrate_Archive_Encryption
         $out = Rmmigrate_Filesystem::open($dest, 'ab');
         if ($out === false) {
             $in->close();
-            return false;
+            return null;
         }
 
         $start = microtime(true);
+        $failed = false;
         while ((microtime(true) - $start) < $budget_sec) {
             $len_header = $in->read(4);
             if ($len_header === false || strlen($len_header) < 4) {
@@ -227,25 +235,33 @@ class Rmmigrate_Archive_Encryption
             }
             $plain = Rmmigrate_Crypto_Core::v2_open($blob, $key);
             if ($plain === false) {
-                $in->close();
-                $out->close();
-                return false;
+                $failed = true;
+                break;
             }
             $out->write($plain);
             $byte_offset = (int) $in->tell();
         }
 
-        $complete = $in->eof() || $byte_offset >= Rmmigrate_Filesystem::filesize($source);
+        $complete = !$failed && ($in->eof() || $byte_offset >= Rmmigrate_Filesystem::filesize($source));
         $in->close();
         $out->close();
 
-        return $complete;
+        if ($failed) {
+            return null;
+        }
+
+        return array(
+            'done'        => $complete,
+            'byte_offset' => $byte_offset,
+        );
     }
 
     /**
      * Legacy resumable v1 decrypt (AES-256-CBC, IV-chained).
+     *
+     * @return array{done:bool,byte_offset:int}|null
      */
-    private static function decrypt_slice_v1(string $source, string $dest, int $byte_offset, int $budget_sec): bool
+    private static function decrypt_slice_v1(string $source, string $dest, int $byte_offset, int $budget_sec): ?array
     {
         if ($byte_offset === 0 && Rmmigrate_Filesystem::exists($dest)) {
             Rmmigrate_Filesystem::delete($dest);
@@ -254,7 +270,7 @@ class Rmmigrate_Archive_Encryption
         $key = self::archive_key_v1();
         $in = Rmmigrate_Filesystem::open($source, 'rb');
         if ($in === false) {
-            return false;
+            return null;
         }
 
         if ($byte_offset === 0) {
@@ -262,7 +278,7 @@ class Rmmigrate_Archive_Encryption
             $magic = $in->read($magic_len);
             if ($magic !== self::MAGIC) {
                 $in->close();
-                return false;
+                return null;
             }
             $iv = $in->read(16);
             $byte_offset = $magic_len + 16;
@@ -274,7 +290,7 @@ class Rmmigrate_Archive_Encryption
         $out = Rmmigrate_Filesystem::open($dest, 'ab');
         if ($out === false) {
             $in->close();
-            return false;
+            return null;
         }
 
         $start = microtime(true);
@@ -301,7 +317,10 @@ class Rmmigrate_Archive_Encryption
         $in->close();
         $out->close();
 
-        return $complete;
+        return array(
+            'done'        => $complete,
+            'byte_offset' => $byte_offset,
+        );
     }
 
     public static function decrypt_file(string $source, string $dest): bool

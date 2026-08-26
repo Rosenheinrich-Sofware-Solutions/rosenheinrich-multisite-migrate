@@ -21,15 +21,34 @@ class Rmmigrate_Runner
     const LEASE_TTL         = 90;
     const LEASE_OPTION_PREFIX = 'rmmigrate_worker_lease_';
     const WAIT_BACKOFF_PREFIX = 'rmmigrate_worker_wait_backoff_';
+    /** Consecutive mid-slice PHP max_execution_time fatals before failing the job. */
+    const MAX_PHP_EXECUTION_TIMEOUTS = 5;
 
     /** @var array<int,Rmmigrate_Filesystem_Stream> */
     private static $job_lock_handles = array();
 
     private static $reserved_memory = null;
 
+    /** @var float|null Wall-clock start of the current locked slice (microtime). */
+    private static $slice_started_at = null;
+
     public static function worker_budget_sec(): int
     {
         return Rmmigrate_Hosting_Detection::worker_budget_sec();
+    }
+
+    /**
+     * Seconds left in this request's voluntary work budget (min 1 while locked).
+     */
+    public static function remaining_budget_sec(): int
+    {
+        $budget = self::worker_budget_sec();
+        if (self::$slice_started_at === null) {
+            return max(1, $budget);
+        }
+        $elapsed = microtime(true) - self::$slice_started_at;
+
+        return max(1, (int) floor($budget - $elapsed));
     }
 
     /**
@@ -55,7 +74,11 @@ class Rmmigrate_Runner
                 'message' => $job->get_progress_message(),
             );
             if ($job->get_status() === Rmmigrate_Job::STATUS_ERROR) {
-                $out['error'] = $job->data['error_message'] ?? $job->get_status_label();
+                $out['error'] = Rmmigrate_User_Error_Messages::for_admin_banner(array(
+                    'message'  => (string) ($job->data['error_message'] ?? $job->get_status_label()),
+                    'code'     => (string) ($job->get_progress()['service_code'] ?? ''),
+                    'job_type' => $job->is_restore() ? 'restore' : 'backup',
+                ));
             }
             return $out;
         }
@@ -108,10 +131,13 @@ class Rmmigrate_Runner
                 // phpcs:ignore Squiz.PHP.DiscouragedFunctions.Discouraged -- CLI/cron workers may run long; ajax path uses a hard ceiling below.
                 @set_time_limit(0);
             } else {
-                // phpcs:ignore Squiz.PHP.DiscouragedFunctions.Discouraged -- Cap admin-ajax workers under typical proxy kill windows.
-                @set_time_limit(max(10, Rmmigrate_Hosting_Detection::worker_budget_sec() + 5));
+                $max_exec = (int) ini_get('max_execution_time');
+                // phpcs:ignore Squiz.PHP.DiscouragedFunctions.Discouraged -- Match PHP max_execution_time; voluntary budget yields earlier.
+                @set_time_limit($max_exec > 0 ? max(10, $max_exec) : max(10, Rmmigrate_Hosting_Detection::worker_budget_sec() + 5));
             }
         }
+
+        self::$slice_started_at = microtime(true);
 
         Rmmigrate_Logger::for_job($job_id);
         Rmmigrate_Logger::log_job_milestone(
@@ -128,7 +154,8 @@ class Rmmigrate_Runner
                 'lock_mode' => Rmmigrate_Hosting_Detection::effective_lock_mode(),
                 'job_type'  => $job->get_job_type(),
             ),
-            5 * MINUTE_IN_SECONDS
+            5 * MINUTE_IN_SECONDS,
+            false
         );
 
         try {
@@ -157,7 +184,12 @@ class Rmmigrate_Runner
                 Rmmigrate_Restore_Runner::disable_maintenance();
             }
             self::release_process_lock($job_id);
-            return array('done' => true, 'status' => -1, 'percent' => 0, 'message' => sanitize_text_field($e->getMessage()), 'error' => sanitize_text_field($e->getMessage()));
+            $public = Rmmigrate_User_Error_Messages::for_admin_banner(array(
+                'message'  => sanitize_text_field($e->getMessage()),
+                'code'     => Rmmigrate_Error_Codes::from_throwable($e),
+                'job_type' => $job->is_restore() ? 'restore' : 'backup',
+            ));
+            return array('done' => true, 'status' => -1, 'percent' => 0, 'message' => $public, 'error' => $public);
         }
 
         self::release_process_lock($job_id);
@@ -177,6 +209,11 @@ class Rmmigrate_Runner
 
         if ($job->get_status() === Rmmigrate_Job::STATUS_COMPLETE && !$job->is_restore()) {
             Rmmigrate_Retention::schedule_deferred_prune();
+        }
+
+        $progress = $job->get_progress();
+        if (!$done && !empty($progress['php_execution_timeouts'])) {
+            $job->update_progress(array('php_execution_timeouts' => 0));
         }
 
         if (!$done) {
@@ -351,7 +388,7 @@ class Rmmigrate_Runner
         }
 
         $dumper = new Rmmigrate_DB_Dumper($job, $scope);
-        $budget = Rmmigrate_Hosting_Detection::worker_budget_sec();
+        $budget = self::remaining_budget_sec();
         $done = $dumper->run_slice($budget);
 
         if ($done) {
@@ -400,7 +437,7 @@ class Rmmigrate_Runner
         }
 
         $archiver = Rmmigrate_Archive_Factory::create_archiver($job, $scope);
-        $done = $archiver->run_slice(self::worker_budget_sec());
+        $done = $archiver->run_slice(self::remaining_budget_sec());
 
         $progress = $job->get_progress();
         $idx = (int) ($progress['archive']['file_index'] ?? 0);
@@ -426,7 +463,7 @@ class Rmmigrate_Runner
     {
         $fin = self::finalize_progress($job);
         $phase = (string) ($fin['phase'] ?? 'hashes');
-        $budget = self::worker_budget_sec();
+        $budget = self::remaining_budget_sec();
 
         if ($phase === 'hashes') {
             if (!self::store_file_hashes_slice($job, $budget)) {
@@ -758,12 +795,16 @@ class Rmmigrate_Runner
             $type,
             'info',
             array('worker_source' => $source),
-            2 * MINUTE_IN_SECONDS
+            2 * MINUTE_IN_SECONDS,
+            false
         );
     }
 
     private static function log_kickoff(int $job_id, string $mode, string $action): void
     {
+        $job = Rmmigrate_Job::get($job_id);
+        $type = ($job !== null && $job->is_restore()) ? 'restore' : 'backup';
+
         Rmmigrate_Logger::log_job_milestone(
             $job_id,
             'kickoff_' . $mode . '_' . $action,
@@ -773,13 +814,14 @@ class Rmmigrate_Runner
                 $mode,
                 $action
             ),
-            'backup',
+            $type,
             'info',
             array(
                 'kickoff_mode'   => $mode,
                 'kickoff_action' => $action,
             ),
-            30
+            30,
+            false
         );
     }
 
@@ -800,7 +842,8 @@ class Rmmigrate_Runner
             $type,
             'warning',
             array('lock_mode' => Rmmigrate_Hosting_Detection::effective_lock_mode()),
-            60
+            60,
+            false
         );
     }
 
@@ -825,7 +868,8 @@ class Rmmigrate_Runner
                 'lock_mode'   => Rmmigrate_Hosting_Detection::effective_lock_mode(),
                 'lock_reason' => $reason,
             ),
-            120
+            120,
+            false
         );
     }
 
@@ -844,6 +888,7 @@ class Rmmigrate_Runner
             ),
         ));
         if (is_wp_error($response)) {
+            $job = Rmmigrate_Job::get($job_id);
             Rmmigrate_Logger::log_job_milestone(
                 $job_id,
                 'loopback_error',
@@ -852,10 +897,11 @@ class Rmmigrate_Runner
                     __('Loopback worker dispatch failed: %s', 'rosenheinrich-multisite-migrate'),
                     $response->get_error_message()
                 ),
-                'backup',
+                ($job !== null && $job->is_restore()) ? 'restore' : 'backup',
                 'warning',
                 array('transport_error' => $response->get_error_message()),
-                120
+                120,
+                false
             );
             return;
         }
@@ -1127,26 +1173,50 @@ class Rmmigrate_Runner
                     Rmmigrate_Logger::log("Location: {$fatal_file} on line {$fatal_line}");
                     
                     $progress = $job->get_progress();
-                    $db = $progress['database'] ?? array();
-                    $phase = $db['phase'] ?? 'unknown';
-                    $table_index = (int) ($db['table_index'] ?? 0);
-                    $tables = $db['tables'] ?? array();
-                    $current_table = $tables[$table_index] ?? 'unknown';
-                    Rmmigrate_Logger::log("Job State at crash -> Phase: {$phase}, DB Table: {$current_table} (Index: {$table_index})");
+                    Rmmigrate_Logger::log(self::format_crash_state_message($job, $progress));
 
                     if (stripos($fatal_message, 'allowed memory size') !== false) {
                         $exception = new RuntimeException(
                             __('PHP ran out of memory during the backup. Use Settings → Database → mysqldump or raise memory_limit.', 'rosenheinrich-multisite-migrate')
                         );
                         $service_code = 'memory_limit';
+                        $message = Rmmigrate_User_Error_Messages::format($exception);
+                        $job->set_status(Rmmigrate_Job::STATUS_ERROR, $message, $service_code);
+                        if ($job->is_restore()) {
+                            Rmmigrate_Restore_Runner::disable_maintenance();
+                        }
+                    } elseif (Rmmigrate_Error_Codes::is_php_execution_timeout($fatal_message)) {
+                        // Soft yield: chunked workers are designed to continue on the next request.
+                        // Marking ERROR here orphaned resumable archives behind a sticky last_error banner.
+                        $timeouts = (int) ($progress['php_execution_timeouts'] ?? 0) + 1;
+                        $job->update_progress(array('php_execution_timeouts' => $timeouts));
+                        if ($timeouts < self::MAX_PHP_EXECUTION_TIMEOUTS) {
+                            Rmmigrate_Logger::log(
+                                sprintf(
+                                    'PHP max_execution_time hit mid-slice (%d/%d); leaving job active for continuation.',
+                                    $timeouts,
+                                    self::MAX_PHP_EXECUTION_TIMEOUTS
+                                )
+                            );
+                            self::schedule_continuation($job_id);
+                        } else {
+                            $exception = new RuntimeException(
+                                __('PHP max_execution_time hit repeatedly.', 'rosenheinrich-multisite-migrate')
+                            );
+                            $message = Rmmigrate_User_Error_Messages::format($exception);
+                            $job->set_status(Rmmigrate_Job::STATUS_ERROR, $message, Rmmigrate_Error_Codes::TIME_LIMIT);
+                            if ($job->is_restore()) {
+                                Rmmigrate_Restore_Runner::disable_maintenance();
+                            }
+                        }
                     } else {
-                        $exception = new RuntimeException(__('Worker stopped unexpectedly. Check the activity log or try again.', 'rosenheinrich-multisite-migrate'));
+                        $exception = new RuntimeException(__('Worker stopped unexpectedly.', 'rosenheinrich-multisite-migrate'));
                         $service_code = 'worker_stopped';
-                    }
-                    $message = Rmmigrate_User_Error_Messages::format($exception);
-                    $job->set_status(Rmmigrate_Job::STATUS_ERROR, $message, $service_code);
-                    if ($job->is_restore()) {
-                        Rmmigrate_Restore_Runner::disable_maintenance();
+                        $message = Rmmigrate_User_Error_Messages::format($exception);
+                        $job->set_status(Rmmigrate_Job::STATUS_ERROR, $message, $service_code);
+                        if ($job->is_restore()) {
+                            Rmmigrate_Restore_Runner::disable_maintenance();
+                        }
                     }
                 }
             }
@@ -1161,6 +1231,48 @@ class Rmmigrate_Runner
         if (self::$locked_job_id === $job_id) {
             self::$locked_job_id = null;
         }
+        self::$slice_started_at = null;
+    }
+
+    /**
+     * Human-readable crash snapshot for activity logs (backup vs restore).
+     *
+     * @param array<string,mixed> $progress
+     */
+    public static function format_crash_state_message(Rmmigrate_Job $job, array $progress): string
+    {
+        if ($job->is_restore()) {
+            $extract = is_array($progress['extract'] ?? null) ? $progress['extract'] : array();
+            $parts = array(
+                'Status: ' . $job->get_status(),
+                'Step: ' . (string) ($progress['step'] ?? 'unknown'),
+                'PlanIndex: ' . (int) ($progress['plan_index'] ?? 0),
+            );
+            if (isset($extract['format'])) {
+                $parts[] = 'ExtractFormat: ' . (string) $extract['format'];
+            }
+            if (isset($extract['byte_offset'])) {
+                $parts[] = 'ByteOffset: ' . (int) $extract['byte_offset'];
+            } elseif (isset($extract['zip_index'])) {
+                $parts[] = 'ZipIndex: ' . (int) $extract['zip_index'];
+            }
+            if (!empty($extract['partial'])) {
+                $parts[] = 'Partial: yes';
+            }
+            if (isset($progress['decrypt_offset'])) {
+                $parts[] = 'DecryptOffset: ' . (int) $progress['decrypt_offset'];
+            }
+
+            return 'Job State at crash -> ' . implode(', ', $parts);
+        }
+
+        $db = is_array($progress['database'] ?? null) ? $progress['database'] : array();
+        $phase = $db['phase'] ?? 'unknown';
+        $table_index = (int) ($db['table_index'] ?? 0);
+        $tables = $db['tables'] ?? array();
+        $current_table = $tables[$table_index] ?? 'unknown';
+
+        return "Job State at crash -> Phase: {$phase}, DB Table: {$current_table} (Index: {$table_index})";
     }
 
     /** @deprecated Use worker_token() */

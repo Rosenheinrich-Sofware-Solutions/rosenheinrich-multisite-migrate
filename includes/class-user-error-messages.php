@@ -63,16 +63,25 @@ class Rmmigrate_User_Error_Messages
                 'action'  => __('Use Settings → Database → mysqldump, raise memory_limit, or exclude large tables.', 'rosenheinrich-multisite-migrate'),
             );
         }
+        if (strpos($lower, 'maximum execution time') !== false
+            || strpos($lower, 'max_execution_time') !== false
+            || strpos($lower, 'exceeded maximum time limit') !== false) {
+            return array(
+                'message' => __('PHP time limit hit mid-slice.', 'rosenheinrich-multisite-migrate'),
+                'action'  => __('Raise max_execution_time or open Health, then retry.', 'rosenheinrich-multisite-migrate'),
+            );
+        }
         if (strpos($lower, 'row too large for php export') !== false) {
             return array(
                 'message' => $text,
                 'action'  => __('Use mysqldump mode or exclude the table from this backup.', 'rosenheinrich-multisite-migrate'),
             );
         }
-        if (strpos($lower, 'worker stopped unexpectedly') !== false) {
+        if (strpos($lower, 'worker stopped unexpectedly') !== false
+            || strpos($lower, 'worker stopped before the job finished') !== false) {
             return array(
-                'message' => __('The backup worker stopped before the job finished.', 'rosenheinrich-multisite-migrate'),
-                'action'  => __('Open the activity log for details, then retry with mysqldump mode if memory was exhausted.', 'rosenheinrich-multisite-migrate'),
+                'message' => __('Worker stopped unexpectedly.', 'rosenheinrich-multisite-migrate'),
+                'action'  => __('Open Activity for details, then retry.', 'rosenheinrich-multisite-migrate'),
             );
         }
         if (strpos($lower, 'backup database table is missing') !== false) {
@@ -87,6 +96,23 @@ class Rmmigrate_User_Error_Messages
                 'action'  => __('Check that the database user can create rows in wp_rmmigrate_jobs, or deactivate and reactivate the plugin.', 'rosenheinrich-multisite-migrate'),
             );
         }
+        if (strpos($lower, 'failed to restore file') !== false
+            || strpos($lower, 'cannot restore file') !== false
+            || strpos($lower, 'too many missing files') !== false
+            || strpos($lower, 'datei konnte nicht wiederhergestellt') !== false) {
+            return array(
+                'message' => __('A file could not be restored.', 'rosenheinrich-multisite-migrate'),
+                'action'  => __('Open the activity log for the file name, check write permissions, then retry.', 'rosenheinrich-multisite-migrate'),
+            );
+        }
+        if (strpos($lower, 'cannot write extracted file') !== false
+            || strpos($lower, 'cannot extract') !== false
+            || strpos($lower, 'extract failed') !== false) {
+            return array(
+                'message' => __('Archive extraction failed.', 'rosenheinrich-multisite-migrate'),
+                'action'  => __('Check disk space and write permissions, then retry.', 'rosenheinrich-multisite-migrate'),
+            );
+        }
 
         return array(
             'message' => $text,
@@ -94,15 +120,71 @@ class Rmmigrate_User_Error_Messages
         );
     }
 
+    /**
+     * Short admin-banner copy: prefer error code, never surface paths/basenames.
+     *
+     * @param array{message?:string,code?:string,error_code?:string,job_type?:string} $last_error
+     */
+    public static function for_admin_banner(array $last_error): string
+    {
+        $code = sanitize_key((string) ($last_error['code'] ?? $last_error['error_code'] ?? ''));
+        if ($code === Rmmigrate_Error_Codes::FILE_RESTORE_FAILED) {
+            return __('A file could not be restored.', 'rosenheinrich-multisite-migrate');
+        }
+        if ($code === Rmmigrate_Error_Codes::EXTRACT_FAILED) {
+            return __('Archive extraction failed.', 'rosenheinrich-multisite-migrate');
+        }
+        if ($code === Rmmigrate_Error_Codes::TIME_LIMIT) {
+            return __('PHP time limit hit mid-slice.', 'rosenheinrich-multisite-migrate');
+        }
+        if ($code === Rmmigrate_Error_Codes::WORKER_STOPPED || $code === Rmmigrate_Error_Codes::STALE_WORKER) {
+            return __('Worker stopped unexpectedly.', 'rosenheinrich-multisite-migrate');
+        }
+        if ($code === Rmmigrate_Error_Codes::MEMORY_LIMIT) {
+            return __('PHP ran out of memory during the job.', 'rosenheinrich-multisite-migrate');
+        }
+        if ($code === Rmmigrate_Error_Codes::PERMISSION_DENIED) {
+            return __('Permission denied while writing files.', 'rosenheinrich-multisite-migrate');
+        }
+
+        $raw = (string) ($last_error['message'] ?? '');
+        // Never surface paths/basenames in admin toasts or banners.
+        if (preg_match('/failed to restore file|cannot restore file|datei konnte nicht wiederhergestellt|too many missing files/i', $raw)
+            || preg_match('/:\s*[^\s\\/:*?"<>|]+\.(?:php|py|js|css|htaccess|txt|json|xml|html|htm|mo|po|inc|sql)\s*$/i', $raw)
+        ) {
+            return __('A file could not be restored.', 'rosenheinrich-multisite-migrate');
+        }
+
+        $mapped = self::map($raw);
+        $message = $mapped['message'];
+        $message = preg_replace('/:\s*(\.?[\w.\-]+|\/[^\s]+|\\\\[^\s]+)\s*$/u', '', $message) ?? $message;
+        $message = trim($message);
+        if ($message === '') {
+            $job_type = sanitize_key((string) ($last_error['job_type'] ?? ''));
+            if ($job_type === 'restore') {
+                return __('The restore did not complete.', 'rosenheinrich-multisite-migrate');
+            }
+            if ($job_type === 'backup') {
+                return __('The backup did not complete.', 'rosenheinrich-multisite-migrate');
+            }
+            if ($job_type === 'import') {
+                return __('The import did not complete.', 'rosenheinrich-multisite-migrate');
+            }
+            return __('The job did not complete.', 'rosenheinrich-multisite-migrate');
+        }
+
+        if (function_exists('mb_substr')) {
+            return (string) mb_substr($message, 0, 200);
+        }
+        return substr($message, 0, 200);
+    }
+
     public static function format(Throwable $e): string
     {
         if (!$e instanceof RuntimeException) {
-            return __('An unexpected error occurred. Check the activity log for details.', 'rosenheinrich-multisite-migrate');
+            return __('An unexpected error occurred.', 'rosenheinrich-multisite-migrate');
         }
-        $mapped = self::map($e->getMessage());
-        if ($mapped['action'] === '') {
-            return $mapped['message'];
-        }
-        return $mapped['message'] . ' ' . $mapped['action'];
+        // Message only — actions belong in UI CTAs / map(), not activity rows or job error_message.
+        return self::map($e->getMessage())['message'];
     }
 }

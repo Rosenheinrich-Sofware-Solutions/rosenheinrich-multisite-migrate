@@ -35,6 +35,8 @@ class Rmmigrate_File_Restorer
         $queue = $this->load_queue($restore, $files_root);
         $index = (int) ($restore['index'] ?? 0);
         $missing_count = (int) ($restore['missing_count'] ?? 0);
+        $skipped_count = (int) ($restore['skipped_count'] ?? 0);
+        $unchanged_count = (int) ($restore['unchanged_count'] ?? 0);
         $total = count($queue);
 
         $search_replace = null;
@@ -45,28 +47,53 @@ class Rmmigrate_File_Restorer
         $start = microtime(true);
         while ($index < $total && (microtime(true) - $start) < $budget_sec) {
             $item = $queue[$index];
-            $missing_count += $this->copy_item($item, $search_replace, $missing_count);
+            $result = $this->copy_item($item, $search_replace, $missing_count);
+            $missing_count += (int) ($result['missing'] ?? 0);
+            $skipped_count += (int) ($result['skipped'] ?? 0);
+            $unchanged_count += (int) ($result['unchanged'] ?? 0);
             $index++;
         }
 
         $patch = array(
-            'index'         => $index,
-            'missing_count' => $missing_count,
-            'queue_ready'   => true,
+            'index'           => $index,
+            'missing_count'   => $missing_count,
+            'skipped_count'   => $skipped_count,
+            'unchanged_count' => $unchanged_count,
+            'queue_ready'     => true,
         );
         if ($index >= $total) {
             $patch['done'] = true;
         }
         $this->job->update_progress(array('file_restore' => $patch));
 
-        if ($index >= $total && $missing_count > 0) {
-            Rmmigrate_Logger::log(
-                sprintf(
-                    /* translators: %d: number of missing files in backup archive. */
-                    __('File restore finished with %d missing file(s) in backup.', 'rosenheinrich-multisite-migrate'),
-                    $missing_count
-                )
-            );
+        if ($index >= $total && ($missing_count > 0 || $skipped_count > 0 || $unchanged_count > 0)) {
+            if ($unchanged_count > 0) {
+                Rmmigrate_Logger::log(
+                    sprintf(
+                        /* translators: %d: number of files already matching the backup on disk. */
+                        __('Skipped %d unchanged file(s) already present on disk.', 'rosenheinrich-multisite-migrate'),
+                        $unchanged_count
+                    )
+                );
+            }
+            if ($skipped_count > 0) {
+                Rmmigrate_Logger::log(
+                    sprintf(
+                        /* translators: %d: number of files that could not be copied during restore. */
+                        __('File restore finished with %d file(s) that could not be restored.', 'rosenheinrich-multisite-migrate'),
+                        $skipped_count
+                    )
+                );
+            }
+            if ($missing_count > 0) {
+                Rmmigrate_Logger::log(
+                    sprintf(
+                        /* translators: %d: number of missing files in backup archive. */
+                        __('File restore finished with %d missing file(s) in backup.', 'rosenheinrich-multisite-migrate'),
+                        $missing_count
+                    )
+                );
+            }
         }
 
         return $index >= $total;
@@ -255,10 +282,12 @@ class Rmmigrate_File_Restorer
 
     /**
      * @param array{src:string,dest:string,replace:bool} $item
-     * @return int 1 when file missing, else 0
+     * @return array{missing:int,skipped:int,unchanged:int}
      */
-    private function copy_item(array $item, ?Rmmigrate_Search_Replace $search_replace, int $missing_so_far): int
+    private function copy_item(array $item, ?Rmmigrate_Search_Replace $search_replace, int $missing_so_far): array
     {
+        $none = array('missing' => 0, 'skipped' => 0, 'unchanged' => 0);
+        $unchanged = array('missing' => 0, 'skipped' => 0, 'unchanged' => 1);
         $src = $item['src'];
         if (!Rmmigrate_Filesystem::exists($src)) {
             $missing = $missing_so_far + 1;
@@ -276,7 +305,7 @@ class Rmmigrate_File_Restorer
                     )
                 );
             }
-            return 1;
+            return array('missing' => 1, 'skipped' => 0, 'unchanged' => 0);
         }
 
         $dest = $item['dest'];
@@ -289,32 +318,51 @@ class Rmmigrate_File_Restorer
             if (!Rmmigrate_Filesystem::is_dir($dest)) {
                 wp_mkdir_p($dest);
             }
-            return 0;
+            return $none;
         }
 
         if ($search_replace !== null && !empty($item['replace'])) {
             $contents = Rmmigrate_Filesystem::get_contents($src);
             if ($contents !== false) {
-                Rmmigrate_Filesystem::put_contents($dest, $search_replace->apply($contents));
-                return 0;
+                $transformed = $search_replace->apply($contents);
+                if ($this->destination_matches_contents($dest, $transformed)) {
+                    return $unchanged;
+                }
+                Rmmigrate_Filesystem::put_contents($dest, $transformed);
+                return $none;
             }
         }
 
-        if (!Rmmigrate_Filesystem::copy($src, $dest)) {
-            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
-            throw Rmmigrate_Job_Exception::raise(
-                sanitize_key(Rmmigrate_Error_Codes::FILE_RESTORE_FAILED),
-                esc_html(
-                    sprintf(
-                        /* translators: %s: file name */
-                        __('Failed to restore file: %1$s', 'rosenheinrich-multisite-migrate'),
-                        basename($src)
-                    )
-                )
-            );
+        if (Rmmigrate_Filesystem::files_identical($src, $dest)) {
+            return $unchanged;
         }
 
-        return 0;
+        if (!Rmmigrate_Filesystem::copy($src, $dest)) {
+            if (Rmmigrate_Filesystem::files_identical($src, $dest)) {
+                return $unchanged;
+            }
+            Rmmigrate_Logger::log(
+                sprintf(
+                    /* translators: 1: file name, 2: destination path */
+                    __('Could not restore %1$s (%2$s); keeping the destination and continuing.', 'rosenheinrich-multisite-migrate'),
+                    basename($src),
+                    $dest
+                )
+            );
+            return array('missing' => 0, 'skipped' => 1, 'unchanged' => 0);
+        }
+
+        return $none;
+    }
+
+    private function destination_matches_contents(string $dest, string $contents): bool
+    {
+        if (!Rmmigrate_Filesystem::is_file($dest)) {
+            return false;
+        }
+
+        $existing = Rmmigrate_Filesystem::get_contents($dest);
+        return $existing !== false && $existing === $contents;
     }
 
     private function should_skip_wp_config_restore(): bool

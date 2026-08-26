@@ -47,6 +47,28 @@
     font-weight: 500;
 }
 
+.mm-restore-confirm-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4em;
+    padding: 0.35em 0.5em;
+    border-radius: 4px;
+    border: 1px solid transparent;
+    color: inherit;
+    line-height: 1.35;
+}
+
+.mm-restore-confirm-label input[type="checkbox"] {
+    margin: 0;
+    flex-shrink: 0;
+}
+
+.mm-restore-confirm-label--error {
+    color: #b32d2e;
+    border-color: #d63638;
+    background: #fcf0f1;
+}
+
 .mm-restore-step,
 .mm-create-step {
     display: none;

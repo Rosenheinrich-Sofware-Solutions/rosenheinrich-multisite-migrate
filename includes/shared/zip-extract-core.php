@@ -58,7 +58,7 @@ class Rmmigrate_Zip_Extract_Core
      * @param array<string,mixed> $progress
      * @return array{done:bool,progress:array<string,mixed>}
      */
-    public static function extract_slice( string $zip_path, string $extract_dir, array $progress, int $budget_sec, bool $only_sql = false, bool $throttle = false, string $password = '' ): array
+    public static function extract_slice( string $zip_path, string $extract_dir, array $progress, int $budget_sec, bool $only_sql = false, bool $throttle = false, string $password = '', int $stream_chunk_bytes = 0 ): array
     {
         if ( ! class_exists( 'ZipArchive' ) ) {
             self::raise_pipeline(
@@ -71,6 +71,7 @@ class Rmmigrate_Zip_Extract_Core
         }
 
         $progress = self::normalize_progress( $progress );
+        $chunk_bytes = $stream_chunk_bytes > 0 ? $stream_chunk_bytes : self::STREAM_CHUNK_BYTES;
 
         $zip = new ZipArchive();
         if ( $zip->open( $zip_path ) !== true ) {
@@ -132,13 +133,29 @@ class Rmmigrate_Zip_Extract_Core
             $size = is_array( $stat ) ? (int) ( $stat['size'] ?? 0 ) : 0;
 
             if ( $size >= self::LARGE_FILE_BYTES ) {
-                self::flush_batch( $zip, $extract_dir, $pending_batch, $zip_bytes_done, $throttle );
-                $pending_batch = array();
-                $pending_batch_bytes = 0;
+                if ( $pending_batch !== array() ) {
+                    if ( ( microtime( true ) - $start ) >= $budget_sec ) {
+                        $zip_index -= count( $pending_batch );
+                        $pending_batch = array();
+                        $pending_batch_bytes = 0;
+                        break;
+                    }
+                    self::flush_batch( $zip, $extract_dir, $pending_batch, $zip_bytes_done, $throttle );
+                    $pending_batch = array();
+                    $pending_batch_bytes = 0;
+                }
 
                 $dest_dir = dirname( $dest );
                 if ( ! is_dir( $dest_dir ) ) {
                     wp_mkdir_p( $dest_dir );
+                }
+
+                $resume_bytes = 0;
+                if ( (int) ( $progress['zip_entry_index'] ?? -1 ) === $zip_index
+                    && (int) ( $progress['zip_entry_bytes'] ?? 0 ) > 0
+                    && self::filesystem_exists( $dest )
+                    && (int) self::filesystem_filesize( $dest ) === (int) $progress['zip_entry_bytes'] ) {
+                    $resume_bytes = (int) $progress['zip_entry_bytes'];
                 }
 
                 $src_stream = $zip->getStream( $name );
@@ -148,17 +165,15 @@ class Rmmigrate_Zip_Extract_Core
                     continue;
                 }
 
-                $complete = self::stream_to_file( $src_stream, $dest, $budget_sec, $start );
+                $complete = self::stream_to_file( $src_stream, $dest, $budget_sec, $start, $chunk_bytes, $resume_bytes );
                 $fclose = 'fclose';
                 call_user_func( $fclose, $src_stream );
 
                 if ( ! $complete ) {
-                    if ( self::filesystem_exists( $dest ) ) {
-                        $zip_entry_bytes = (int) self::filesystem_filesize( $dest );
-                        self::filesystem_delete( $dest );
-                    } else {
-                        $zip_entry_bytes = 0;
-                    }
+                    // Keep partial file so the next slice can resume (skip already-written bytes).
+                    $zip_entry_bytes = self::filesystem_exists( $dest )
+                        ? (int) self::filesystem_filesize( $dest )
+                        : 0;
                     break;
                 }
 
@@ -176,13 +191,25 @@ class Rmmigrate_Zip_Extract_Core
             $zip_index++;
 
             if ( count( $pending_batch ) >= self::BATCH_FILE_LIMIT || $pending_batch_bytes >= self::BATCH_BYTE_LIMIT ) {
+                if ( ( microtime( true ) - $start ) >= $budget_sec ) {
+                    $zip_index -= count( $pending_batch );
+                    $pending_batch = array();
+                    $pending_batch_bytes = 0;
+                    break;
+                }
                 self::flush_batch( $zip, $extract_dir, $pending_batch, $zip_bytes_done, $throttle );
                 $pending_batch = array();
                 $pending_batch_bytes = 0;
             }
         }
 
-        self::flush_batch( $zip, $extract_dir, $pending_batch, $zip_bytes_done, $throttle );
+        if ( $pending_batch !== array() ) {
+            if ( ( microtime( true ) - $start ) >= $budget_sec ) {
+                $zip_index -= count( $pending_batch );
+            } else {
+                self::flush_batch( $zip, $extract_dir, $pending_batch, $zip_bytes_done, $throttle );
+            }
+        }
 
         $zip->close();
 
@@ -249,16 +276,35 @@ class Rmmigrate_Zip_Extract_Core
     /**
      * @param resource $src_stream
      */
-    private static function stream_to_file( $src_stream, string $dest, int $budget_sec, float $start ): bool
+    private static function stream_to_file( $src_stream, string $dest, int $budget_sec, float $start, int $chunk_bytes = 0, int $resume_bytes = 0 ): bool
     {
-        $dest_stream = self::filesystem_open( $dest, 'wb' );
+        $mode = $resume_bytes > 0 ? 'ab' : 'wb';
+        $dest_stream = self::filesystem_open( $dest, $mode );
         if ( $dest_stream === false ) {
+            return false;
+        }
+
+        $chunk_size = $chunk_bytes > 0 ? $chunk_bytes : self::STREAM_CHUNK_BYTES;
+
+        $skipped = 0;
+        while ( $skipped < $resume_bytes && ! feof( $src_stream ) ) {
+            $need = min( $chunk_size, $resume_bytes - $skipped );
+            // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fread -- ZipArchive internal stream, not filesystem path.
+            $chunk = fread( $src_stream, $need );
+            if ( $chunk === false || $chunk === '' ) {
+                $dest_stream->close();
+                return false;
+            }
+            $skipped += strlen( $chunk );
+        }
+        if ( $skipped < $resume_bytes ) {
+            $dest_stream->close();
             return false;
         }
 
         while ( ! feof( $src_stream ) && ( microtime( true ) - $start ) < $budget_sec ) {
             // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fread -- ZipArchive internal stream, not filesystem path.
-            $chunk = fread( $src_stream, self::STREAM_CHUNK_BYTES );
+            $chunk = fread( $src_stream, $chunk_size );
             if ( $chunk === false ) {
                 $dest_stream->close();
                 return false;

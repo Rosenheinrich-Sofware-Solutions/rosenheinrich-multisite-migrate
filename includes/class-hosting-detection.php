@@ -238,6 +238,10 @@ class Rmmigrate_Hosting_Detection
         if ($max_exec < 15) {
             return max(5, $max_exec - 3);
         }
+        // Low ceilings (e.g. Laragon 20s): reserve bootstrap/shutdown headroom.
+        if ($max_exec < 25) {
+            return min(15, max(5, $max_exec - 8));
+        }
         return min(15, max(5, $max_exec - 5));
     }
 
@@ -306,13 +310,14 @@ class Rmmigrate_Hosting_Detection
                     __('Cron worker scheduled for job #%d.', 'rosenheinrich-multisite-migrate'),
                     $job_id
                 ),
-                'backup',
+                ($job !== null && $job->is_restore()) ? 'restore' : 'backup',
                 'info',
                 array(
                     'kickoff_mode'  => 'cron',
                     'delay_seconds' => $delay_seconds,
                 ),
-                120
+                120,
+                false
             );
         }
     }

@@ -279,6 +279,18 @@
             var $text = options.$text;
             var pollTimer = null;
 
+            function resolveProgressMessage(data) {
+                var msg = (data && data.message) ? data.message : '';
+                if (!data || data.job_type !== 'restore' || !rmmigrateAdmin.restoreStepLabels) {
+                    return msg;
+                }
+                var step = data.progress_step || '';
+                if (step && rmmigrateAdmin.restoreStepLabels[step]) {
+                    return rmmigrateAdmin.restoreStepLabels[step];
+                }
+                return msg;
+            }
+
             function update(percent, message) {
                 if ($fill && $fill.length) {
                     $fill.css('width', percent + '%');
@@ -303,7 +315,7 @@
                     }
                     var d = res.data;
                     var pct = d.percent || 0;
-                    update(pct, d.message || '');
+                    update(pct, resolveProgressMessage(d));
 
                     if (d.active) {
                         var kickoff = rmmigrateAdmin.kickoffMode || 'auto';
@@ -347,13 +359,7 @@
                                 ? (rmmigrateAdminUI.i18n('jobCancelled', 'Cancelled'))
                                 : (rmmigrateAdminUI.i18n('jobFailed', 'Failed'));
                         }
-                        var $panel = $('#mm-job-inline-error');
-                        if (!$panel.length) {
-                            $panel = $('<div id="mm-job-inline-error" class="notice notice-error inline mm-job-inline-error"><p class="mm-job-inline-error__text"></p></div>');
-                            $('#mm-active-job-banner, .mm-restore-progress-text').first().before($panel);
-                        }
-                        $panel.find('.mm-job-inline-error__text').text(d.error);
-                        $panel.removeClass('mm-hidden');
+                        // One sticky toast only — callers must not toast again in onError.
                         rmmigrateAdminUI.toast(d.error, 'error');
                         if (typeof options.onError === 'function') {
                             options.onError(d);

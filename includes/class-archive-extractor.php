@@ -190,6 +190,8 @@ class Rmmigrate_Archive_Extractor
         $entries = (int) ($extract['entry_count'] ?? 0);
         $partial = (isset($extract['partial']) && is_array($extract['partial'])) ? $extract['partial'] : null;
         $done = false;
+        $timeouts = (int) ($progress['php_execution_timeouts'] ?? 0);
+        $had_partial_at_start = $partial !== null;
 
         // Always run at least one pass: a tiny budget (or a loaded host) can be
         // exhausted during open/seek above, which would otherwise return without
@@ -284,9 +286,13 @@ class Rmmigrate_Archive_Extractor
                 }
             }
 
-            $first_block = true;
             while ($bytes_done < $uncomp_len) {
-                if (!$first_block && (microtime(true) - $start) >= $budget_sec) {
+                // Yield before every block (including the first). After soft PHP
+                // timeouts, keep 2s headroom once some extract progress exists.
+                $headroom = ($timeouts > 0 && ($had_partial_at_start || $bytes_done > 0 || $entries > 0))
+                    ? 2.0
+                    : 0.0;
+                if ((microtime(true) - $start) + $headroom >= $budget_sec) {
                     if ($out_fh !== null) {
                         $out_fh->close();
                     }
@@ -352,10 +358,19 @@ class Rmmigrate_Archive_Extractor
                         // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
                         throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::DAF_CORRUPT), esc_html__('DAF archive block is corrupt.', 'rosenheinrich-multisite-migrate'));
                     }
-                    $out_fh->write($out);
+                    // After soft timeouts, write in smaller appends to reduce LOCK_EX stalls.
+                    $write_chunk = $timeouts > 0 ? 524288 : strlen($out);
+                    $out_len = strlen($out);
+                    for ($off = 0; $off < $out_len; $off += $write_chunk) {
+                        if ($out_fh->write(substr($out, $off, $write_chunk)) === false) {
+                            $out_fh->close();
+                            $fh->close();
+                            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+                            throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::EXTRACT_FAILED), esc_html__('Cannot write extracted file.', 'rosenheinrich-multisite-migrate'));
+                        }
+                    }
                 }
                 $bytes_done += $block_uncomp;
-                $first_block = false;
             }
 
             if ($out_fh !== null) {

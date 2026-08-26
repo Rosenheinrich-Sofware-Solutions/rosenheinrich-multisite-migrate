@@ -14,7 +14,9 @@ $rmmigrate_titles = array(
 );
 $rmmigrate_title = $rmmigrate_titles[$rmmigrate_job_type] ?? __('Job in progress', 'rosenheinrich-multisite-migrate');
 $rmmigrate_pct = max(0, min(100, (int) $rmmigrate_active_job->get_percent()));
-$rmmigrate_msg = (string) $rmmigrate_active_job->get_progress_message();
+$rmmigrate_msg = $rmmigrate_job_type === Rmmigrate_Job::JOB_TYPE_RESTORE
+    ? (string) Rmmigrate_Restore_Runner::admin_progress_label($rmmigrate_active_job)
+    : (string) $rmmigrate_active_job->get_progress_message();
 if ($rmmigrate_msg === '') {
 	$rmmigrate_msg = $rmmigrate_pct . '%';
 } elseif ($rmmigrate_pct > 0 && $rmmigrate_pct < 100) {

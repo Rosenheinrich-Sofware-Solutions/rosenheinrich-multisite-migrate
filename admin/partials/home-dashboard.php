@@ -54,6 +54,8 @@ if (is_multisite()) {
 
 <?php include RMMIGRATE_PATH . 'admin/partials/components/verify-restore-banner.php'; ?>
 
+<?php include RMMIGRATE_PATH . 'admin/partials/components/restore-success-banner.php'; ?>
+
 <?php include RMMIGRATE_PATH . 'admin/partials/backup-create-panel.php'; ?>
 
 <div id="mm-create-host">

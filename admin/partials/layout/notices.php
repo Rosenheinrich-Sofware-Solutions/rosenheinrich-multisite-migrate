@@ -4,18 +4,6 @@ if (!defined('ABSPATH')) {
 }
 
 if (!empty($rmmigrate_last_error['message'])) {
-    $rmmigrate_failed_query = array('filter' => 'failed');
-    if (!empty($rmmigrate_last_error['job_id'])) {
-        $rmmigrate_failed_query['job_id'] = (int) $rmmigrate_last_error['job_id'];
-    }
-    $rmmigrate_failed_page = !empty($rmmigrate_subsite_mode)
-        ? 'multisite-migrate-subsite'
-        : 'multisite-migrate-archives';
-    $rmmigrate_failed_url = Rmmigrate_Admin_Router::admin_url(
-        $rmmigrate_failed_page,
-        $rmmigrate_failed_query,
-        !empty($rmmigrate_is_network)
-    );
     $rmmigrate_activity_url = Rmmigrate_Admin_Router::admin_url(
         'multisite-migrate-activity',
         array(),
@@ -30,41 +18,48 @@ if (!empty($rmmigrate_last_error['message'])) {
     } elseif ($rmmigrate_error_job_type === 'import') {
         $rmmigrate_error_context = 'import_fail';
     }
-    $rmmigrate_error_message = (string) $rmmigrate_last_error['message'];
-    if (function_exists('mb_substr')) {
-        $rmmigrate_error_message = (string) mb_substr($rmmigrate_error_message, 0, 500);
-    } else {
-        $rmmigrate_error_message = substr($rmmigrate_error_message, 0, 500);
-    }
+    $rmmigrate_error_message = Rmmigrate_User_Error_Messages::for_admin_banner($rmmigrate_last_error);
     $rmmigrate_health_url = Rmmigrate_Admin_Router::admin_url(
         'multisite-migrate-health',
         array(),
         !empty($rmmigrate_is_network)
     );
+    $rmmigrate_error_job_id = (int) ($rmmigrate_last_error['job_id'] ?? 0);
+    $rmmigrate_banner_title   = sprintf(
+        /* translators: %d: job ID. */
+        __('Last job #%d did not finish', 'rosenheinrich-multisite-migrate'),
+        $rmmigrate_error_job_id
+    );
+    if ($rmmigrate_error_job_type === 'restore') {
+        $rmmigrate_banner_title = sprintf(
+            /* translators: %d: job ID. */
+            __('Last restore #%d did not finish', 'rosenheinrich-multisite-migrate'),
+            $rmmigrate_error_job_id
+        );
+    } elseif ($rmmigrate_error_job_type === 'backup') {
+        $rmmigrate_banner_title = sprintf(
+            /* translators: %d: job ID. */
+            __('Last backup #%d did not finish', 'rosenheinrich-multisite-migrate'),
+            $rmmigrate_error_job_id
+        );
+    } elseif ($rmmigrate_error_job_type === 'import') {
+        $rmmigrate_banner_title = sprintf(
+            /* translators: %d: job ID. */
+            __('Last import #%d did not finish', 'rosenheinrich-multisite-migrate'),
+            $rmmigrate_error_job_id
+        );
+    }
     $rmmigrate_banner = array(
         'variant' => 'error',
         'class'   => 'mm-last-error-notice',
-        'title'   => sprintf(
-            /* translators: %d: job ID. */
-            __('Last job #%d did not finish', 'rosenheinrich-multisite-migrate'),
-            (int) ($rmmigrate_last_error['job_id'] ?? 0)
-        ),
-        'text'    => sprintf(
-            /* translators: %s: error message from the failed job. */
-            __('Partial or timed-out jobs leave unusable archives. %s Fix hosting checks, then retry or resume from Activity.', 'rosenheinrich-multisite-migrate'),
-            $rmmigrate_error_message
-        ),
+        'title'   => $rmmigrate_banner_title,
+        'text'    => $rmmigrate_error_message,
         'actions' => array(
             array(
                 'type'    => 'link',
                 'label'   => __('Check hosting', 'rosenheinrich-multisite-migrate'),
                 'url'     => $rmmigrate_health_url,
                 'primary' => true,
-            ),
-            array(
-                'type'  => 'link',
-                'label' => __('View failed jobs', 'rosenheinrich-multisite-migrate'),
-                'url'   => $rmmigrate_failed_url,
             ),
             array(
                 'type'  => 'link',

@@ -318,6 +318,10 @@ class Rmmigrate_Job
             'source'    => array('zip_path' => $zip_path, 'source_job_id' => $source_job_id),
             'log_token' => Rmmigrate_Activity_Log::generate_log_token(),
         );
+        $safety_job_id = (int) ($options['safety_job_id'] ?? 0);
+        if ($safety_job_id > 0) {
+            $progress_data['safety_job_id'] = $safety_job_id;
+        }
         if (!empty($options['archive_passphrase'])) {
             $progress_data['archive_passphrase'] = (string) $options['archive_passphrase'];
         }
@@ -367,14 +371,18 @@ class Rmmigrate_Job
             $mode
         );
         Rmmigrate_Logger::log_job($job->get_id(), $message);
+        $activity_context = array(
+            'source_job_id' => $source_job_id,
+            'restore_mode'  => $mode,
+            'restore_type'  => $restore_type,
+            'triggered_by'  => 'manual',
+        );
+        if ($safety_job_id > 0) {
+            $activity_context['safety_job_id'] = $safety_job_id;
+        }
         Rmmigrate_Activity_Log::record('restore', $message, 'info', array(
             'job_id'  => $job->get_id(),
-            'context' => array(
-                'source_job_id' => $source_job_id,
-                'restore_mode'  => $mode,
-                'restore_type'  => $restore_type,
-                'triggered_by'  => 'manual',
-            ),
+            'context' => $activity_context,
         ));
 
         return $job;
@@ -529,6 +537,29 @@ class Rmmigrate_Job
         }
 
         return $active;
+    }
+
+    /**
+     * Completed restore highlighted by ?mm_restore_ok=1&job_id= after success redirect.
+     */
+    public static function resolve_admin_restore_success_job(bool $is_network, int $highlight_job_id): ?self
+    {
+        unset($is_network);
+        if (Rmmigrate_Request_Input::get_text('mm_restore_ok') !== '1' || $highlight_job_id <= 0) {
+            return null;
+        }
+
+        $job = self::get($highlight_job_id);
+        if (
+            $job === null
+            || !$job->is_restore()
+            || $job->get_status() !== self::STATUS_COMPLETE
+            || !Rmmigrate_Access::can_view_job($job)
+        ) {
+            return null;
+        }
+
+        return $job;
     }
 
     /**
@@ -928,7 +959,7 @@ class Rmmigrate_Job
                 }
             }
         }
-        if (($status === self::STATUS_ERROR || $status === self::STATUS_COMPLETE) && $error !== null) {
+        if (($status === self::STATUS_ERROR || ($status === self::STATUS_COMPLETE && !$this->is_restore())) && $error !== null) {
             update_site_option('rmmigrate_last_error', $this->build_last_error_payload($error));
         }
         $updated = $wpdb->update(self::table_name(), $fields, array('id' => $this->get_id()), $formats, array('%d'));
@@ -948,6 +979,12 @@ class Rmmigrate_Job
                     $level = 'warning';
                 }
                 $triggered_by = (string) ($this->data['triggered_by'] ?? 'manual');
+                $activity_context = array('triggered_by' => $triggered_by);
+                $progress = $this->get_progress();
+                $safety_job_id = (int) ($progress['safety_job_id'] ?? 0);
+                if ($type === 'restore' && $safety_job_id > 0) {
+                    $activity_context['safety_job_id'] = $safety_job_id;
+                }
                 Rmmigrate_Activity_Log::record(
                     $type,
                     $status === self::STATUS_COMPLETE
@@ -975,10 +1012,9 @@ class Rmmigrate_Job
                     $level,
                     array(
                         'job_id'  => $this->get_id(),
-                        'context' => array('triggered_by' => $triggered_by),
+                        'context' => $activity_context,
                     )
                 );
-                $progress = $this->get_progress();
                 if ($type === 'backup' && !empty($progress['scheduled'])) {
                     if ($status === self::STATUS_COMPLETE && $error === null) {
                         Rmmigrate_Scheduler::reset_schedule_failures();

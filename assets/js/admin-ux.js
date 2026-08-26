@@ -131,6 +131,25 @@
         try {
             var url = new URL(window.location.href);
             url.searchParams.delete('mm_verify');
+            url.searchParams.delete('mm_restore_ok');
+            url.searchParams.delete('job_id');
+            window.location.href = url.pathname + url.search + url.hash;
+        } catch (err) {
+            window.location.reload();
+        }
+    });
+
+    $(document).on('click', '.mm-dismiss-restore-success', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        var $btn = $(this);
+        if ($btn.prop('disabled')) {
+            return;
+        }
+        $btn.prop('disabled', true);
+        try {
+            var url = new URL(window.location.href);
+            url.searchParams.delete('mm_restore_ok');
             url.searchParams.delete('job_id');
             window.location.href = url.pathname + url.search + url.hash;
         } catch (err) {

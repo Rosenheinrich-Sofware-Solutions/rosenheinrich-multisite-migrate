@@ -1690,7 +1690,9 @@
 
 .mm-premium-table.mm-activity-table td.column-date,
 .mm-premium-table.mm-activity-table td.column-message {
-    overflow-wrap: anywhere;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 

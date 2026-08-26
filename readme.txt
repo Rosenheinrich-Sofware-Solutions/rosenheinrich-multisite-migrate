@@ -4,7 +4,7 @@ Tags: backup, migration, wordpress-backup, restore, multisite
 Requires at least: 6.9
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.1.8
+Stable tag: 1.1.9
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -133,6 +133,27 @@ Help translate the plugin UI and wordpress.org readme on [translate.wordpress.or
 
 Browse the Free plugin source and open issues on [GitHub](https://github.com/Rosenheinrich-Sofware-Solutions/rosenheinrich-multisite-migrate?utm_source=wprepo&utm_medium=readme&utm_campaign=multisite_migrate_free&utm_content=github_source). Installs and updates remain on WordPress.org.
 
+== External Services ==
+
+The free plugin does not phone home by default. It may contact external services only when you opt in or submit something explicitly.
+
+= Rosenheinrich portal (multisitemigrate.rosenheinrich.com) =
+
+* **Usage telemetry (opt-in):** setup wizard or Settings → Privacy. Sends a pseudonymous install ID, site hash (not your URL), plugin/WordPress/PHP versions, wizard progress, and sanitized backup/import/restore outcomes — never backup files or database content.
+* **Product emails (opt-in):** setup wizard only. Sends your admin email, name, site URL, site title, and version info to subscribe you to product updates.
+* **Feedback (explicit submit):** in-plugin feedback or deactivate survey. Sends your message, rating/reason, versions, and site hash; optional contact email on deactivate only.
+
+Privacy Policy: https://multisitemigrate.rosenheinrich.com/privacy-policy/
+Terms (Plus/Pro only; free plugin is GPLv2): https://multisitemigrate.rosenheinrich.com/terms-of-service/
+
+= GitHub (optional) =
+
+If you install the MCP Adapter from AI Agents, the plugin fetches the latest release from api.github.com (WordPress/mcp-adapter). Admin action only.
+
+= Pro only (not used by Free) =
+
+License validation and Google Drive OAuth use the same portal; see the Privacy Policy.
+
 == Installation ==
 
 1. Upload the plugin to `/wp-content/plugins/` or install it from Plugins → Add New.
@@ -214,6 +235,13 @@ No. Backup, restore, and local migration are driven from the WordPress admin UI.
 Backup and restore run as background-style chunked jobs. They are designed not to hold a single request open for the entire archive build. See [shared hosting guidance](https://multisitemigrate.rosenheinrich.com/features/shared-hosting/?utm_source=wprepo&utm_medium=link&utm_content=shared_hosting&utm_campaign=multisite_migrate_free).
 
 == Changelog ==
+
+= 1.1.9 =
+* More reliable chunked restore and backup on hosts with short PHP time limits (including Laragon-style 20s ceilings).
+* Encrypted archives decrypt across worker slices instead of one long request.
+* Soft PHP timeouts leave restore jobs resumable; activity logs show restore step and offsets instead of an unknown DB phase.
+* Archive writes avoid exclusive file locks that can hang under antivirus on local Windows stacks.
+* If a file cannot be overwritten during restore (for example locked by the web server), keep the live file and continue instead of failing the whole job.
 
 = 1.1.8 =
 * Bug fixes.
@@ -300,6 +328,9 @@ Backup and restore run as background-style chunked jobs. They are designed not t
 * Initial public release of the free edition: multisite-aware backups, restore, local import/export, search & replace, AES-256 encryption and a health dashboard.
 
 == Upgrade Notice ==
+
+= 1.1.9 =
+More reliable restore workers on short PHP time limits; sliced decrypt, clearer timeout logs, and continue when `.htaccess` cannot be overwritten. Recommended update.
 
 = 1.1.8 =
 Bug fixes. Recommended update.

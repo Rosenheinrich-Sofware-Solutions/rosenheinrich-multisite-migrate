@@ -223,6 +223,7 @@ class Rmmigrate_Activity_Log
         }
 
         $upload_to_job = array();
+        $safety_to_restore = array();
         foreach ($entries as $entry) {
             $job_id = (int) ($entry['job_id'] ?? 0);
             $context = is_array($entry['context'] ?? null) ? $entry['context'] : array();
@@ -230,6 +231,11 @@ class Rmmigrate_Activity_Log
 
             if ($upload_id !== '' && $job_id > 0) {
                 $upload_to_job[$upload_id] = $job_id;
+            }
+
+            $safety_job_id = (int) ($context['safety_job_id'] ?? 0);
+            if ($safety_job_id > 0 && $job_id > 0) {
+                $safety_to_restore[$safety_job_id] = $job_id;
             }
         }
 
@@ -255,6 +261,13 @@ class Rmmigrate_Activity_Log
             if ($job_id <= 0 && preg_match('/job\s*#(\d+)/i', $message, $m)) {
                 $job_id = (int) $m[1];
                 $entry['job_id'] = $job_id;
+            }
+
+            // Fold pre-restore safety snapshot activity into the restore job row.
+            if ($job_id > 0 && isset($safety_to_restore[$job_id])) {
+                $job_id = (int) $safety_to_restore[$job_id];
+                $entry['job_id'] = $job_id;
+                $entry['type'] = 'restore';
             }
 
             $group_key = null;
@@ -319,14 +332,43 @@ class Rmmigrate_Activity_Log
 
         $type_priority = array('import' => 10, 'backup' => 9, 'restore' => 8, 'staging' => 7, 'cloud' => 6, 'cleanup' => 5);
         $best_type = (string) ($best['type'] ?? '');
+        $job_id = (int) ($best['job_id'] ?? 0);
+        $job_type_locked = false;
+        if ($job_id <= 0) {
+            foreach ($group as $entry) {
+                $candidate = (int) ($entry['job_id'] ?? 0);
+                if ($candidate > 0) {
+                    $job_id = $candidate;
+                    break;
+                }
+            }
+        }
+        if ($job_id > 0) {
+            $job = Rmmigrate_Job::get($job_id);
+            if ($job !== null) {
+                $best_type = $job->get_job_type() === Rmmigrate_Job::JOB_TYPE_RESTORE ? 'restore' : 'backup';
+                $job_type_locked = true;
+            }
+        }
+        if (!$job_type_locked) {
+            foreach ($group as $entry) {
+                if (strtolower((string) ($entry['type'] ?? '')) === 'restore') {
+                    $best_type = 'restore';
+                    $job_type_locked = true;
+                    break;
+                }
+            }
+        }
         $best_priority = $type_priority[strtolower($best_type)] ?? (strtolower($best_type) === 'system' ? 0 : 1);
 
-        foreach ($group as $entry) {
-            $t = strtolower((string) ($entry['type'] ?? ''));
-            $p = $type_priority[$t] ?? ($t === 'system' ? 0 : 1);
-            if ($p > $best_priority) {
-                $best_type = $t;
-                $best_priority = $p;
+        if (!$job_type_locked) {
+            foreach ($group as $entry) {
+                $t = strtolower((string) ($entry['type'] ?? ''));
+                $p = $type_priority[$t] ?? ($t === 'system' ? 0 : 1);
+                if ($p > $best_priority) {
+                    $best_type = $t;
+                    $best_priority = $p;
+                }
             }
         }
         if ($best_type !== '') {

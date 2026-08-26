@@ -63,7 +63,8 @@ final class Rmmigrate_Filesystem_Stream
         }
 
         if ($this->truncate_pending && $this->position === 0) {
-            if (file_put_contents($this->path, $data, LOCK_EX) === false) {
+            // No LOCK_EX: workers are single-writer per path; exclusive locks hang under AV/NFS and can blow max_execution_time.
+            if (file_put_contents($this->path, $data) === false) {
                 return false;
             }
             $this->truncate_pending = false;
@@ -72,7 +73,7 @@ final class Rmmigrate_Filesystem_Stream
         }
 
         if (strpos($this->mode, 'a') !== false) {
-            if (file_put_contents($this->path, $data, FILE_APPEND | LOCK_EX) === false) {
+            if (file_put_contents($this->path, $data, FILE_APPEND) === false) {
                 return false;
             }
             $this->position += $len;
@@ -81,27 +82,23 @@ final class Rmmigrate_Filesystem_Stream
 
         // Mid-file write: use native fopen/fseek/fwrite to avoid loading the
         // entire file into memory (OOM risk on large SQL dumps).
+        // No flock: single-writer workers; blocking LOCK_EX hangs under AV (Laragon)
+        // and can exceed PHP max_execution_time mid-extract.
         // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen -- Plugin: centralized filesystem gateway.
         $fh = @fopen($this->path, 'c+b');
         if ($fh === false) {
             return false;
         }
-        if (flock($fh, LOCK_EX)) {
-            fseek($fh, $this->position);
-            // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fwrite -- Plugin: centralized filesystem gateway.
-            $written = fwrite($fh, $data);
-            flock($fh, LOCK_UN);
-            // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Plugin: centralized filesystem gateway.
-            fclose($fh);
-            if ($written === false) {
-                return false;
-            }
-            $this->position += $len;
-            return $len;
-        }
+        fseek($fh, $this->position);
+        // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fwrite -- Plugin: centralized filesystem gateway.
+        $written = fwrite($fh, $data);
         // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Plugin: centralized filesystem gateway.
         fclose($fh);
-        return false;
+        if ($written === false) {
+            return false;
+        }
+        $this->position += $len;
+        return $len;
     }
 
     public function close(): bool
@@ -264,6 +261,24 @@ class Rmmigrate_Filesystem
         return is_string($hash) ? $hash : '';
     }
 
+    public static function files_identical(string $source, string $destination): bool
+    {
+        if (!self::is_file($source) || !self::is_file($destination)) {
+            return false;
+        }
+
+        $size = self::filesize($source);
+        if ($size !== self::filesize($destination)) {
+            return false;
+        }
+        if ($size === 0) {
+            return true;
+        }
+
+        $source_hash = self::file_md5($source);
+        return $source_hash !== '' && $source_hash === self::file_md5($destination);
+    }
+
     public static function delete(string $path): bool
     {
         $fs = self::fs();
@@ -378,15 +393,27 @@ class Rmmigrate_Filesystem
 
     public static function copy(string $source, string $destination): bool
     {
-        $fs = self::fs();
-        if ($fs !== null) {
-            return (bool) $fs->copy($source, $destination, true, FS_CHMOD_FILE);
-        }
-        $contents = self::get_contents($source);
-        if ($contents === false) {
+        try {
+            $fs = self::fs();
+            if ($fs !== null && $fs->copy($source, $destination, true, FS_CHMOD_FILE)) {
+                return true;
+            }
+            // Small-file fallback: WP_Filesystem::copy can fail on root dotfiles
+            // (.htaccess) under some hosts / AV while get/put still works. Cap size
+            // so multi-GB archives never load into memory here.
+            $size = @filesize($source);
+            if ($size === false || $size < 0 || $size > 2 * 1024 * 1024) {
+                return false;
+            }
+            $contents = self::get_contents($source);
+            if ($contents === false) {
+                return false;
+            }
+            return self::put_contents($destination, $contents) !== false;
+        } catch (\Throwable $e) {
+            unset($e);
             return false;
         }
-        return self::put_contents($destination, $contents) !== false;
     }
 
     /**

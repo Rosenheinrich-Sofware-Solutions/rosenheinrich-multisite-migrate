@@ -443,12 +443,18 @@ class Rmmigrate_Admin_Assets
                 'srMoreOverflow'      => __('… +%d more', 'rosenheinrich-multisite-migrate'),
             ),
         );
+        $localize['restoreStepLabels'] = Rmmigrate_Restore_Runner::restore_step_labels();
         if ($active_job !== null) {
             $localize['activeJob'] = array(
                 'id'      => $active_job->get_id(),
                 'type'    => $active_job->get_job_type(),
                 'percent' => (int) $active_job->get_percent(),
-                'message' => (string) $active_job->get_progress_message(),
+                'message' => $active_job->is_restore()
+                    ? (string) Rmmigrate_Restore_Runner::admin_progress_label($active_job)
+                    : (string) $active_job->get_progress_message(),
+                'progress_step' => $active_job->is_restore()
+                    ? Rmmigrate_Restore_Runner::get_status_step($active_job)
+                    : '',
             );
         }
 

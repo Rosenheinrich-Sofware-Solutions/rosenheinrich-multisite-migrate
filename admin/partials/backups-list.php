@@ -39,9 +39,11 @@ $rmmigrate_list_page_slug = $rmmigrate_current_page ?? 'multisite-migrate-archiv
 
 
 
-<?php include RMMIGRATE_PATH . 'admin/partials/components/active-job-banner.php'; ?>
+<?php include RMMIGRATE_PATH . 'admin/partials/components/restore-success-banner.php'; ?>
 
 <?php include RMMIGRATE_PATH . 'admin/partials/components/verify-restore-banner.php'; ?>
+
+<?php include RMMIGRATE_PATH . 'admin/partials/components/active-job-banner.php'; ?>
 
 <?php include RMMIGRATE_PATH . 'admin/partials/backup-create-panel.php'; ?>
 
@@ -114,7 +116,7 @@ $rmmigrate_list_page_slug = $rmmigrate_current_page ?? 'multisite-migrate-archiv
                 /* translators: 1: job ID, 2: error message. */
                 __('Latest error (job #%1$d): %2$s', 'rosenheinrich-multisite-migrate'),
                 (int) ($rmmigrate_last_error['job_id'] ?? 0),
-                $rmmigrate_last_error['message']
+                Rmmigrate_User_Error_Messages::for_admin_banner($rmmigrate_last_error)
             );
             $rmmigrate_empty_actions = '<a href="' . esc_url(Rmmigrate_Admin_Router::admin_url('multisite-migrate-activity', array(), $rmmigrate_is_network)) . '">' . esc_html__('View activity log', 'rosenheinrich-multisite-migrate') . '</a>';
         } else {

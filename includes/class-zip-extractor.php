@@ -38,6 +38,8 @@ class Rmmigrate_Zip_Extractor
             $only_sql = $this->job->get_restore_mode() === Rmmigrate_Job::RESTORE_MODE_DB;
         }
 
+        $stream_chunk = ((int) ($progress['php_execution_timeouts'] ?? 0) > 0) ? 524288 : 0;
+
         $result = Rmmigrate_Zip_Extract_Core::extract_slice(
             $zip_path,
             $extract_dir,
@@ -45,7 +47,8 @@ class Rmmigrate_Zip_Extractor
             $budget_sec,
             $only_sql,
             $throttle,
-            $password
+            $password,
+            $stream_chunk
         );
 
         $this->job->update_progress(array('extract' => $result['progress']));

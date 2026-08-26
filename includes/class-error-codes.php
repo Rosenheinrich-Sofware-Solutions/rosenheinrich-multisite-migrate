@@ -65,6 +65,16 @@ final class Rmmigrate_Error_Codes
         return self::from_message($e->getMessage());
     }
 
+    /**
+     * True when PHP fatal text is a max_execution_time kill (soft-resumable mid-slice).
+     */
+    public static function is_php_execution_timeout(string $message): bool
+    {
+        $lower = strtolower(wp_strip_all_tags($message));
+        return strpos($lower, 'maximum execution time') !== false
+            || strpos($lower, 'max_execution_time') !== false;
+    }
+
     public static function from_wp_error(WP_Error $error): string
     {
         $code = sanitize_key($error->get_error_code());
@@ -92,7 +102,9 @@ final class Rmmigrate_Error_Codes
             || strpos($lower, 'failed to register import') !== false) {
             return self::JOB_CREATE_FAILED;
         }
-        if (strpos($lower, 'backup build exceeded maximum time limit') !== false) {
+        if (strpos($lower, 'backup build exceeded maximum time limit') !== false
+            || self::is_php_execution_timeout($message)
+            || strpos($lower, 'hit php max_execution_time') !== false) {
             return self::TIME_LIMIT;
         }
         if (strpos($lower, 'insufficient disk space') !== false || strpos($lower, 'disk space') !== false) {
@@ -165,7 +177,10 @@ final class Rmmigrate_Error_Codes
             return self::EXTRACT_FAILED;
         }
         if (strpos($lower, 'cannot write extracted file') !== false
-            || strpos($lower, 'cannot restore file') !== false) {
+            || strpos($lower, 'cannot restore file') !== false
+            || strpos($lower, 'failed to restore file') !== false
+            || strpos($lower, 'too many missing files') !== false
+            || strpos($lower, 'datei konnte nicht wiederhergestellt') !== false) {
             return self::FILE_RESTORE_FAILED;
         }
         if (strpos($lower, 'could not create backup working directory') !== false

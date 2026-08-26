@@ -166,7 +166,7 @@ final class Rmmigrate_Backup_Service
         }
         Rmmigrate_Job_Preflight::assert_can_view_job($job);
         $active = $job->get_status() >= 0 && $job->get_status() < 100;
-        return array(
+        $payload = array(
             'active'      => $active,
             'is_stale'    => $active && Rmmigrate_Job::is_stale($job),
             'lease_fresh' => Rmmigrate_Runner::lease_is_fresh($job->get_id()),
@@ -174,9 +174,16 @@ final class Rmmigrate_Backup_Service
             'job_type'    => $job->get_job_type(),
             'status'      => $job->get_status(),
             'percent'     => $job->get_percent(),
-            'message'     => $job->get_progress_message(),
+            'message'     => $job->is_restore()
+                ? Rmmigrate_Restore_Runner::admin_progress_label($job)
+                : $job->get_progress_message(),
             'error'       => $job->data['error_message'] ?? '',
         );
+        if ($job->is_restore()) {
+            $payload['progress_step'] = Rmmigrate_Restore_Runner::get_status_step($job);
+        }
+
+        return $payload;
     }
 
     public static function cancel(int $job_id): void

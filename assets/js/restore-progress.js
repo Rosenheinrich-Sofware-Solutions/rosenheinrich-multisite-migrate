@@ -12,12 +12,32 @@
     function reloadWithoutJobId() {
         try {
             var url = new URL(window.location.href);
+            url.searchParams.delete('mm_restore_ok');
+            url.searchParams.delete('mm_verify');
             if (url.searchParams.has('job_id')) {
                 url.searchParams.delete('job_id');
                 window.location.href = url.pathname + url.search + url.hash;
             } else {
                 window.location.reload();
             }
+        } catch (e) {
+            window.location.reload();
+        }
+    }
+
+    function reloadAfterRestoreSuccess(jobId) {
+        try {
+            var url = new URL(window.location.href);
+            url.searchParams.delete('create');
+            url.searchParams.delete('mm_verify');
+            if (jobId) {
+                url.searchParams.set('job_id', String(jobId));
+                url.searchParams.set('mm_restore_ok', '1');
+            } else {
+                url.searchParams.delete('job_id');
+                url.searchParams.delete('mm_restore_ok');
+            }
+            window.location.href = url.pathname + url.search + url.hash;
         } catch (e) {
             window.location.reload();
         }
@@ -202,8 +222,15 @@
                 restoreFocusReturn.focus();
             }
         }
+        $('#mm-restore-confirm').closest('.mm-restore-confirm-label').removeClass('mm-restore-confirm-label--error');
         $('#mm-restore-dialog').hide().addClass('mm-hidden');
     }
+
+    $(document).on('change', '#mm-restore-confirm', function () {
+        if ($(this).is(':checked')) {
+            $(this).closest('.mm-restore-confirm-label').removeClass('mm-restore-confirm-label--error');
+        }
+    });
 
     function showProgressPanel(mode) {
         progressMode = mode || 'restore';
@@ -267,7 +294,7 @@
                 });
             },
             onError: function (d) {
-                rmmigrateAdminUI.toast(d.error || t('safetySnapshotFailed', 'Safety snapshot failed'), 'error');
+                // pollJob already showed one error toast.
             }
         });
     }
@@ -441,10 +468,14 @@
     });
 
     $('#mm-restore-start').on('click', function () {
-        if (!$('#mm-restore-confirm').is(':checked')) {
-            rmmigrateAdminUI.toast(t('confirmOverwrite', 'Please confirm you understand data will be overwritten.'), 'error');
+        var $confirm = $('#mm-restore-confirm');
+        var $label = $confirm.closest('.mm-restore-confirm-label');
+        if (!$confirm.is(':checked')) {
+            $label.addClass('mm-restore-confirm-label--error');
+            $confirm.trigger('focus');
             return;
         }
+        $label.removeClass('mm-restore-confirm-label--error');
         var jobId = $('#mm-restore-source-id').val();
         var data = {
             action: 'rmmigrate_start_restore',
@@ -496,29 +527,26 @@
             $fill: progressFill(),
             $text: progressText(),
             onComplete: function () {
-                var msg = t('restoreComplete', 'Restore complete');
-                if (activityUrl) {
-                    msg += ' — ' + t('viewActivityDetails', 'view Activity Log for details');
-                }
-                progressText().text(t('progressCompleteLabel', '100% — %s').replace('%s', msg));
-                rmmigrateAdminUI.toast(msg, 'success');
-                $('#mm-active-job-banner, #mm-restore-progress').addClass('mm-finished-job').css('position', 'relative');
-                if ($('#mm-active-job-banner').length) {
-                    showActiveJobDismiss();
+                hideRestoreCancelActions();
+                $('#mm-active-job-banner, #mm-restore-progress').hide();
+                var successJobId = jobId;
+                var go = function () { reloadAfterRestoreSuccess(successJobId); };
+                if (window.rmmigrateFeedback && typeof window.rmmigrateFeedback.maybePrompt === 'function') {
+                    window.rmmigrateFeedback.maybePrompt({
+                        context: 'restore_success',
+                        jobType: 'restore',
+                        onDone: go,
+                        holdMs: 2000
+                    });
                 } else {
-                    hideRestoreCancelActions();
+                    setTimeout(go, 2000);
                 }
-                var go = function () { reloadWithoutJobId(); };
-                setTimeout(go, 2000);
             },
             onError: function (d) {
-                rmmigrateAdminUI.toast(d.error || t('jobFailed', 'Job failed'), 'error');
+                // pollJob already showed one error toast.
+                $('#mm-active-job-title').text(t('restoreFailed', 'Restore failed'));
                 $('#mm-active-job-banner, #mm-restore-progress').addClass('mm-finished-job').css('position', 'relative');
-                if ($('#mm-active-job-banner').length) {
-                    showActiveJobDismiss();
-                } else {
-                    hideRestoreCancelActions();
-                }
+                hideRestoreCancelActions();
                 progressText().css('color', '#d63638');
                 progressFill().css('background-color', '#d63638');
             }
@@ -526,6 +554,14 @@
     }
 
     function resumeActiveJob() {
+        try {
+            var params = new URLSearchParams(window.location.search);
+            if (params.get('mm_restore_ok') === '1') {
+                return;
+            }
+        } catch (e) {
+            // ignore
+        }
         if (!rmmigrateAdmin.activeJob || !rmmigrateAdmin.activeJob.id) {
             return;
         }

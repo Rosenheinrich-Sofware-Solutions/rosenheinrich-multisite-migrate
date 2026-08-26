@@ -221,6 +221,7 @@ final class Rmmigrate_Restore_Service
             'migration_map'      => $migration_map,
             'archive_passphrase' => $archive_passphrase,
             'topology'           => $topology,
+            'safety_job_id'      => $safety_id,
         ));
 
         $kick = !empty($params['kick_worker']);

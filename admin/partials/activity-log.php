@@ -152,7 +152,25 @@ $rmmigrate_reset_url = Rmmigrate_Admin_Router::admin_url(
                                 <?php echo esc_html(Rmmigrate_Activity_Log::status_label($rmmigrate_entry_status)); ?>
                             </span>
                         </td>
-                        <td class="column-message mm-activity-message" data-label="<?php echo esc_attr(__('Message', 'rosenheinrich-multisite-migrate')); ?>"><?php echo esc_html($rmmigrate_entry['message'] ?? ''); ?></td>
+                        <td class="column-message mm-activity-message" data-label="<?php echo esc_attr(__('Message', 'rosenheinrich-multisite-migrate')); ?>" title="<?php echo esc_attr((string) ($rmmigrate_entry['message'] ?? '')); ?>">
+                            <?php echo esc_html($rmmigrate_entry['message'] ?? ''); ?>
+                            <?php
+                            $rmmigrate_bundled_count = (int) ($rmmigrate_entry['bundled_count'] ?? 0);
+                            if ($rmmigrate_bundled_count > 1) :
+                                ?>
+                                <span class="mm-activity-bundled-hint">
+                                    <?php
+                                    echo esc_html(
+                                        sprintf(
+                                            /* translators: %d: number of process events bundled into this row */
+                                            __('(%d events — open Details)', 'rosenheinrich-multisite-migrate'),
+                                            $rmmigrate_bundled_count
+                                        )
+                                    );
+                                    ?>
+                                </span>
+                            <?php endif; ?>
+                        </td>
                         <td class="column-actions mm-row-actions" data-label="<?php echo esc_attr(__('Actions', 'rosenheinrich-multisite-migrate')); ?>">
                             <button type="button" class="button button-small button-primary mm-btn-teal mm-activity-detail-btn" data-entry-id="<?php echo esc_attr($rmmigrate_entry_id); ?>" data-job-id="<?php echo esc_attr((string) $rmmigrate_entry_job_id); ?>" data-title="<?php echo esc_attr($rmmigrate_detail_title); ?>"><?php esc_html_e('Details', 'rosenheinrich-multisite-migrate'); ?></button>
                         </td>
