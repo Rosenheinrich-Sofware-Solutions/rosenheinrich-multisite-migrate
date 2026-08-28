@@ -9,6 +9,7 @@ class Rmmigrate_Network_Admin
     public static function register(): void
     {
         add_action('network_admin_menu', array(__CLASS__, 'menu'));
+        add_action('admin_enqueue_scripts', array(__CLASS__, 'assets'));
         add_action('network_admin_enqueue_scripts', array(__CLASS__, 'assets'));
     }
 
@@ -32,6 +33,9 @@ class Rmmigrate_Network_Admin
 
     public static function assets(string $hook): void
     {
+        if (!is_network_admin()) {
+            return;
+        }
         Rmmigrate_Admin_Assets::enqueue($hook, true);
     }
 }
