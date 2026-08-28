@@ -132,7 +132,7 @@ $rmmigrate_list_page_slug = $rmmigrate_current_page ?? 'multisite-migrate-archiv
         $rmmigrate_empty_message = __('No backups yet. Create your first backup to protect this site.', 'rosenheinrich-multisite-migrate');
         if ($rmmigrate_filter === 'all' && Rmmigrate_Setup_Wizard::can_run() && !Rmmigrate_Setup_Wizard::is_finished()) {
             $rmmigrate_empty_actions = '<a class="button button-primary mm-btn-teal" href="' . esc_url($rmmigrate_setup_url) . '">' . esc_html__('Start setup wizard', 'rosenheinrich-multisite-migrate') . '</a>';
-        } elseif ($rmmigrate_filter === 'all' && (!$rmmigrate_show_archives_hero || !$rmmigrate_can_backup_create)) {
+        } elseif ($rmmigrate_filter === 'all' && $rmmigrate_can_backup_create && !$rmmigrate_show_archives_hero) {
             $rmmigrate_empty_actions = '<button type="button" class="button button-primary mm-btn-teal" id="mm-toggle-create-empty">' . esc_html__('Backup now', 'rosenheinrich-multisite-migrate') . '</button>';
         }
     }
@@ -151,9 +151,9 @@ $rmmigrate_list_page_slug = $rmmigrate_current_page ?? 'multisite-migrate-archiv
         <tr>
 
             <?php if ($rmmigrate_can_delete_backups) : ?>
-            <td class="manage-column column-cb check-column">
+            <th scope="col" class="manage-column column-cb check-column">
                 <input type="checkbox" id="mm-select-all-backups" aria-label="<?php esc_attr_e('Select all deletable backups', 'rosenheinrich-multisite-migrate'); ?>">
-            </td>
+            </th>
             <?php endif; ?>
 
                     <th class="column-date"><?php
@@ -329,7 +329,7 @@ $rmmigrate_list_page_slug = $rmmigrate_current_page ?? 'multisite-migrate-archiv
                                     <a href="#mm-active-job-banner" class="mm-view-job-progress" data-job-id="<?php echo esc_attr((string) $rmmigrate_job->get_id()); ?>" data-job-type="<?php echo esc_attr($rmmigrate_job->get_job_type()); ?>"><?php esc_html_e('View progress', 'rosenheinrich-multisite-migrate'); ?></a>
                                 </span>
                             <?php endif; ?>
-                            <?php if (!$rmmigrate_is_active) : ?>
+                            <?php if (!$rmmigrate_is_active && $rmmigrate_can_delete_backups) : ?>
                                 <span class="mm-action-item mm-action-danger">
                                     <button type="button" class="button-link mm-delete-backup" data-job-id="<?php echo esc_attr($rmmigrate_job->get_id()); ?>"><?php esc_html_e('Delete', 'rosenheinrich-multisite-migrate'); ?></button>
                                 </span>

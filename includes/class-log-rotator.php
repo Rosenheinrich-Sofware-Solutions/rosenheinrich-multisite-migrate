@@ -6,6 +6,8 @@ if (!defined('ABSPATH')) {
 
 class Rmmigrate_Log_Rotator
 {
+    /** Upper bound when discovering numbered log generations (independent of current rotation limit). */
+    private const MAX_GENERATION_SCAN = 999;
     /**
      * Rotate if file exceeds max_bytes; keep at most max_files generations.
      */
@@ -86,7 +88,6 @@ class Rmmigrate_Log_Rotator
         }
 
         $dir = trailingslashit($dir);
-        $max_files = Rmmigrate_Engine_Config::log_max_rotated_files();
         $out = array();
 
         $base = $dir . $basename;
@@ -94,11 +95,19 @@ class Rmmigrate_Log_Rotator
             $out[] = $base;
         }
 
-        for ($i = 1; $i < $max_files; $i++) {
-            $path = $dir . $parts['stem'] . '.' . $i . $parts['ext'];
-            if (Rmmigrate_Filesystem::exists($path)) {
-                $out[] = $path;
+        $rotated = glob($dir . $parts['stem'] . '.*' . $parts['ext']) ?: array();
+        $indexed = array();
+        foreach ($rotated as $path) {
+            if (preg_match('/\.(\d+)' . preg_quote($parts['ext'], '/') . '$/', basename($path), $m)
+                && (int) $m[1] >= 1
+                && (int) $m[1] <= self::MAX_GENERATION_SCAN
+            ) {
+                $indexed[(int) $m[1]] = $path;
             }
+        }
+        ksort($indexed);
+        foreach ($indexed as $path) {
+            $out[] = $path;
         }
 
         return $out;
@@ -131,8 +140,7 @@ class Rmmigrate_Log_Rotator
             glob($dir . 'system-*.log') ?: array(),
             glob($dir . 'system-*.*.log') ?: array(),
             glob($dir . 'system.log') ?: array(),
-            glob($dir . 'system.[0-9].log') ?: array(),
-            glob($dir . 'system.[0-9][0-9].log') ?: array()
+            glob($dir . 'system.*.log') ?: array()
         );
         $out = array();
         foreach (array_unique($candidates) as $path) {

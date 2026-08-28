@@ -20,7 +20,6 @@ final class Rmmigrate_Restore_Service
     }
 
     /**
-     * @param array<string,mixed> $params
      * @return array<string,mixed>
      */
     public static function prefetch_archive(int $job_id): array
@@ -69,7 +68,7 @@ final class Rmmigrate_Restore_Service
             'manifest'              => self::redact_manifest_for_admin($manifest),
             'manifest_incomplete'   => $manifest_incomplete,
             'install_type_mismatch' => !$manifest_incomplete && self::install_type_mismatch($manifest),
-            'is_encrypted'          => substr($archive_path, -5) === Rmmigrate_Archive_Encryption::EXT,
+            'is_encrypted'          => substr($archive_path, -strlen(Rmmigrate_Archive_Encryption::EXT)) === Rmmigrate_Archive_Encryption::EXT,
         );
     }
 
@@ -79,7 +78,7 @@ final class Rmmigrate_Restore_Service
      */
     private static function redact_manifest_for_admin(array $manifest): array
     {
-        foreach (array(
+        static $secret_keys = array(
             'db_password',
             'db_pass',
             'installer_passcode',
@@ -87,8 +86,15 @@ final class Rmmigrate_Restore_Service
             'archive_passphrase',
             'encryption_key',
             'manifest_signature',
-        ) as $key) {
-            unset($manifest[$key]);
+        );
+        foreach ($manifest as $key => $value) {
+            if (in_array((string) $key, $secret_keys, true)) {
+                unset($manifest[$key]);
+                continue;
+            }
+            if (is_array($value)) {
+                $manifest[$key] = self::redact_manifest_for_admin($value);
+            }
         }
 
         return $manifest;
@@ -108,6 +114,151 @@ final class Rmmigrate_Restore_Service
             'pairs' => $pairs,
             'count' => count($pairs),
         );
+    }
+
+    /**
+     * @param array{target_index?:int,last_id?:int,updated_so_far?:int} $resume
+     * @return array{updated:int,complete:bool,resume:?array{target_index:int,last_id:int,updated_so_far:int},message:string}
+     */
+    public static function migration_search_replace(string $old_url, string $new_url, array $resume = array()): array
+    {
+        if ($old_url === '') {
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Structured service exception payload.
+            throw new Rmmigrate_Service_Exception(esc_html(__('Enter an old URL.', 'rosenheinrich-multisite-migrate')));
+        }
+        if ($new_url === '') {
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Structured service exception payload.
+            throw new Rmmigrate_Service_Exception(esc_html(__('Enter a new URL.', 'rosenheinrich-multisite-migrate')));
+        }
+
+        $map = array(
+            'site_url' => array('old' => $old_url, 'new' => $new_url),
+            'home_url' => array('old' => $old_url, 'new' => $new_url),
+        );
+        $engine = new Rmmigrate_Search_Replace($map);
+        $targets = self::migration_search_replace_targets();
+        $updated = 0;
+        $updated_so_far = max(0, (int) ($resume['updated_so_far'] ?? 0));
+        $target_index = max(0, (int) ($resume['target_index'] ?? 0));
+        $last_id = max(0, (int) ($resume['last_id'] ?? 0));
+        $start = microtime(true);
+        $rows_scanned = 0;
+        $batch_size = 200;
+        $time_budget_sec = 20;
+        $row_budget = 1000;
+
+        global $wpdb;
+        while ($target_index < count($targets)) {
+            if ($rows_scanned >= $row_budget || (microtime(true) - $start) >= $time_budget_sec) {
+                break;
+            }
+            $target = $targets[$target_index];
+            $table = $target['table'];
+            $id_col = $target['id_col'];
+            $quoted = Rmmigrate_Snap_DB::quote_identifier($table);
+            $id_quoted = Rmmigrate_Snap_DB::quote_identifier($id_col);
+            $col_quoted = array_map(array(Rmmigrate_Snap_DB::class, 'quote_identifier'), $target['columns']);
+            $select_cols = array_unique(array_merge(array($id_quoted), $col_quoted));
+            $sql = 'SELECT ' . implode(', ', $select_cols) . ' FROM ' . $quoted
+                . ' WHERE ' . $id_quoted . ' > ' . (int) $last_id
+                . ' ORDER BY ' . $id_quoted . ' ASC LIMIT ' . (int) $batch_size;
+            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.NotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- Batch read; identifiers quoted; LIMIT ints.
+            $rows = $wpdb->get_results($sql, ARRAY_A);
+            if ($wpdb->last_error !== '') {
+                // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Structured service exception payload.
+                throw new Rmmigrate_Service_Exception(
+                    esc_html(__('Search & Replace failed while reading the database.', 'rosenheinrich-multisite-migrate')),
+                    array('phase' => 'search_replace'),
+                    sanitize_key(Rmmigrate_Error_Codes::VALIDATION)
+                );
+            }
+            if (empty($rows)) {
+                $target_index++;
+                $last_id = 0;
+                continue;
+            }
+            foreach ($rows as $row) {
+                if ($rows_scanned >= $row_budget || (microtime(true) - $start) >= $time_budget_sec) {
+                    break 2;
+                }
+                $rows_scanned++;
+                $id = $row[$id_col] ?? null;
+                if ($id === null) {
+                    continue;
+                }
+                $last_id = max($last_id, (int) $id);
+                $fields = array();
+                foreach ($target['columns'] as $column) {
+                    if (!array_key_exists($column, $row) || !is_string($row[$column]) || $row[$column] === '') {
+                        continue;
+                    }
+                    $replaced = $engine->apply($row[$column]);
+                    if ($replaced !== $row[$column]) {
+                        $fields[$column] = $replaced;
+                    }
+                }
+                if ($fields !== array()) {
+                    // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Confirmed repair write on validated table/columns.
+                    $written = $wpdb->update($table, $fields, array($id_col => $id));
+                    if ($written !== false) {
+                        $updated++;
+                    }
+                }
+            }
+            if (count($rows) < $batch_size) {
+                $target_index++;
+                $last_id = 0;
+            }
+        }
+
+        $complete = $target_index >= count($targets);
+        $updated_total = $updated_so_far + $updated;
+        $result = array(
+            'updated'  => $updated_total,
+            'complete' => $complete,
+            'resume'   => $complete ? null : array(
+                'target_index'  => $target_index,
+                'last_id'       => $last_id,
+                'updated_so_far'=> $updated_total,
+            ),
+            'message'  => $complete
+                ? sprintf(
+                    /* translators: %d: rows updated */
+                    __('Updated %d row(s).', 'rosenheinrich-multisite-migrate'),
+                    $updated_total
+                )
+                : __('Search & Replace in progress…', 'rosenheinrich-multisite-migrate'),
+        );
+
+        return $result;
+    }
+
+    /**
+     * @return array<int,array{table:string,columns:string[],id_col:string}>
+     */
+    private static function migration_search_replace_targets(): array
+    {
+        global $wpdb;
+        $prefix = (string) $wpdb->prefix;
+        $candidates = array(
+            array('table' => $prefix . 'options', 'columns' => array('option_value'), 'id_col' => 'option_id'),
+            array('table' => $prefix . 'posts', 'columns' => array('post_content', 'post_excerpt', 'guid'), 'id_col' => 'ID'),
+            array('table' => $prefix . 'postmeta', 'columns' => array('meta_value'), 'id_col' => 'meta_id'),
+            array('table' => $prefix . 'comments', 'columns' => array('comment_content', 'comment_author_url'), 'id_col' => 'comment_ID'),
+            array('table' => $prefix . 'usermeta', 'columns' => array('meta_value'), 'id_col' => 'umeta_id'),
+        );
+
+        $out = array();
+        foreach ($candidates as $candidate) {
+            $like = $wpdb->esc_like($candidate['table']);
+            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Existence probe.
+            $found = $wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $like));
+            if ($found === $candidate['table']) {
+                $out[] = $candidate;
+            }
+        }
+
+        return $out;
     }
 
     /**
@@ -190,7 +341,14 @@ final class Rmmigrate_Restore_Service
             : true;
         if ($use_safety_snapshot && $safety_id <= 0) {
             $safety_id = Rmmigrate_Safety_Snapshot::create_before_restore($source, $mode);
-            if ($safety_id > 0 && !Rmmigrate_Safety_Snapshot::is_complete($safety_id)) {
+            if ($safety_id <= 0) {
+                // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Structured service exception payload.
+                throw new Rmmigrate_Service_Exception(
+                    esc_html(__('Safety snapshot could not be created. Restore was cancelled.', 'rosenheinrich-multisite-migrate')),
+                    array('phase' => 'restore'),
+                    sanitize_key(Rmmigrate_Error_Codes::FILE_RESTORE_FAILED)
+                );
+            } elseif (!Rmmigrate_Safety_Snapshot::is_complete($safety_id)) {
                 return array(
                     'awaiting_safety'      => true,
                     'waiting_for_snapshot' => true,
@@ -270,10 +428,10 @@ final class Rmmigrate_Restore_Service
                 }
                 $map['blogs'][] = array(
                     'blog_id'    => (int) ($entry['blog_id'] ?? 0),
-                    'old_domain' => sanitize_text_field($entry['old_domain'] ?? ''),
-                    'new_domain' => sanitize_text_field($entry['new_domain'] ?? ''),
-                    'old_path'   => sanitize_text_field($entry['old_path'] ?? '/'),
-                    'new_path'   => sanitize_text_field($entry['new_path'] ?? '/'),
+                    'old_domain' => self::sanitize_blog_map_field($entry['old_domain'] ?? ''),
+                    'new_domain' => self::sanitize_blog_map_field($entry['new_domain'] ?? ''),
+                    'old_path'   => self::sanitize_blog_map_field($entry['old_path'] ?? '/', '/'),
+                    'new_path'   => self::sanitize_blog_map_field($entry['new_path'] ?? '/', '/'),
                 );
             }
         }
@@ -386,6 +544,15 @@ final class Rmmigrate_Restore_Service
                 array(), sanitize_key(Rmmigrate_Error_Codes::SOURCE_NOT_FOUND));
         }
         return $job;
+    }
+
+    private static function sanitize_blog_map_field($value, string $default = ''): string
+    {
+        if (!is_scalar($value)) {
+            return $default;
+        }
+
+        return sanitize_text_field((string) $value);
     }
 
     private static function require_complete_job(int $job_id): Rmmigrate_Job

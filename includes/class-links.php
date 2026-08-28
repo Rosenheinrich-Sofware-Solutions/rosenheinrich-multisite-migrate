@@ -75,10 +75,8 @@ class Rmmigrate_Links
         );
     }
 
-    public static function review_url(string $placement = 'review_nudge'): string
+    public static function review_url(): string
     {
-        unset($placement);
-
         return Rmmigrate_Review_Nudge::review_url();
     }
 }

@@ -39,10 +39,13 @@ final class Rmmigrate_OAuth_Bearer_Auth
             return $result;
         }
 
+        // Only fail closed for MM-shaped opaque access tokens (64 hex chars).
+        if (!preg_match('/^[a-f0-9]{64}$/i', $token)) {
+            return $result;
+        }
+
         $row = Rmmigrate_OAuth_Store::find_token($token, 'access');
         if ($row === null) {
-            // Opaque Bearer that is not a known MM access token must fail closed.
-            // JWT-shaped tokens already returned above so other plugins keep working.
             return new WP_Error(
                 'rmmigrate_oauth_invalid_token',
                 __('Invalid OAuth access token.', 'rosenheinrich-multisite-migrate'),
@@ -66,20 +69,25 @@ final class Rmmigrate_OAuth_Bearer_Auth
         return true;
     }
 
+    private static function sanitize_authorization_header(string $header): string
+    {
+        return trim((string) wp_unslash($header));
+    }
+
     private static function get_authorization_header(): string
     {
         if (isset($_SERVER['HTTP_AUTHORIZATION'])) {
-            return sanitize_text_field(wp_unslash($_SERVER['HTTP_AUTHORIZATION']));
+            return self::sanitize_authorization_header(sanitize_text_field(wp_unslash($_SERVER['HTTP_AUTHORIZATION'])));
         }
         if (isset($_SERVER['REDIRECT_HTTP_AUTHORIZATION'])) {
-            return sanitize_text_field(wp_unslash($_SERVER['REDIRECT_HTTP_AUTHORIZATION']));
+            return self::sanitize_authorization_header(sanitize_text_field(wp_unslash($_SERVER['REDIRECT_HTTP_AUTHORIZATION'])));
         }
         if (function_exists('getallheaders')) {
             $headers = getallheaders();
             if (is_array($headers)) {
                 foreach ($headers as $key => $value) {
                     if (strtolower((string) $key) === 'authorization') {
-                        return (string) $value;
+                        return self::sanitize_authorization_header((string) $value);
                     }
                 }
             }

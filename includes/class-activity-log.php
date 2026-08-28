@@ -9,6 +9,12 @@ class Rmmigrate_Activity_Log
     /** @deprecated Use max_entries() */
     const MAX_ENTRIES = 2000;
 
+    /** @var array<int,Rmmigrate_Job|null> */
+    private static $job_request_cache = array();
+
+    /** @var array<string,bool> */
+    private static $job_visibility_request_cache = array();
+
     public static function max_entries(): int
     {
         return Rmmigrate_Engine_Config::activity_max_entries();
@@ -56,13 +62,52 @@ class Rmmigrate_Activity_Log
         );
         $entry['entry_id'] = self::make_entry_id($entry);
 
-        if (self::is_duplicate_terminal($entry)) {
-            return;
+        $line = wp_json_encode($entry) . "\n";
+        $written = self::with_activity_lock(static function () use ($entry, $line): void {
+            if (self::is_duplicate_terminal($entry)) {
+                return;
+            }
+            Rmmigrate_Filesystem::put_contents(self::path(), $line, FILE_APPEND);
+            self::trim_file();
+        });
+        if (!$written) {
+            Rmmigrate_Logger::log_system(
+                'Activity entry dropped: could not acquire activity log lock.',
+                array('type' => $type, 'status' => $status),
+                'warning'
+            );
+        }
+    }
+
+    /**
+     * @param callable():void $callback
+     */
+    private static function with_activity_lock(callable $callback, int $max_attempts = 5): bool
+    {
+        $path = self::path();
+        $lock_path = $path . '.lock';
+        for ($attempt = 0; $attempt < $max_attempts; $attempt++) {
+            $lock = Rmmigrate_Filesystem::open_lock($lock_path, 'c+');
+            if ($lock === false) {
+                usleep(50000 * ($attempt + 1));
+                continue;
+            }
+            if (!Rmmigrate_Filesystem::try_exclusive_lock($lock)) {
+                Rmmigrate_Filesystem::fclose_raw($lock);
+                usleep(50000 * ($attempt + 1));
+                continue;
+            }
+
+            try {
+                $callback();
+                return true;
+            } finally {
+                Rmmigrate_Filesystem::release_lock($lock);
+                Rmmigrate_Filesystem::fclose_raw($lock);
+            }
         }
 
-        $line = wp_json_encode($entry) . "\n";
-        Rmmigrate_Filesystem::put_contents(self::path(), $line, FILE_APPEND | LOCK_EX);
-        self::trim_file();
+        return false;
     }
 
     /**
@@ -121,12 +166,13 @@ class Rmmigrate_Activity_Log
         int $page = 1,
         string $type_filter = '',
         string $date_from = '',
-        string $date_to = ''
+        string $date_to = '',
+        int $job_id = 0
     ): array {
         $per_page = max(1, $per_page);
         $page = max(1, $page);
 
-        $collected = self::collect_filtered_entries($type_filter, $date_from, $date_to);
+        $collected = self::collect_filtered_entries($type_filter, $date_from, $date_to, $job_id);
         $bundled = self::bundle_entries_for_display($collected['entries']);
         $total = count($bundled);
         $total_pages = $total > 0 ? (int) ceil($total / $per_page) : 1;
@@ -151,7 +197,8 @@ class Rmmigrate_Activity_Log
     private static function collect_filtered_entries(
         string $type_filter = '',
         string $date_from = '',
-        string $date_to = ''
+        string $date_to = '',
+        int $job_id = 0
     ): array {
         $scan_budget = Rmmigrate_Engine_Config::activity_scan_budget();
         $files = Rmmigrate_Log_Rotator::list_generations(self::logs_dir(), 'activity.jsonl');
@@ -182,6 +229,9 @@ class Rmmigrate_Activity_Log
                     $decoded['entry_id'] = self::make_entry_id($decoded);
                 }
                 if ($type_filter !== '' && ($decoded['type'] ?? '') !== $type_filter) {
+                    continue;
+                }
+                if ($job_id > 0 && (int) ($decoded['job_id'] ?? 0) !== $job_id) {
                     continue;
                 }
                 if ($from_ts !== null || $to_ts !== null) {
@@ -344,7 +394,7 @@ class Rmmigrate_Activity_Log
             }
         }
         if ($job_id > 0) {
-            $job = Rmmigrate_Job::get($job_id);
+            $job = self::get_request_cached_job($job_id);
             if ($job !== null) {
                 $best_type = $job->get_job_type() === Rmmigrate_Job::JOB_TYPE_RESTORE ? 'restore' : 'backup';
                 $job_type_locked = true;
@@ -565,7 +615,7 @@ class Rmmigrate_Activity_Log
         return null;
     }
 
-    public static function tail_job_log(int $job_id, int $lines = 30, ?string $around_time = null): string
+    public static function tail_job_log(int $job_id, int $lines = 30): string
     {
         if ($job_id <= 0) {
             return '';
@@ -581,6 +631,20 @@ class Rmmigrate_Activity_Log
     {
         $chunk = self::read_file_chunk($path, $max_lines, 0);
         return $chunk['lines'];
+    }
+
+    public static function count_display_lines(string $lines): int
+    {
+        if ($lines === '') {
+            return 0;
+        }
+
+        $count = substr_count($lines, "\n");
+        if (substr($lines, -1) !== "\n") {
+            $count++;
+        }
+
+        return $count;
     }
 
     /**
@@ -616,8 +680,12 @@ class Rmmigrate_Activity_Log
             $older_file = self::next_older_log_generation($path);
         } elseif (!$has_older_in_file && $offset_from_end + $lines >= $available && $available > 0) {
             $older_file = self::next_older_log_generation($path);
-            if ($older_file === '' && $total_lines > 0 && ($offset_from_end + $lines) < $total_lines) {
-                $has_older_in_file = true;
+            if ($older_file === '') {
+                if ($total_lines > 0 && ($offset_from_end + $lines) < $total_lines) {
+                    $has_older_in_file = true;
+                } elseif ($total_lines < 0 && $available >= $need && $start_index === 0) {
+                    $has_older_in_file = true;
+                }
             }
         }
 
@@ -745,19 +813,42 @@ class Rmmigrate_Activity_Log
         if (!Rmmigrate_Filesystem::exists($path)) {
             return;
         }
-        $content = Rmmigrate_Filesystem::get_contents($path);
+        // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen -- Exclusive lock required across read/rewrite.
+        $fh = @fopen($path, 'c+');
+        if ($fh === false) {
+            return;
+        }
+        if (!flock($fh, LOCK_EX)) {
+            // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Plugin: centralized filesystem gateway.
+            fclose($fh);
+            return;
+        }
+        // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_stream_get_contents -- Locked read for trim.
+        $content = stream_get_contents($fh);
         if ($content === false || $content === '') {
+            flock($fh, LOCK_UN);
+            // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Plugin: centralized filesystem gateway.
+            fclose($fh);
             return;
         }
         $max = self::max_entries();
         $lines = explode("\n", str_replace("\r", '', $content));
         $lines = array_filter(array_map('trim', $lines), 'strlen');
         if (count($lines) <= $max) {
+            flock($fh, LOCK_UN);
+            // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Plugin: centralized filesystem gateway.
+            fclose($fh);
             Rmmigrate_Log_Rotator::maintain_activity_log();
             return;
         }
         $keep = array_slice($lines, -$max);
-        Rmmigrate_Filesystem::put_contents($path, implode("\n", $keep) . "\n");
+        ftruncate($fh, 0);
+        rewind($fh);
+        // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fwrite -- Plugin: centralized filesystem gateway.
+        fwrite($fh, implode("\n", $keep) . "\n");
+        flock($fh, LOCK_UN);
+        // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Plugin: centralized filesystem gateway.
+        fclose($fh);
         Rmmigrate_Log_Rotator::maintain_activity_log();
     }
 
@@ -1082,40 +1173,51 @@ class Rmmigrate_Activity_Log
             return;
         }
 
-        $path = self::path();
-        if (!Rmmigrate_Filesystem::exists($path)) {
-            return;
-        }
+        if (!self::with_activity_lock(static function () use ($job_id): void {
+            foreach (Rmmigrate_Log_Rotator::glob_activity_log_files(self::logs_dir()) as $path) {
+                if (!Rmmigrate_Filesystem::exists($path)) {
+                    continue;
+                }
 
-        $content = Rmmigrate_Filesystem::get_contents($path);
-        if ($content === false || $content === '') {
-            return;
-        }
+                $content = Rmmigrate_Filesystem::get_contents($path);
+                if ($content === false || $content === '') {
+                    continue;
+                }
 
-        $lines = explode("\n", str_replace("\r", '', $content));
-        $kept = array();
-        foreach ($lines as $line) {
-            $line = trim($line);
-            if ($line === '') {
-                continue;
+                $lines = explode("\n", str_replace("\r", '', $content));
+                $kept = array();
+                foreach ($lines as $line) {
+                    $line = trim($line);
+                    if ($line === '') {
+                        continue;
+                    }
+                    $decoded = json_decode($line, true);
+                    if (!is_array($decoded)) {
+                        $kept[] = $line;
+                        continue;
+                    }
+                    if ((int) ($decoded['job_id'] ?? 0) === $job_id) {
+                        continue;
+                    }
+                    $kept[] = $line;
+                }
+
+                if ($kept === array()) {
+                    Rmmigrate_Filesystem::delete($path);
+                    continue;
+                }
+
+                Rmmigrate_Filesystem::put_contents($path, implode("\n", $kept) . "\n");
             }
-            $decoded = json_decode($line, true);
-            if (!is_array($decoded)) {
-                $kept[] = $line;
-                continue;
-            }
-            if ((int) ($decoded['job_id'] ?? 0) === $job_id) {
-                continue;
-            }
-            $kept[] = $line;
+        })) {
+            Rmmigrate_Logger::log(
+                sprintf(
+                    /* translators: %d: job ID */
+                    __('Could not acquire activity log lock to delete entries for job #%d.', 'rosenheinrich-multisite-migrate'),
+                    $job_id
+                )
+            );
         }
-
-        if ($kept === array()) {
-            Rmmigrate_Filesystem::delete($path);
-            return;
-        }
-
-        Rmmigrate_Filesystem::put_contents($path, implode("\n", $kept) . "\n");
     }
 
     public static function log_view_url(string $log_name, bool $is_network): string
@@ -1156,17 +1258,50 @@ class Rmmigrate_Activity_Log
             return self::current_user_is_activity_admin();
         }
 
+        return self::resolve_job_visibility($job_id);
+    }
+
+    private static function job_visibility_cache_key(int $job_id): string
+    {
+        return (string) get_current_blog_id() . ':' . (string) get_current_user_id() . ':' . (string) $job_id;
+    }
+
+    private static function get_request_cached_job(int $job_id): ?Rmmigrate_Job
+    {
+        if ($job_id <= 0) {
+            return null;
+        }
+
+        if (!array_key_exists($job_id, self::$job_request_cache)) {
+            self::$job_request_cache[$job_id] = Rmmigrate_Job::get($job_id);
+        }
+
+        return self::$job_request_cache[$job_id];
+    }
+
+    private static function resolve_job_visibility(int $job_id): bool
+    {
+        $cache_key = self::job_visibility_cache_key($job_id);
+        if (array_key_exists($cache_key, self::$job_visibility_request_cache)) {
+            return self::$job_visibility_request_cache[$cache_key];
+        }
+
         global $wpdb;
         if (!isset($wpdb) || !is_object($wpdb) || !method_exists($wpdb, 'get_row')) {
-            return self::current_user_is_activity_admin();
+            $visible = self::current_user_is_activity_admin();
+            self::$job_visibility_request_cache[$cache_key] = $visible;
+            return $visible;
         }
 
-        $job = Rmmigrate_Job::get($job_id);
+        $job = self::get_request_cached_job($job_id);
         if ($job === null) {
-            return self::current_user_is_activity_admin();
+            $visible = self::current_user_is_activity_admin();
+        } else {
+            $visible = Rmmigrate_Access::can_view_job($job);
         }
 
-        return Rmmigrate_Access::can_view_job($job);
+        self::$job_visibility_request_cache[$cache_key] = $visible;
+        return $visible;
     }
 
     private static function current_user_is_activity_admin(): bool

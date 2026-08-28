@@ -44,37 +44,50 @@ final class Rmmigrate_Request_Input
     private static function filtered_value(int $input_type, string $key)
     {
         // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Nonce/capability verified by the dispatch-layer caller.
+        $bag = self::superglobal_for_input($input_type);
+        if ($bag !== null && array_key_exists($key, $bag)) {
+            return wp_unslash($bag[$key]);
+        }
+
         $value = filter_input($input_type, $key);
         if ($value !== null && $value !== false) {
             return $value;
         }
 
-        $bag = self::superglobal_for_input($input_type);
-        if ($bag !== null && array_key_exists($key, $bag)) {
-            return $bag[$key];
+        return null;
+    }
+
+    /**
+     * @return mixed|null
+     */
+    private static function scalar_value(int $input_type, string $key)
+    {
+        $value = self::filtered_value($input_type, $key);
+        if ($value === null || is_array($value)) {
+            return null;
         }
 
-        return null;
+        return $value;
     }
 
     public static function post_text(string $key, string $default = ''): string
     {
-        $value = self::filtered_value(INPUT_POST, $key);
+        $value = self::scalar_value(INPUT_POST, $key);
         if ($value === null) {
             return $default;
         }
 
-        return sanitize_text_field(is_string($value) ? wp_unslash($value) : (string) $value);
+        return sanitize_text_field(is_string($value) ? $value : (string) $value);
     }
 
     public static function post_key(string $key, string $default = ''): string
     {
-        $value = self::filtered_value(INPUT_POST, $key);
+        $value = self::scalar_value(INPUT_POST, $key);
         if ($value === null) {
             return $default;
         }
 
-        return sanitize_key(is_string($value) ? wp_unslash($value) : (string) $value);
+        return sanitize_key(is_string($value) ? $value : (string) $value);
     }
 
     private static function validate_int($raw, int $default): int
@@ -93,43 +106,37 @@ final class Rmmigrate_Request_Input
 
     public static function post_int(string $key, int $default = 0): int
     {
-        // phpcs:ignore WordPress.Security.NonceVerification.Missing -- Nonce/capability verified by the dispatch-layer caller.
-        $value = filter_input(INPUT_POST, $key, FILTER_VALIDATE_INT);
-        if ($value !== null && $value !== false) {
-            return (int) $value;
-        }
-
         return self::validate_int(self::filtered_value(INPUT_POST, $key), $default);
     }
 
     public static function post_bool(string $key): bool
     {
-        $value = self::filtered_value(INPUT_POST, $key);
+        $value = self::scalar_value(INPUT_POST, $key);
         return $value !== null && $value !== '' && $value !== '0' && $value !== 0;
     }
 
     public static function post_textarea(string $key, string $default = ''): string
     {
-        $value = self::filtered_value(INPUT_POST, $key);
+        $value = self::scalar_value(INPUT_POST, $key);
         if ($value === null) {
             return $default;
         }
 
-        return sanitize_textarea_field(is_string($value) ? wp_unslash($value) : (string) $value);
+        return sanitize_textarea_field(is_string($value) ? $value : (string) $value);
     }
 
     public static function post_raw(string $key, string $default = ''): string
     {
-        $value = self::filtered_value(INPUT_POST, $key);
+        $value = self::scalar_value(INPUT_POST, $key);
         if ($value === null) {
             return $default;
         }
 
-        return is_string($value) ? wp_unslash($value) : (string) $value;
+        return is_string($value) ? $value : (string) $value;
     }
 
     /**
-     * @return array<int|string>
+     * @return int[]
      */
     public static function post_int_array(string $key): array
     {
@@ -140,15 +147,25 @@ final class Rmmigrate_Request_Input
             if (!is_array($raw)) {
                 // phpcs:ignore WordPress.Security.NonceVerification.Missing -- Nonce/capability verified by the dispatch-layer caller; values are cast with intval() below.
                 if (isset($_POST[$key]) && is_array($_POST[$key])) {
-                    // phpcs:ignore WordPress.Security.NonceVerification.Missing -- Nonce/capability verified by the dispatch-layer caller; values are cast with intval().
-                    return array_map('intval', wp_unslash($_POST[$key]));
+                    // phpcs:ignore WordPress.Security.NonceVerification.Missing, WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- Dispatch-layer nonce; each value is intval()'d below.
+                    $values = wp_unslash($_POST[$key]);
+                } else {
+                    return array();
                 }
-                return array();
+            } else {
+                $values = $raw;
             }
-            $values = $raw;
         }
 
-        return array_map('intval', wp_unslash($values));
+        $out = array();
+        foreach ($values as $value) {
+            if (is_array($value)) {
+                continue;
+            }
+            $out[] = (int) $value;
+        }
+
+        return $out;
     }
 
     public static function post_url_raw(string $key, string $default = ''): string
@@ -163,50 +180,40 @@ final class Rmmigrate_Request_Input
 
     public static function post_array(): array
     {
-        // phpcs:ignore WordPress.Security.NonceVerification.Missing -- Nonce/capability verified by the dispatch-layer caller.
-        $filtered = filter_input_array(INPUT_POST);
-        if (is_array($filtered) && $filtered !== array()) {
-            return wp_unslash($filtered);
-        }
-
         // phpcs:ignore WordPress.Security.NonceVerification.Missing, WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- Nonce/capability verified by the dispatch-layer caller; the returned array is sanitized field-by-field by each save handler.
-        return wp_unslash($_POST);
+        $post = wp_unslash($_POST);
+
+        return is_array($post) ? $post : array();
     }
 
     public static function get_int(string $key, int $default = 0): int
     {
-        // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Nonce/capability verified by the dispatch-layer caller.
-        $value = filter_input(INPUT_GET, $key, FILTER_VALIDATE_INT);
-        if ($value !== null && $value !== false) {
-            return (int) $value;
-        }
-
         return self::validate_int(self::filtered_value(INPUT_GET, $key), $default);
     }
 
     public static function get_key(string $key, string $default = ''): string
     {
-        $value = self::filtered_value(INPUT_GET, $key);
+        $value = self::scalar_value(INPUT_GET, $key);
         if ($value === null) {
             return $default;
         }
 
-        return sanitize_key(is_string($value) ? wp_unslash($value) : (string) $value);
+        return sanitize_key(is_string($value) ? $value : (string) $value);
     }
 
     public static function get_text(string $key, string $default = ''): string
     {
-        $value = self::filtered_value(INPUT_GET, $key);
+        $value = self::scalar_value(INPUT_GET, $key);
         if ($value === null) {
             return $default;
         }
 
-        return sanitize_text_field(is_string($value) ? wp_unslash($value) : (string) $value);
+        return sanitize_text_field(is_string($value) ? $value : (string) $value);
     }
 
     public static function get_raw(string $key, string $default = ''): string
     {
-        $value = self::filtered_value(INPUT_GET, $key);
+        $value = self::scalar_value(INPUT_GET, $key);
         if ($value === null) {
             return $default;
         }
@@ -222,18 +229,6 @@ final class Rmmigrate_Request_Input
 
     public static function request_int(string $key, int $default = 0): int
     {
-        // phpcs:ignore WordPress.Security.NonceVerification.Missing -- Nonce/capability verified by the dispatch-layer caller.
-        $post = filter_input(INPUT_POST, $key, FILTER_VALIDATE_INT);
-        if ($post !== null && $post !== false) {
-            return (int) $post;
-        }
-
-        // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Nonce/capability verified by the dispatch-layer caller.
-        $get = filter_input(INPUT_GET, $key, FILTER_VALIDATE_INT);
-        if ($get !== null && $get !== false) {
-            return (int) $get;
-        }
-
         $raw = self::filtered_value(INPUT_POST, $key);
         if ($raw === null) {
             $raw = self::filtered_value(INPUT_GET, $key);
@@ -246,16 +241,16 @@ final class Rmmigrate_Request_Input
 
     public static function request_text(string $key, string $default = ''): string
     {
-        $value = self::filtered_value(INPUT_POST, $key);
+        $value = self::scalar_value(INPUT_POST, $key);
         if ($value === null) {
-            $value = self::filtered_value(INPUT_GET, $key);
+            $value = self::scalar_value(INPUT_GET, $key);
         }
         // NOTE: $_REQUEST is intentionally NOT used here — cookie-injection risk.
         if ($value === null) {
             return $default;
         }
 
-        return sanitize_text_field(is_string($value) ? wp_unslash($value) : (string) $value);
+        return sanitize_text_field(is_string($value) ? $value : (string) $value);
     }
 
     /**
@@ -267,8 +262,8 @@ final class Rmmigrate_Request_Input
         if (!isset($_FILES[$files_key]['tmp_name']) || !is_string($_FILES[$files_key]['tmp_name'])) {
             return '';
         }
-        // phpcs:ignore WordPress.Security.NonceVerification.Missing -- Nonce/capability verified by the dispatch-layer caller; tmp_name is validated with is_uploaded_file() below.
-        $tmp = sanitize_text_field(wp_unslash($_FILES[$files_key]['tmp_name']));
+        // phpcs:ignore WordPress.Security.NonceVerification.Missing, WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- Dispatch-layer nonce; tmp_name is validated with is_uploaded_file(), not text-sanitized.
+        $tmp = wp_unslash($_FILES[$files_key]['tmp_name']);
         return self::is_uploaded_tmp($tmp) ? $tmp : '';
     }
 
@@ -279,12 +274,6 @@ final class Rmmigrate_Request_Input
     {
         if ($tmp === '') {
             return false;
-        }
-        if (defined('RMMIGRATE_UNIT_TEST')
-            && RMMIGRATE_UNIT_TEST
-            && !empty($GLOBALS['mm_test_uploaded_files'][(string) $tmp])
-        ) {
-            return true;
         }
 
         return is_uploaded_file($tmp);

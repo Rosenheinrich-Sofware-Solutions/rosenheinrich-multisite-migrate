@@ -14,6 +14,7 @@ class Rmmigrate_Scheduler
     const FAIL_COUNT_OPTION = 'rmmigrate_schedule_fail_count';
     const FAIL_NOTIFY_THRESHOLD = 3;
     const ADMIN_DUE_TRANSIENT = 'rmmigrate_admin_due_tick';
+    const ADMIN_DUE_LOCK_OPTION = 'rmmigrate_admin_due_lock';
     const LAST_TICK_OPTION = 'rmmigrate_last_tick';
 
     public static function register(): void
@@ -27,6 +28,10 @@ class Rmmigrate_Scheduler
     {
         if (wp_installing()) {
             return;
+        }
+
+        if (class_exists('Rmmigrate_Bootstrap', false)) {
+            Rmmigrate_Bootstrap::register_cron_schedules_filter();
         }
 
         $schedules = wp_get_schedules();
@@ -101,7 +106,7 @@ class Rmmigrate_Scheduler
                 ),
                 'info'
             );
-            self::advance_next_run($settings, $schedule_id);
+            self::advance_next_run($schedule_id);
             return;
         }
 
@@ -118,7 +123,7 @@ class Rmmigrate_Scheduler
         );
         if (is_wp_error($resolved)) {
             self::record_schedule_failure('Scope invalid: ' . $resolved->get_error_message());
-            self::advance_next_run($settings, $schedule_id);
+            self::advance_next_run($schedule_id);
             return;
         }
 
@@ -155,10 +160,10 @@ class Rmmigrate_Scheduler
                 'info'
             );
             delete_site_option(self::FAIL_COUNT_OPTION);
-            self::advance_next_run($settings, $schedule_id);
+            self::advance_next_run($schedule_id);
         } catch (Throwable $e) {
             self::record_schedule_failure(sanitize_text_field($e->getMessage()));
-            self::advance_next_run($settings, $schedule_id);
+            self::advance_next_run($schedule_id);
         }
     }
 
@@ -186,7 +191,7 @@ class Rmmigrate_Scheduler
         $count = (int) get_site_option(self::FAIL_COUNT_OPTION, 0) + 1;
         update_site_option(self::FAIL_COUNT_OPTION, $count);
         if ($count >= self::FAIL_NOTIFY_THRESHOLD) {
-            Rmmigrate_Notifications::notify_schedule_failures($count, $message);
+            Rmmigrate_Notifications::notify_schedule_failures($count, $clean_msg);
             update_site_option(self::FAIL_COUNT_OPTION, 0);
         }
     }
@@ -196,12 +201,9 @@ class Rmmigrate_Scheduler
         delete_site_option(self::FAIL_COUNT_OPTION);
     }
 
-    /**
-     * @param array<string,mixed> $settings
-     */
-    public static function advance_next_run(array $settings, string $schedule_id = ''): void
+    public static function advance_next_run(string $schedule_id = ''): void
     {
-        $settings = Rmmigrate_Schedules::normalize($settings);
+        $settings = Rmmigrate_Schedules::normalize(Rmmigrate_Settings::get());
         if ($schedule_id === '') {
             foreach ($settings['schedules'] as $schedule) {
                 if (!empty($schedule['enabled'])) {
@@ -218,12 +220,16 @@ class Rmmigrate_Scheduler
             return;
         }
 
-        Rmmigrate_Schedules::advance_schedule($settings, $schedule_id);
+        Rmmigrate_Schedules::advance_schedule($schedule_id);
     }
 
     public static function grace_seconds_for_interval(string $interval): int
     {
         switch ($interval) {
+            case 'every_15':
+                return 5 * MINUTE_IN_SECONDS;
+            case 'hourly':
+                return 10 * MINUTE_IN_SECONDS;
             case 'daily':
             case 'weekly':
             case 'monthly':
@@ -243,15 +249,42 @@ class Rmmigrate_Scheduler
             return;
         }
 
-        $settings = Rmmigrate_Schedules::normalize(Rmmigrate_Settings::get());
-        if (!Rmmigrate_Schedules::has_enabled($settings)) {
-            return;
-        }
-        if (Rmmigrate_Schedules::due_schedules($settings) === array()) {
+        if (!self::acquire_admin_due_lock()) {
             return;
         }
 
-        set_transient(self::ADMIN_DUE_TRANSIENT, time(), 2 * MINUTE_IN_SECONDS);
-        self::tick();
+        try {
+            set_transient(self::ADMIN_DUE_TRANSIENT, time(), 2 * MINUTE_IN_SECONDS);
+            $settings = Rmmigrate_Schedules::normalize(Rmmigrate_Settings::get());
+            if (!Rmmigrate_Schedules::has_enabled($settings)) {
+                return;
+            }
+            if (Rmmigrate_Schedules::due_schedules($settings) === array()) {
+                return;
+            }
+
+            self::tick();
+        } finally {
+            self::release_admin_due_lock();
+        }
+    }
+
+    private static function acquire_admin_due_lock(): bool
+    {
+        $now = microtime(true);
+        if (add_site_option(self::ADMIN_DUE_LOCK_OPTION, $now)) {
+            return true;
+        }
+        $started = (float) get_site_option(self::ADMIN_DUE_LOCK_OPTION, 0);
+        if ($started <= 0 || ($now - $started) >= MINUTE_IN_SECONDS) {
+            delete_site_option(self::ADMIN_DUE_LOCK_OPTION);
+            return add_site_option(self::ADMIN_DUE_LOCK_OPTION, $now);
+        }
+        return false;
+    }
+
+    private static function release_admin_due_lock(): void
+    {
+        delete_site_option(self::ADMIN_DUE_LOCK_OPTION);
     }
 }

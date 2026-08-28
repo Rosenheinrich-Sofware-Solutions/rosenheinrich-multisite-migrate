@@ -62,7 +62,7 @@ class Rmmigrate_Restore_Topology_Compatibility
             );
         }
 
-        if (($manifest['backup_intent'] ?? '') === 'migration' && !self::archive_has_core($state, $manifest)) {
+        if (($manifest['backup_intent'] ?? '') === 'migration' && !$archive_has_core) {
             return self::gate(
                 'migration_no_core',
                 __('Migration backup is missing WordPress core files. Create a new backup with Include WordPress core enabled.', 'rosenheinrich-multisite-migrate'),
@@ -71,12 +71,16 @@ class Rmmigrate_Restore_Topology_Compatibility
         }
 
         $manifest_core = !empty($manifest['has_wp_core_files']);
-        if ($manifest_core && !$archive_has_core) {
-            return self::gate(
-                'archive_tampered',
-                __('Archive manifest claims WordPress core is included but core files are missing. The archive may be incomplete or tampered.', 'rosenheinrich-multisite-migrate'),
-                __('Re-download the backup archive from the source site.', 'rosenheinrich-multisite-migrate')
-            );
+        $archive_scan = is_array($state['archive'] ?? null) ? $state['archive'] : null;
+        if ($manifest_core && $archive_scan !== null && array_key_exists('has_wp_core_files', $archive_scan)) {
+            $archive_has_core_files = !empty($archive_scan['has_wp_core_files']);
+            if (!$archive_has_core_files) {
+                return self::gate(
+                    'archive_tampered',
+                    __('Archive manifest claims WordPress core is included but core files are missing. The archive may be incomplete or tampered.', 'rosenheinrich-multisite-migrate'),
+                    __('Re-download the backup archive from the source site.', 'rosenheinrich-multisite-migrate')
+                );
+            }
         }
 
         $topology_gate = self::validate_topology($state, $manifest, $destination, $installer_context);
@@ -208,15 +212,8 @@ class Rmmigrate_Restore_Topology_Compatibility
         }
 
         $db_action = (string) ($state['db_action'] ?? '');
-        if ($db_action !== '' && $db_action !== 'empty') {
-            return false;
-        }
 
-        if ($db_action === 'empty') {
-            return true;
-        }
-
-        return !empty($state['overwrite_confirmed']) || !empty($state['full_installation_replace']);
+        return $db_action === 'empty';
     }
 
     /**

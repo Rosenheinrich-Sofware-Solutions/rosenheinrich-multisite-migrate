@@ -30,34 +30,23 @@ class Rmmigrate_Retention
 
     public static function prune(): void
     {
+        wp_cache_delete('mm_retention_network', 'rmmigrate');
+        wp_cache_delete('mm_retention_safety', 'rmmigrate');
+        wp_cache_delete('mm_retention_subsite', 'rmmigrate');
+
         $settings = Rmmigrate_Settings::get();
         $network_keep = max(0, (int) ($settings['retention_network'] ?? 0));
         $subsite_keep = max(0, (int) ($settings['retention_subsite'] ?? 0));
 
-        $cache_key = 'mm_retention_network';
-        $network_rows = wp_cache_get($cache_key, 'rmmigrate');
-        if ($network_rows === false) {
-            $network_rows = Rmmigrate_Snap_DB::jobs_retention_network_rows();
-            wp_cache_set($cache_key, $network_rows, 'rmmigrate', 300);
-        }
+        $network_rows = Rmmigrate_Snap_DB::jobs_retention_network_rows();
         if ($network_keep > 0) {
             self::prune_group($network_rows, $network_keep);
         }
 
-        $cache_key_safety = 'mm_retention_safety';
-        $safety_rows = wp_cache_get($cache_key_safety, 'rmmigrate');
-        if ($safety_rows === false) {
-            $safety_rows = Rmmigrate_Snap_DB::jobs_retention_safety_rows();
-            wp_cache_set($cache_key_safety, $safety_rows, 'rmmigrate', 300);
-        }
+        $safety_rows = Rmmigrate_Snap_DB::jobs_retention_safety_rows();
         self::prune_group($safety_rows, 1);
 
-        $cache_key_subsite = 'mm_retention_subsite';
-        $subsite_rows = wp_cache_get($cache_key_subsite, 'rmmigrate');
-        if ($subsite_rows === false) {
-            $subsite_rows = Rmmigrate_Snap_DB::jobs_retention_subsite_rows();
-            wp_cache_set($cache_key_subsite, $subsite_rows, 'rmmigrate', 300);
-        }
+        $subsite_rows = Rmmigrate_Snap_DB::jobs_retention_subsite_rows();
 
         if ($subsite_keep > 0) {
             $by_blog = array();
@@ -92,17 +81,19 @@ class Rmmigrate_Retention
         foreach ($to_delete as $row) {
             $job = Rmmigrate_Job::get((int) $row['id']);
             if ($job === null) {
+                // Orphan row: no hydratable job. Remove it so retention can converge.
+                $wpdb->delete($table, array('id' => (int) $row['id']), array('%d'));
                 continue;
             }
             Rmmigrate_Job_Cleanup::purge($job);
             $wpdb->delete($table, array('id' => $job->get_id()), array('%d'));
             $deleted_ids[] = $job->get_id();
-            wp_cache_delete('mm_retention_network', 'rmmigrate');
-            wp_cache_delete('mm_retention_safety', 'rmmigrate');
-            wp_cache_delete('mm_retention_subsite', 'rmmigrate');
         }
 
         if ($deleted_ids !== array()) {
+            wp_cache_delete('mm_retention_network', 'rmmigrate');
+            wp_cache_delete('mm_retention_safety', 'rmmigrate');
+            wp_cache_delete('mm_retention_subsite', 'rmmigrate');
             $triggered_by = (function_exists('wp_doing_cron') && wp_doing_cron()) ? 'cron' : 'system';
             Rmmigrate_Logger::log_system(
                 sprintf(
@@ -123,7 +114,7 @@ class Rmmigrate_Retention
      * @param array<int,array<string,mixed>> $rows
      * @return array<string,array<int,array<string,mixed>>>
      */
-    public static function partition_rows_for_tests(array $rows): array
+    public static function partition_rows(array $rows): array
     {
         $network = array();
         $subsite = array();

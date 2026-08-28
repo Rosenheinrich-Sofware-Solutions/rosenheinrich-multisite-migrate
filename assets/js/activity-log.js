@@ -127,7 +127,7 @@
                 html += metaPair(i18n.file || 'File', escHtml(filename));
             }
             if (uploadId) {
-                html += metaPair('Upload ID', escHtml(uploadId));
+                html += metaPair(i18n.uploadId || 'Upload ID', escHtml(uploadId));
             }
             if (data.server) {
                 html += metaPair(
@@ -168,24 +168,41 @@
             html += '<h3 class="mm-activity-detail-card__title">' + escHtml(i18n.jobLog || 'Job log') + '</h3>';
             html += '<code class="mm-activity-log-file">' + escHtml(log) + '</code>';
             html += '</div>';
-            html += '<div class="mm-log-viewer-wrap" data-log="' + escHtml(log) + '" data-offset="' + escHtml(String(offsetEnd)) + '" data-lines="200">';
-
-            html += '<div class="mm-log-viewer-toolbar">';
+            var $logWrap = $('<div class="mm-log-viewer-wrap"></div>').attr({
+                'data-log': log,
+                'data-offset': String(offsetEnd),
+                'data-lines': '200'
+            });
+            var $toolbar = $('<div class="mm-log-viewer-toolbar"></div>');
             if (chunk.has_newer) {
-                html += '<a href="#" class="button button-secondary mm-log-view-newer" data-offset="' + Math.max(0, offsetEnd - 200) + '">' + escHtml(i18n.loadNewer || 'Load newer') + '</a>';
+                $toolbar.append(
+                    $('<a href="#" class="button button-secondary mm-log-view-newer"></a>')
+                        .attr('data-offset', Math.max(0, offsetEnd - 200))
+                        .text(i18n.loadNewer || 'Load newer')
+                );
             }
             if (chunk.has_older) {
                 if (chunk.older_file) {
-                    html += '<a href="#" class="button button-secondary mm-log-view-older-file" data-log="' + escHtml(chunk.older_file) + '" data-offset="0">' + escHtml((i18n.continueIn || 'Continue in %s').replace('%s', chunk.older_file)) + '</a>';
+                    $toolbar.append(
+                        $('<a href="#" class="button button-secondary mm-log-view-older-file"></a>')
+                            .attr({ 'data-log': chunk.older_file, 'data-offset': '0' })
+                            .text((i18n.continueIn || 'Continue in %s').replace('%s', chunk.older_file))
+                    );
                 } else {
-                    html += '<a href="#" class="button button-secondary mm-log-view-older" data-offset="' + (offsetEnd + 200) + '">' + escHtml(i18n.loadOlder || 'Load older') + '</a>';
+                    $toolbar.append(
+                        $('<a href="#" class="button button-secondary mm-log-view-older"></a>')
+                            .attr('data-offset', offsetEnd + 200)
+                            .text(i18n.loadOlder || 'Load older')
+                    );
                 }
             }
-            html += '</div>';
-
-            html += '<pre class="mm-log-viewer">' + escHtml(chunk.lines || '') + '</pre>';
-            html += '<p class="description mm-activity-log-footer">' + escHtml((i18n.showingLines || 'Showing %1$d lines').replace('%1$d', lineCount)) + '</p>';
-            html += '</div>';
+            $logWrap.append($toolbar);
+            $logWrap.append($('<pre class="mm-log-viewer"></pre>').text(chunk.lines || ''));
+            $logWrap.append(
+                $('<p class="description mm-activity-log-footer"></p>')
+                    .text((i18n.showingLines || 'Showing %1$d lines').replace('%1$d', lineCount))
+            );
+            html += $logWrap.prop('outerHTML');
             html += '</section>';
         }
 
@@ -197,7 +214,8 @@
 
     function openDetail(entryId, title, jobId) {
         var $dialog = $('#mm-activity-detail-dialog');
-        $('#mm-activity-detail-title').text(title || rmmigrateAdmin.i18n.activityDetails || 'Activity details');
+        var i18n = (typeof rmmigrateAdmin !== 'undefined' && rmmigrateAdmin.i18n) ? rmmigrateAdmin.i18n : {};
+        $('#mm-activity-detail-title').text(title || i18n.activityDetails || 'Activity details');
         $('#mm-activity-detail-body').html('<p class="description">' + escHtml(rmmigrateAdmin.loadingText) + '</p>');
         $dialog.removeClass('mm-hidden');
         var $modal = $dialog.find('.mm-restore-modal').first();
@@ -223,6 +241,8 @@
             }
         }
 
+        var requestFailedMsg = i18n.requestFailed || 'Request failed.';
+
         $.post(rmmigrateAdmin.ajaxUrl, {
             action: 'rmmigrate_activity_detail',
             nonce: rmmigrateAdmin.nonce,
@@ -230,14 +250,14 @@
             job_id: jobId || 0
         }).done(function (resp) {
             if (!resp || !resp.success) {
-                $('#mm-activity-detail-body').html('<p class="mm-status-warn">' + escHtml((resp && resp.data && resp.data.message) || rmmigrateAdmin.i18n.requestFailed) + '</p>');
+                $('#mm-activity-detail-body').html('<p class="mm-status-warn">' + escHtml((resp && resp.data && resp.data.message) || requestFailedMsg) + '</p>');
                 refreshDetailTrap();
                 return;
             }
             $('#mm-activity-detail-body').html(renderDetail(resp.data));
             refreshDetailTrap();
         }).fail(function () {
-            $('#mm-activity-detail-body').html('<p class="mm-status-warn">' + escHtml(rmmigrateAdmin.i18n.requestFailed) + '</p>');
+            $('#mm-activity-detail-body').html('<p class="mm-status-warn">' + escHtml(requestFailedMsg) + '</p>');
             refreshDetailTrap();
         });
     }
@@ -256,7 +276,7 @@
     });
 
     $(document).on('click', '.mm-activity-detail-close, #mm-activity-detail-dialog .mm-restore-overlay', function (e) {
-        if (e.target === this || $(e.target).hasClass('mm-activity-detail-close')) {
+        if (e.target === this || $(e.target).closest('.mm-activity-detail-close').length) {
             closeDetail();
         }
     });
@@ -264,6 +284,8 @@
     function loadLogChunk($wrap, log, offset, lines) {
         var $viewer = $wrap.find('.mm-log-viewer');
         var $toolbar = $wrap.find('.mm-log-viewer-toolbar');
+        var i18n = (rmmigrateAdmin && rmmigrateAdmin.i18n) || {};
+        var requestFailedMsg = i18n.requestFailed || 'Request failed.';
         $viewer.text(rmmigrateAdmin.loadingText || 'Loading…');
         $.post(rmmigrateAdmin.ajaxUrl, {
             action: 'rmmigrate_log_chunk',
@@ -273,39 +295,40 @@
             lines: lines
         }).done(function (resp) {
             if (!resp || !resp.success || !resp.data) {
-                $viewer.text((resp && resp.data && resp.data.message) || rmmigrateAdmin.i18n.requestFailed);
+                $viewer.text((resp && resp.data && resp.data.message) || requestFailedMsg);
                 return;
             }
             var data = resp.data;
             $wrap.attr('data-log', data.log || log);
             $wrap.attr('data-offset', String(data.offset_from_end || 0));
+            $wrap.data('log', data.log || log);
+            $wrap.data('offset', data.offset_from_end || 0);
             $viewer.text(data.lines || '');
             $toolbar.find('.mm-log-view-newer, .mm-log-view-older, .mm-log-view-older-file').remove();
             if (data.has_newer) {
                 $toolbar.prepend(
                     '<a href="#" class="button button-secondary mm-log-view-newer" data-offset="' +
                     Math.max(0, (data.offset_from_end || 0) - lines) + '">' +
-                    escHtml(rmmigrateAdmin.i18n.loadNewer || 'Load newer') + '</a>'
+                    escHtml(i18n.loadNewer || 'Load newer') + '</a>'
                 );
             }
             if (data.has_older) {
                 if (data.older_file) {
                     $toolbar.append(
-                        '<a href="#" class="button button-secondary mm-log-view-older-file" data-log="' +
-                        escHtml(data.older_file) + '" data-offset="0">' +
-                        escHtml((rmmigrateAdmin.i18n.continueIn || 'Continue in %s').replace('%s', data.older_file)) +
-                        '</a>'
+                        $('<a href="#" class="button button-secondary mm-log-view-older-file"></a>')
+                            .attr({ 'data-log': data.older_file, 'data-offset': '0' })
+                            .text((i18n.continueIn || 'Continue in %s').replace('%s', data.older_file))
                     );
                 } else {
                     $toolbar.append(
                         '<a href="#" class="button button-secondary mm-log-view-older" data-offset="' +
                         ((data.offset_from_end || 0) + lines) + '">' +
-                        escHtml(rmmigrateAdmin.i18n.loadOlder || 'Load older') + '</a>'
+                        escHtml(i18n.loadOlder || 'Load older') + '</a>'
                     );
                 }
             }
         }).fail(function () {
-            $viewer.text(rmmigrateAdmin.i18n.requestFailed);
+            $viewer.text(requestFailedMsg);
         });
     }
 

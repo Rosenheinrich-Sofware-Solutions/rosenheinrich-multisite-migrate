@@ -33,7 +33,7 @@
                 action: 'rmmigrate_prune',
                 nonce: rmmigrateAdmin.nonce
             }).done(function (res) {
-                if (res.success) {
+                if (res && res.success && res.data) {
                     setToolStatus($status, res.data.message || i18n('done', 'Done'), 'ok');
                 } else {
                     setToolStatus($status, i18n('failed', 'Failed'), 'error');
@@ -52,7 +52,7 @@
                 action: 'rmmigrate_clean_storage',
                 nonce: rmmigrateAdmin.nonce
             }).done(function (res) {
-                if (res.success) {
+                if (res && res.success && res.data) {
                     setToolStatus($status, res.data.message || i18n('done', 'Done'), 'ok');
                 } else {
                     setToolStatus($status, i18n('failed', 'Failed'), 'error');
@@ -135,7 +135,7 @@ function formatInstallCleanupSize(bytes) {
                     action: 'rmmigrate_delete_install_files',
                     nonce: rmmigrateAdmin.nonce
                 }).done(function (res) {
-                    if (res.success) {
+                    if (res && res.success && res.data) {
                         $status.text(res.data.message || i18n('done', 'Done'));
                     } else {
                         $status.text(i18n('installCleanupFailed', 'Could not delete installation files.'));
@@ -166,6 +166,7 @@ function formatInstallCleanupSize(bytes) {
     });
 
     $(document).on('click', '#mm-sr-run, #mm-sr-preview', function () {
+        var isPreview = this.id === 'mm-sr-preview';
         var oldUrl = $('#mm-sr-old').val();
         var newUrl = $('#mm-sr-new').val();
         var $result = $('#mm-sr-result');
@@ -175,35 +176,80 @@ function formatInstallCleanupSize(bytes) {
             return;
         }
 
-        rmmigrateAdminUI.confirm(
-            i18n('srConfirmRun', 'Run Search & Replace on your database? Old URL: ') + oldUrl + ' → ' + newUrl,
-            function () {
-                $result.html('<div style="margin-top: 10px; color: var(--mm-text-muted);">' + i18n('loading', 'Loading…') + '</div>');
+        var confirmMsg = isPreview
+            ? i18n('srConfirmPreview', 'Preview Search & Replace rules for Old URL: ') + oldUrl + ' → ' + newUrl
+            : i18n('srConfirmRun', 'Run Search & Replace on your database? Old URL: ') + oldUrl + ' → ' + newUrl;
 
-                $.post(rmmigrateAdmin.ajaxUrl, {
-                    action: 'rmmigrate_search_replace_preview',
+        rmmigrateAdminUI.confirm(confirmMsg, function () {
+            $result.empty().append(
+                $('<div>')
+                    .css({ marginTop: '10px', color: 'var(--mm-text-muted)' })
+                    .text(i18n('loading', 'Loading…'))
+            );
+
+            function runSlice(resume) {
+                var payload = {
+                    action: isPreview ? 'rmmigrate_search_replace_preview' : 'rmmigrate_search_replace_run',
                     nonce: rmmigrateAdmin.nonce,
                     old_url: oldUrl,
                     new_url: newUrl
-                }).done(function (res) {
-                    if (!res.success || !res.data || !res.data.pairs) {
-                        var errMsg = res.data && res.data.message ? res.data.message : i18n('failed', 'Failed');
+                };
+                if (resume) {
+                    payload.resume = JSON.stringify(resume);
+                }
+                return $.post(rmmigrateAdmin.ajaxUrl, payload);
+            }
+
+            function handleRunResponse(res) {
+                if (!res || !res.success || !res.data) {
+                    var errMsg = (res && res.data && res.data.message) ? res.data.message : i18n('failed', 'Failed');
+                    $result.empty();
+                    rmmigrateAdminUI.toast(errMsg, 'error');
+                    return;
+                }
+                if (res.data.complete === false && res.data.resume) {
+                    $result.empty();
+                    var $loading = $('<div>').css({ marginTop: '10px', color: 'var(--mm-text-muted)' });
+                    $loading.text(res.data.message || i18n('loading', 'Loading…'));
+                    $result.append($loading);
+                    runSlice(res.data.resume).done(handleRunResponse).fail(function () {
+                        $result.empty();
+                        rmmigrateAdminUI.toast(i18n('failed', 'Failed'), 'error');
+                    });
+                    return;
+                }
+                $result.empty();
+                rmmigrateAdminUI.showNotice(
+                    res.data.message || i18n('srApplied', 'Search & Replace applied.'),
+                    'success'
+                );
+            }
+
+            runSlice(null).done(function (res) {
+                if (isPreview) {
+                    if (!res || !res.success || !res.data) {
+                        var errMsg = (res && res.data && res.data.message) ? res.data.message : i18n('failed', 'Failed');
                         $result.empty();
                         rmmigrateAdminUI.toast(errMsg, 'error');
                         return;
                     }
-                    var pairs = res.data.pairs;
                     $result.empty();
+                    if (!res.data.pairs) {
+                        rmmigrateAdminUI.toast(i18n('failed', 'Failed'), 'error');
+                        return;
+                    }
                     rmmigrateAdminUI.showNotice(
-                        i18n('srSuccess', 'Search & Replace configuration ready with %d replacement rule(s).').replace('%d', String(pairs.length)),
+                        i18n('srSuccess', 'Search & Replace configuration ready with %d replacement rule(s).').replace('%d', String(res.data.pairs.length)),
                         'success'
                     );
-                }).fail(function () {
-                    $result.empty();
-                    rmmigrateAdminUI.toast(i18n('failed', 'Failed'), 'error');
-                });
-            }
-        );
+                    return;
+                }
+                handleRunResponse(res);
+            }).fail(function () {
+                $result.empty();
+                rmmigrateAdminUI.toast(i18n('failed', 'Failed'), 'error');
+            });
+        });
     });
 
     $('#mm-test-hosting-detection').on('click', function () {
@@ -215,13 +261,13 @@ function formatInstallCleanupSize(bytes) {
             action: 'rmmigrate_test_hosting',
             nonce: rmmigrateAdmin.nonce
         }).done(function (res) {
-            if (res.success && res.data && res.data.message) {
+            if (!res || !res.success || !res.data || !res.data.message) {
+                $status.text(res && res.data && res.data.message ? res.data.message : i18n('failed', 'Failed'));
+            } else {
                 $status.text(res.data.message);
                 if (res.data.reload) {
                     setTimeout(function () { window.location.reload(); }, 800);
                 }
-            } else {
-                $status.text(res.data && res.data.message ? res.data.message : i18n('failed', 'Failed'));
             }
         }).fail(function () {
             $status.text(i18n('failed', 'Failed'));

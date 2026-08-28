@@ -4,7 +4,7 @@ Tags: backup, migration, wordpress-backup, restore, multisite
 Requires at least: 6.9
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.1.9
+Stable tag: 1.2.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -127,7 +127,7 @@ Learn more and [compare plans](https://multisitemigrate.rosenheinrich.com/pricin
 
 = Translations =
 
-Help translate the plugin UI and wordpress.org readme on [translate.wordpress.org](https://translate.wordpress.org/projects/wp-plugins/rosenheinrich-multisite-migrate/) — see the [Polyglots handbook](https://make.wordpress.org/polyglots/handbook/translating/how-to-translate/) to get started.
+Help translate the Multisite Migrate UI and WordPress.org readme on [translate.wordpress.org](https://translate.wordpress.org/projects/wp-plugins/rosenheinrich-multisite-migrate/) — see the [Polyglots handbook](https://make.wordpress.org/polyglots/handbook/translating/how-to-translate/) to get started.
 
 = Source =
 
@@ -171,7 +171,7 @@ Free includes AI abilities for backup status, archives, health (with a recommend
 
 No. Backup, restore, and local migration work entirely from the WordPress admin UI. AI / MCP is optional for operators who want to query status or start a confirmed backup from their AI client.
 
-= How can I help translate the plugin? =
+= How can I help translate Multisite Migrate? =
 
 Translations live on WordPress.org GlotPress — you do not need to edit files in the plugin ZIP.
 
@@ -235,6 +235,9 @@ No. Backup, restore, and local migration are driven from the WordPress admin UI.
 Backup and restore run as background-style chunked jobs. They are designed not to hold a single request open for the entire archive build. See [shared hosting guidance](https://multisitemigrate.rosenheinrich.com/features/shared-hosting/?utm_source=wprepo&utm_medium=link&utm_content=shared_hosting&utm_campaign=multisite_migrate_free).
 
 == Changelog ==
+
+= 1.2.0 =
+* Hardening, bug fixes, and performance improvements across backup, restore, and archive handling.
 
 = 1.1.9 =
 * More reliable chunked restore and backup on hosts with short PHP time limits (including Laragon-style 20s ceilings).
@@ -328,6 +331,9 @@ Backup and restore run as background-style chunked jobs. They are designed not t
 * Initial public release of the free edition: multisite-aware backups, restore, local import/export, search & replace, AES-256 encryption and a health dashboard.
 
 == Upgrade Notice ==
+
+= 1.2.0 =
+Hardening, bug fixes, and performance improvements across backup, restore, and archive handling. Recommended update.
 
 = 1.1.9 =
 More reliable restore workers on short PHP time limits; sliced decrypt, clearer timeout logs, and continue when `.htaccess` cannot be overwritten. Recommended update.

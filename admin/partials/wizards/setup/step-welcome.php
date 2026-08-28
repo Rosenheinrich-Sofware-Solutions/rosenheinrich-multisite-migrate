@@ -25,9 +25,13 @@ if (!defined('ABSPATH')) {
             <summary><?php esc_html_e('This will allow Multisite Migrate to', 'rosenheinrich-multisite-migrate'); ?></summary>
             <ul class="mm-setup-disclosure__list">
                 <?php foreach ($rmmigrate_disclosure as $rmmigrate_row) : ?>
+                    <?php
+                    $rmmigrate_row_title = isset($rmmigrate_row['title']) ? (string) $rmmigrate_row['title'] : '';
+                    $rmmigrate_row_detail = isset($rmmigrate_row['detail']) ? (string) $rmmigrate_row['detail'] : '';
+                    ?>
                     <li>
-                        <strong><?php echo esc_html($rmmigrate_row['title']); ?></strong>
-                        <span><?php echo esc_html($rmmigrate_row['detail']); ?></span>
+                        <strong><?php echo esc_html($rmmigrate_row_title); ?></strong>
+                        <span><?php echo esc_html($rmmigrate_row_detail); ?></span>
                     </li>
                 <?php endforeach; ?>
             </ul>

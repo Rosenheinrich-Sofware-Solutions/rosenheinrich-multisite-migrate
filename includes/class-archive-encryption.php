@@ -8,6 +8,9 @@ class Rmmigrate_Archive_Encryption
 {
     const EXT = '.venc';
 
+    /** Plaintext bytes read per encrypt_slice chunk; also used for plain_offset math. */
+    const PLAIN_CHUNK_SIZE = 1048576;
+
     /** @var string|null */
     private static $runtime_passphrase = null;
 
@@ -37,30 +40,41 @@ class Rmmigrate_Archive_Encryption
     {
         self::load_crypto_core();
         $salt = random_bytes(Rmmigrate_Crypto_Core::V2_SALT_LEN);
-        $iterations = Rmmigrate_Crypto_Core::V2_ITERATIONS;
+        $iterations = Rmmigrate_Crypto_Core::seal_v2_iterations(Rmmigrate_Crypto_Core::V2_ITERATIONS);
         $key = Rmmigrate_Crypto_Core::derive_v2_key(self::archive_secret(), $salt, $iterations);
 
         $in = Rmmigrate_Filesystem::open($source, 'rb');
+        if ($in === false) {
+            return false;
+        }
         if (Rmmigrate_Filesystem::exists($dest)) {
             Rmmigrate_Filesystem::delete($dest);
         }
         $out = Rmmigrate_Filesystem::open($dest, 'ab');
-        if ($in === false || $out === false) {
+        if ($out === false) {
+            $in->close();
             return false;
         }
         $out->write(Rmmigrate_Crypto_Core::v2_header($salt, $iterations));
 
+        $chunk_index = 0;
         while (!$in->eof()) {
-            $chunk = $in->read(1048576);
+            $chunk = $in->read(self::PLAIN_CHUNK_SIZE);
             if ($chunk === false) {
                 $in->close();
                 $out->close();
                 return false;
             }
             if ($chunk === '') {
-                continue;
+                break;
             }
-            $blob = Rmmigrate_Crypto_Core::v2_seal($chunk, $key);
+            $aad = Rmmigrate_Crypto_Core::v2_chunk_aad(
+                $chunk_index,
+                0,
+                $chunk_index === 0 ? $salt : '',
+                $chunk_index === 0 ? $iterations : 0
+            );
+            $blob = Rmmigrate_Crypto_Core::v2_seal($chunk, $key, $aad);
             if ($blob === '') {
                 $in->close();
                 $out->close();
@@ -68,6 +82,7 @@ class Rmmigrate_Archive_Encryption
             }
             $out->write(pack('N', strlen($blob)));
             $out->write($blob);
+            $chunk_index++;
         }
 
         $in->close();
@@ -94,13 +109,14 @@ class Rmmigrate_Archive_Encryption
                 Rmmigrate_Filesystem::delete($dest);
             }
             $salt = random_bytes(Rmmigrate_Crypto_Core::V2_SALT_LEN);
-            $iterations = Rmmigrate_Crypto_Core::V2_ITERATIONS;
+            $iterations = Rmmigrate_Crypto_Core::seal_v2_iterations(Rmmigrate_Crypto_Core::V2_ITERATIONS);
             $key = Rmmigrate_Crypto_Core::derive_v2_key(self::archive_secret(), $salt, $iterations);
             $out = Rmmigrate_Filesystem::open($dest, 'ab');
             if ($out === false) {
                 return null;
             }
             $out->write(Rmmigrate_Crypto_Core::v2_header($salt, $iterations));
+            $chunk_index = 0;
         } else {
             $probe = Rmmigrate_Filesystem::open($dest, 'rb');
             if ($probe === false) {
@@ -114,13 +130,28 @@ class Rmmigrate_Archive_Encryption
                 return null;
             }
             $iterations = (strlen((string) $iter_header) === 4)
-                ? unpack('N', $iter_header)[1]
+                ? (int) unpack('N', $iter_header)[1]
                 : Rmmigrate_Crypto_Core::V2_ITERATIONS;
-            $key = Rmmigrate_Crypto_Core::derive_v2_key(self::archive_secret(), (string) $salt, (int) $iterations);
+            if (!Rmmigrate_Crypto_Core::iterations_in_range($iterations)) {
+                return null;
+            }
+            $key = Rmmigrate_Crypto_Core::derive_v2_key(self::archive_secret(), (string) $salt, $iterations);
+            $expected_offset = self::v2_offset_after_n_chunks(
+                $dest,
+                self::expected_encrypt_chunk_count($plain_offset)
+            );
+            $dest_size = (int) Rmmigrate_Filesystem::filesize($dest);
+            $tail_meta = self::v2_chunks_before_offset($dest, $dest_size);
+            $truncate_to = min($expected_offset, $tail_meta['offset']);
+            if ($truncate_to < $dest_size) {
+                RMMIGRATE_IO::truncate_file($dest, $truncate_to);
+            }
             $out = Rmmigrate_Filesystem::open($dest, 'ab');
             if ($out === false) {
                 return null;
             }
+            $chunk_index = self::count_v2_chunks_before_offset($dest, $truncate_to);
+            $plain_offset = $chunk_index * self::PLAIN_CHUNK_SIZE;
         }
 
         $in = Rmmigrate_Filesystem::open($source, 'rb');
@@ -134,16 +165,22 @@ class Rmmigrate_Archive_Encryption
 
         $start = microtime(true);
         while (!$in->eof() && (microtime(true) - $start) < $budget_sec) {
-            $chunk = $in->read(1048576);
+            $chunk = $in->read(self::PLAIN_CHUNK_SIZE);
             if ($chunk === false) {
                 $in->close();
                 $out->close();
                 return null;
             }
             if ($chunk === '') {
-                continue;
+                break;
             }
-            $blob = Rmmigrate_Crypto_Core::v2_seal($chunk, $key);
+            $aad = Rmmigrate_Crypto_Core::v2_chunk_aad(
+                $chunk_index,
+                0,
+                $chunk_index === 0 ? (string) $salt : '',
+                $chunk_index === 0 ? (int) $iterations : 0
+            );
+            $blob = Rmmigrate_Crypto_Core::v2_seal($chunk, $key, $aad);
             if ($blob === '') {
                 $in->close();
                 $out->close();
@@ -152,6 +189,7 @@ class Rmmigrate_Archive_Encryption
             $out->write(pack('N', strlen($blob)));
             $out->write($blob);
             $plain_offset = (int) $in->tell();
+            $chunk_index++;
         }
 
         $done = $in->eof();
@@ -167,10 +205,15 @@ class Rmmigrate_Archive_Encryption
     /**
      * Resumable decrypt slice. Returns null on hard failure.
      *
-     * @return array{done:bool,byte_offset:int}|null
+     * @return array{done:bool,byte_offset:int,plain_bytes:int}|null
      */
-    public static function decrypt_slice(string $source, string $dest, int $byte_offset, int $budget_sec): ?array
-    {
+    public static function decrypt_slice(
+        string $source,
+        string $dest,
+        int $byte_offset,
+        int $budget_sec,
+        int $plain_bytes = -1
+    ): ?array {
         self::load_crypto_core();
         $probe = Rmmigrate_Filesystem::open($source, 'rb');
         if ($probe === false) {
@@ -180,7 +223,7 @@ class Rmmigrate_Archive_Encryption
         $probe->close();
 
         if ($magic === Rmmigrate_Crypto_Core::MAGIC_V2) {
-            return self::decrypt_slice_v2($source, $dest, $byte_offset, $budget_sec);
+            return self::decrypt_slice_v2($source, $dest, $byte_offset, $budget_sec, $plain_bytes);
         }
 
         return self::decrypt_slice_v1($source, $dest, $byte_offset, $budget_sec);
@@ -191,12 +234,18 @@ class Rmmigrate_Archive_Encryption
      * tag), so a slice can resume at any chunk boundary; the salt/key are always
      * re-derived from the header.
      *
-     * @return array{done:bool,byte_offset:int}|null
+     * @return array{done:bool,byte_offset:int,plain_bytes:int}|null
      */
-    private static function decrypt_slice_v2(string $source, string $dest, int $byte_offset, int $budget_sec): ?array
-    {
+    private static function decrypt_slice_v2(
+        string $source,
+        string $dest,
+        int $byte_offset,
+        int $budget_sec,
+        int $plain_bytes = -1
+    ): ?array {
         if ($byte_offset === 0 && Rmmigrate_Filesystem::exists($dest)) {
             Rmmigrate_Filesystem::delete($dest);
+            $plain_bytes = -1;
         }
 
         $in = Rmmigrate_Filesystem::open($source, 'rb');
@@ -206,13 +255,38 @@ class Rmmigrate_Archive_Encryption
         $in->read(strlen(Rmmigrate_Crypto_Core::MAGIC_V2));
         $salt = $in->read(Rmmigrate_Crypto_Core::V2_SALT_LEN);
         $iter_header = $in->read(4);
-        $iterations = (strlen((string) $iter_header) === 4) ? unpack('N', $iter_header)[1] : Rmmigrate_Crypto_Core::V2_ITERATIONS;
-        $key = Rmmigrate_Crypto_Core::derive_v2_key(self::archive_secret(), (string) $salt, (int) $iterations);
+        $iterations = (strlen((string) $iter_header) === 4) ? (int) unpack('N', $iter_header)[1] : Rmmigrate_Crypto_Core::V2_ITERATIONS;
+        if (!Rmmigrate_Crypto_Core::iterations_in_range($iterations)) {
+            $in->close();
+            return null;
+        }
+        $key = Rmmigrate_Crypto_Core::derive_v2_key(self::archive_secret(), (string) $salt, $iterations);
 
         $header_size = Rmmigrate_Crypto_Core::header_size_v2();
         if ($byte_offset < $header_size) {
             $byte_offset = $header_size;
         }
+
+        if ($byte_offset > $header_size && Rmmigrate_Filesystem::exists($dest)) {
+            $expected_plain = $plain_bytes >= 0
+                ? $plain_bytes
+                : self::v2_plain_bytes_before_source_offset(
+                    $source,
+                    $byte_offset,
+                    $key,
+                    (string) $salt,
+                    (int) $iterations
+                );
+            if ($expected_plain === null) {
+                $in->close();
+                return null;
+            }
+            $dest_size = (int) Rmmigrate_Filesystem::filesize($dest);
+            if ($dest_size > $expected_plain) {
+                RMMIGRATE_IO::truncate_file($dest, $expected_plain);
+            }
+        }
+
         $in->seek($byte_offset);
 
         $out = Rmmigrate_Filesystem::open($dest, 'ab');
@@ -223,23 +297,38 @@ class Rmmigrate_Archive_Encryption
 
         $start = microtime(true);
         $failed = false;
-        while ((microtime(true) - $start) < $budget_sec) {
+        $chunk_index = self::count_v2_chunks_before_offset($source, $byte_offset);
+        $first_pass = true;
+        while ($first_pass || (microtime(true) - $start) < $budget_sec) {
+            $first_pass = false;
             $len_header = $in->read(4);
-            if ($len_header === false || strlen($len_header) < 4) {
+            if ($len_header === false || $len_header === '') {
+                break;
+            }
+            if (strlen($len_header) < 4) {
+                $failed = true;
                 break;
             }
             $len = unpack('N', $len_header)[1];
             $blob = $in->read($len);
             if ($blob === false || strlen($blob) < $len) {
+                $failed = true;
                 break;
             }
-            $plain = Rmmigrate_Crypto_Core::v2_open($blob, $key);
+            $aad = Rmmigrate_Crypto_Core::v2_chunk_aad(
+                $chunk_index,
+                0,
+                $chunk_index === 0 ? (string) $salt : '',
+                $chunk_index === 0 ? (int) $iterations : 0
+            );
+            $plain = Rmmigrate_Crypto_Core::v2_open_with_legacy($blob, $key, $aad);
             if ($plain === false) {
                 $failed = true;
                 break;
             }
             $out->write($plain);
             $byte_offset = (int) $in->tell();
+            $chunk_index++;
         }
 
         $complete = !$failed && ($in->eof() || $byte_offset >= Rmmigrate_Filesystem::filesize($source));
@@ -250,76 +339,35 @@ class Rmmigrate_Archive_Encryption
             return null;
         }
 
+        $plain_size = Rmmigrate_Filesystem::exists($dest) ? (int) Rmmigrate_Filesystem::filesize($dest) : 0;
+
         return array(
             'done'        => $complete,
             'byte_offset' => $byte_offset,
+            'plain_bytes' => $plain_size,
         );
     }
 
     /**
      * Legacy resumable v1 decrypt (AES-256-CBC, IV-chained).
      *
-     * @return array{done:bool,byte_offset:int}|null
+     * @return array{done:bool,byte_offset:int,plain_bytes:int}|null
      */
     private static function decrypt_slice_v1(string $source, string $dest, int $byte_offset, int $budget_sec): ?array
     {
-        if ($byte_offset === 0 && Rmmigrate_Filesystem::exists($dest)) {
-            Rmmigrate_Filesystem::delete($dest);
-        }
-
-        $key = self::archive_key_v1();
-        $in = Rmmigrate_Filesystem::open($source, 'rb');
-        if ($in === false) {
+        unset($budget_sec);
+        if ($byte_offset > 0) {
             return null;
         }
-
-        if ($byte_offset === 0) {
-            $magic_len = strlen(self::MAGIC);
-            $magic = $in->read($magic_len);
-            if ($magic !== self::MAGIC) {
-                $in->close();
-                return null;
-            }
-            $iv = $in->read(16);
-            $byte_offset = $magic_len + 16;
-        } else {
-            $in->seek($byte_offset);
-            $iv = $in->read(16);
-        }
-
-        $out = Rmmigrate_Filesystem::open($dest, 'ab');
-        if ($out === false) {
-            $in->close();
+        if (!self::decrypt_file($source, $dest)) {
             return null;
         }
-
-        $start = microtime(true);
-        while ((microtime(true) - $start) < $budget_sec) {
-            $len_header = $in->read(4);
-            if ($len_header === false || strlen($len_header) < 4) {
-                break;
-            }
-            $len = unpack('N', $len_header)[1];
-            $encrypted = $in->read($len);
-            if ($encrypted === false || strlen($encrypted) < $len) {
-                break;
-            }
-            $plain = openssl_decrypt($encrypted, 'AES-256-CBC', $key, OPENSSL_RAW_DATA, $iv);
-            if ($plain === false) {
-                break;
-            }
-            $out->write($plain);
-            $iv = substr(hash('sha256', $iv . $encrypted, true), 0, 16);
-            $byte_offset = (int) $in->tell();
-        }
-
-        $complete = $in->eof() || $byte_offset >= Rmmigrate_Filesystem::filesize($source);
-        $in->close();
-        $out->close();
+        $size = Rmmigrate_Filesystem::filesize($source);
 
         return array(
-            'done'        => $complete,
-            'byte_offset' => $byte_offset,
+            'done'        => true,
+            'byte_offset' => $size > 0 ? $size : 0,
+            'plain_bytes' => Rmmigrate_Filesystem::exists($dest) ? (int) Rmmigrate_Filesystem::filesize($dest) : 0,
         );
     }
 
@@ -327,11 +375,15 @@ class Rmmigrate_Archive_Encryption
     {
         self::load_crypto_core();
         $in = Rmmigrate_Filesystem::open($source, 'rb');
+        if ($in === false) {
+            return false;
+        }
         if (Rmmigrate_Filesystem::exists($dest)) {
             Rmmigrate_Filesystem::delete($dest);
         }
         $out = Rmmigrate_Filesystem::open($dest, 'ab');
-        if ($in === false || $out === false) {
+        if ($out === false) {
+            $in->close();
             return false;
         }
 
@@ -339,9 +391,14 @@ class Rmmigrate_Archive_Encryption
         if ($magic === Rmmigrate_Crypto_Core::MAGIC_V2) {
             $salt = $in->read(Rmmigrate_Crypto_Core::V2_SALT_LEN);
             $iter_header = $in->read(4);
-            $iterations = (strlen((string) $iter_header) === 4) ? unpack('N', $iter_header)[1] : Rmmigrate_Crypto_Core::V2_ITERATIONS;
-            $key = Rmmigrate_Crypto_Core::derive_v2_key(self::archive_secret(), (string) $salt, (int) $iterations);
-            $ok = self::stream_decrypt_v2($in, $out, $key, 0);
+            $iterations = (strlen((string) $iter_header) === 4) ? (int) unpack('N', $iter_header)[1] : Rmmigrate_Crypto_Core::V2_ITERATIONS;
+            if (!Rmmigrate_Crypto_Core::iterations_in_range($iterations)) {
+                $in->close();
+                $out->close();
+                return false;
+            }
+            $key = Rmmigrate_Crypto_Core::derive_v2_key(self::archive_secret(), (string) $salt, $iterations);
+            $ok = self::stream_decrypt_v2($in, $out, $key, 0, (string) $salt, $iterations);
             $in->close();
             $out->close();
             return $ok;
@@ -360,34 +417,190 @@ class Rmmigrate_Archive_Encryption
 
     /**
      * v2 chunk loop. Reads from $in starting at the current position; budget 0
-     * means run to completion. Returns true on success / clean completion.
+     * means run to completion. Returns true on full success; false on failure or budget expiry.
      *
      * @param Rmmigrate_Filesystem_Stream $in
      * @param Rmmigrate_Filesystem_Stream $out
      */
-    private static function stream_decrypt_v2($in, $out, string $key, int $budget_sec): bool
+    private static function stream_decrypt_v2($in, $out, string $key, int $budget_sec, string $salt = '', int $iterations = 0, int $chunk_index = 0): bool
     {
         $start = microtime(true);
         while (!$in->eof()) {
             if ($budget_sec > 0 && (microtime(true) - $start) >= $budget_sec) {
-                return true;
+                return false;
             }
             $len_header = $in->read(4);
             if ($len_header === false || strlen($len_header) < 4) {
-                break;
+                return $in->eof();
             }
             $len = unpack('N', $len_header)[1];
             $blob = $in->read($len);
             if ($blob === false || strlen($blob) < $len) {
-                break;
+                return false;
             }
-            $plain = Rmmigrate_Crypto_Core::v2_open($blob, $key);
+            $aad = Rmmigrate_Crypto_Core::v2_chunk_aad(
+                $chunk_index,
+                0,
+                $chunk_index === 0 ? $salt : '',
+                $chunk_index === 0 ? $iterations : 0
+            );
+            $plain = Rmmigrate_Crypto_Core::v2_open_with_legacy($blob, $key, $aad);
             if ($plain === false) {
                 return false;
             }
             $out->write($plain);
+            $chunk_index++;
         }
         return true;
+    }
+
+    private static function expected_encrypt_chunk_count(int $plain_offset): int
+    {
+        if ($plain_offset <= 0) {
+            return 0;
+        }
+
+        $count = 0;
+        $remaining = $plain_offset;
+        while ($remaining > 0) {
+            $remaining -= min(self::PLAIN_CHUNK_SIZE, $remaining);
+            $count++;
+        }
+
+        return $count;
+    }
+
+    private static function v2_offset_after_n_chunks(string $path, int $chunk_count): int
+    {
+        $header_size = Rmmigrate_Crypto_Core::header_size_v2();
+        if ($chunk_count <= 0) {
+            return $header_size;
+        }
+
+        $in = Rmmigrate_Filesystem::open($path, 'rb');
+        if ($in === false) {
+            return $header_size;
+        }
+        $in->seek($header_size);
+
+        $offset = $header_size;
+        $count = 0;
+        while ($count < $chunk_count && !$in->eof()) {
+            $len_header = $in->read(4);
+            if ($len_header === false || strlen($len_header) < 4) {
+                break;
+            }
+            $len = (int) unpack('N', $len_header)[1];
+            $in->seek($len, SEEK_CUR);
+            $offset = (int) $in->tell();
+            $count++;
+        }
+        $in->close();
+
+        return $offset;
+    }
+
+    /**
+     * @return int|null Plain bytes confirmed before $byte_offset, or null on failure.
+     */
+    private static function v2_plain_bytes_before_source_offset(
+        string $source,
+        int $byte_offset,
+        string $key,
+        string $salt,
+        int $iterations
+    ): ?int {
+        $header_size = Rmmigrate_Crypto_Core::header_size_v2();
+        if ($byte_offset <= $header_size) {
+            return 0;
+        }
+
+        $in = Rmmigrate_Filesystem::open($source, 'rb');
+        if ($in === false) {
+            return null;
+        }
+        $in->seek($header_size);
+
+        $plain_bytes = 0;
+        $chunk_index = 0;
+        $offset = $header_size;
+        while ($offset < $byte_offset) {
+            $chunk_start = $offset;
+            $len_header = $in->read(4);
+            if ($len_header === false || strlen($len_header) < 4) {
+                $in->close();
+                return null;
+            }
+            $len = (int) unpack('N', $len_header)[1];
+            if ($chunk_start + 4 + $len > $byte_offset) {
+                break;
+            }
+            $blob = $in->read($len);
+            if ($blob === false || strlen($blob) < $len) {
+                $in->close();
+                return null;
+            }
+            $aad = Rmmigrate_Crypto_Core::v2_chunk_aad(
+                $chunk_index,
+                0,
+                $chunk_index === 0 ? $salt : '',
+                $chunk_index === 0 ? $iterations : 0
+            );
+            $plain = Rmmigrate_Crypto_Core::v2_open_with_legacy($blob, $key, $aad);
+            if ($plain === false) {
+                $in->close();
+                return null;
+            }
+            $plain_bytes += strlen($plain);
+            $offset = $chunk_start + 4 + $len;
+            $chunk_index++;
+        }
+        $in->close();
+
+        return $plain_bytes;
+    }
+
+    /**
+     * @return array{count:int,offset:int}
+     */
+    private static function v2_chunks_before_offset(string $path, int $byte_offset): array
+    {
+        $header_size = Rmmigrate_Crypto_Core::header_size_v2();
+        if ($byte_offset <= $header_size) {
+            return array('count' => 0, 'offset' => $header_size);
+        }
+
+        $in = Rmmigrate_Filesystem::open($path, 'rb');
+        if ($in === false) {
+            return array('count' => 0, 'offset' => $header_size);
+        }
+        $in->seek($header_size);
+
+        $count = 0;
+        $offset = $header_size;
+        while ($offset < $byte_offset && !$in->eof()) {
+            $chunk_start = $offset;
+            $len_header = $in->read(4);
+            if ($len_header === false || strlen($len_header) < 4) {
+                break;
+            }
+            $len = (int) unpack('N', $len_header)[1];
+            $chunk_end = $chunk_start + 4 + $len;
+            if ($chunk_end > $byte_offset) {
+                break;
+            }
+            $in->seek($len, SEEK_CUR);
+            $offset = $chunk_end;
+            $count++;
+        }
+        $in->close();
+
+        return array('count' => $count, 'offset' => $offset);
+    }
+
+    private static function count_v2_chunks_before_offset(string $path, int $byte_offset): int
+    {
+        return self::v2_chunks_before_offset($path, $byte_offset)['count'];
     }
 
     /**
@@ -400,15 +613,18 @@ class Rmmigrate_Archive_Encryption
     private static function stream_decrypt_v1($in, $out, string $key): bool
     {
         $iv = $in->read(16);
+        if ($iv === false || strlen($iv) < 16) {
+            return false;
+        }
         while (!$in->eof()) {
             $len_header = $in->read(4);
             if ($len_header === false || strlen($len_header) < 4) {
-                break;
+                return $in->eof();
             }
             $len = unpack('N', $len_header)[1];
             $encrypted = $in->read($len);
             if ($encrypted === false || strlen($encrypted) < $len) {
-                break;
+                return false;
             }
             $plain = openssl_decrypt($encrypted, 'AES-256-CBC', $key, OPENSSL_RAW_DATA, $iv);
             if ($plain === false) {

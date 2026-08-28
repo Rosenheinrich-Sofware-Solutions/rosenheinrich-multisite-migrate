@@ -17,7 +17,7 @@
         if (idx !== -1) {
             return url.substring(idx);
         }
-        return url;
+        return fallback;
     }
 
     function archivesUrlFromButton(el) {
@@ -62,21 +62,30 @@
         });
         window.setTimeout(function () {
             go(target);
-        }, 2000);
+        }, 4000);
     }
 
     function postSubscribe(subscribeUrl, fields) {
+        var controller = new AbortController();
+        var timeoutId = window.setTimeout(function () {
+            controller.abort();
+        }, 10000);
         return fetch(subscribeUrl, {
             method: 'POST',
             mode: 'cors',
             credentials: 'omit',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(fields || {})
+            body: JSON.stringify(fields || {}),
+            signal: controller.signal
         }).then(function (resp) {
+            window.clearTimeout(timeoutId);
             if (!resp.ok) {
                 throw new Error('subscribe_failed');
             }
             return resp.json();
+        }).catch(function (err) {
+            window.clearTimeout(timeoutId);
+            throw err;
         });
     }
 
@@ -115,15 +124,22 @@
             allow: '1'
         }).then(function (res) {
             if (!res || !res.success || !res.data) {
-                return $.Deferred().reject().promise();
+                return fallbackSubscribe();
             }
             var data = res.data;
             if (data.skipped) {
                 return $.Deferred().resolve().promise();
             }
-            return postSubscribe(data.subscribeUrl, data.fields).catch(function () {
+            return postSubscribe(data.subscribeUrl, data.fields).then(function () {
+                return $.post(rmmigrateAdmin.ajaxUrl, {
+                    action: 'rmmigrate_setup_wizard_newsletter_confirm',
+                    nonce: rmmigrateAdmin.nonce
+                });
+            }).catch(function () {
                 return fallbackSubscribe();
             });
+        }).catch(function () {
+            return fallbackSubscribe();
         });
     }
 
@@ -174,12 +190,19 @@
         var target = archivesUrlFromButton(this);
         var $card = $('.mm-setup-optin');
         var $btn = $(this);
+        if (!$card.hasClass('is-done') && !finishOptInInFlight) {
+            resolveFinishOptIn({ redirecting: true }).always(function () {
+                if (!$btn.prop('disabled')) {
+                    $card.addClass('is-submitting');
+                    $btn.prop('disabled', true).attr('aria-busy', 'true');
+                }
+                completeAndGo(target);
+            });
+            return;
+        }
         if (!$btn.prop('disabled')) {
             $card.addClass('is-submitting');
             $btn.prop('disabled', true).attr('aria-busy', 'true');
-        }
-        if (!$card.hasClass('is-done') && !finishOptInInFlight) {
-            resolveFinishOptIn({ redirecting: true });
         }
         completeAndGo(target);
     });

@@ -18,7 +18,13 @@ final class Rmmigrate_Process
      */
     public static function open(array $command, array $descriptors, ?array &$pipes = null, $cwd = null, $env = null, array $options = array())
     {
-        $disabled = array_map('trim', explode(',', (string) ini_get('disable_functions')));
+        if (!function_exists('proc_open')) {
+            return false;
+        }
+        $disabled = array_map(
+            'strtolower',
+            array_filter(array_map('trim', explode(',', (string) ini_get('disable_functions'))))
+        );
         if (in_array('proc_open', $disabled, true)) {
             return false;
         }
@@ -41,6 +47,7 @@ final class Rmmigrate_Process
                 Rmmigrate_Filesystem::fclose_pipe($pipe);
             }
         }
+        self::close($process);
     }
 
     /**

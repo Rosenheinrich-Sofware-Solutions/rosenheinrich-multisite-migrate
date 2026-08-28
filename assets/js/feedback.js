@@ -3,6 +3,7 @@
 
     var cfg = (window.rmmigrateAdmin && window.rmmigrateAdmin.feedback) || {};
     var i18n = cfg.i18n || {};
+    var releaseFeedbackTrap = null;
     var state = {
         open: false,
         sentiment: '',
@@ -11,8 +12,6 @@
         errorCode: '',
         errorMessage: '',
         onDone: null,
-        manual: false,
-        promptToken: 0,
         doneCalled: false,
         reviewMode: false
     };
@@ -94,6 +93,10 @@
         if (!state.open && !state.onDone) {
             return;
         }
+        if (typeof releaseFeedbackTrap === 'function') {
+            releaseFeedbackTrap();
+            releaseFeedbackTrap = null;
+        }
         var $dialog = $('#mm-feedback-dialog');
         $dialog.addClass('mm-hidden').attr('hidden', 'hidden');
         $('body').removeClass('mm-feedback-open');
@@ -124,7 +127,6 @@
         state.jobType = opts.jobType || '';
         state.errorCode = opts.errorCode || '';
         state.onDone = typeof opts.onDone === 'function' ? opts.onDone : null;
-        state.manual = !!opts.manual;
         state.doneCalled = false;
         resetForm();
         showAttachedError(opts.errorMessage || '');
@@ -155,18 +157,23 @@
         }
 
         // Shared 14-day lock for auto prompts once the dialog appears.
-        cfg.shouldPrompt = false;
-        $.post(rmmigrateAdmin.ajaxUrl, {
-            action: cfg.shownAction || 'rmmigrate_feedback_shown',
-            nonce: rmmigrateAdmin.nonce
-        });
+        if (!opts.manual) {
+            cfg.shouldPrompt = false;
+            $.post(rmmigrateAdmin.ajaxUrl, {
+                action: cfg.shownAction || 'rmmigrate_feedback_shown',
+                nonce: rmmigrateAdmin.nonce
+            });
+        }
 
         var $dialog = $('#mm-feedback-dialog');
         $dialog.removeClass('mm-hidden').removeAttr('hidden');
         $('body').addClass('mm-feedback-open');
         state.open = true;
         if (typeof rmmigrateAdminUI !== 'undefined' && rmmigrateAdminUI.trapFocus) {
-            rmmigrateAdminUI.trapFocus($dialog.find('.mm-feedback-modal'));
+            if (typeof releaseFeedbackTrap === 'function') {
+                releaseFeedbackTrap();
+            }
+            releaseFeedbackTrap = rmmigrateAdminUI.trapFocus($dialog.find('.mm-feedback-modal'));
         }
         if (state.reviewMode) {
             $dialog.find('#mm-feedback-review-link').trigger('focus');

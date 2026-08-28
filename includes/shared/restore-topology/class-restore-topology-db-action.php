@@ -79,8 +79,27 @@ class Rmmigrate_Restore_Topology_Db_Action
 
         $restore_mode = Rmmigrate_Restore_Topology_Manifest::restore_mode($manifest, $context);
         if ($restore_mode === 'network_to_subsite') {
-            $target_prefix = (string) ($context['target_prefix'] ?? $context['db_prefix'] ?? $manifest['db_prefix'] ?? 'wp_');
-            self::drop_prefixed_tables($pdo, $target_prefix);
+            $target_blog_id = Rmmigrate_Restore_Topology_Manifest::resolve_target_blog_id($context, $destination);
+            if ($target_blog_id <= 0) {
+                // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+                throw Rmmigrate_Job_Exception::raise(
+                    sanitize_key('topology_network_to_subsite_target'),
+                    esc_html__('Network-to-subsite import requires a target blog on this network.', 'rosenheinrich-multisite-migrate')
+                );
+            }
+            $target_prefix = (string) ($context['target_prefix'] ?? '');
+            if ($target_prefix === '') {
+                $base_prefix = (string) ($destination['base_prefix'] ?? $context['db_prefix'] ?? '');
+                if ($base_prefix === '') {
+                    $base_prefix = 'wp_';
+                }
+                $target_prefix = ($target_blog_id > 1)
+                    ? $base_prefix . $target_blog_id . '_'
+                    : $base_prefix;
+            } else {
+                $base_prefix = self::infer_base_prefix($target_prefix, $target_blog_id);
+            }
+            self::drop_prefixed_tables($pdo, $target_prefix, $base_prefix, $target_blog_id);
 
             return;
         }
@@ -129,7 +148,7 @@ class Rmmigrate_Restore_Topology_Db_Action
             return false;
         }
         $patterns = array('*rmmigrate_jobs', '*rmmigrate_pro_jobs');
-        if (class_exists('Rmmigrate_Multisite_Scope', false)) {
+        if (class_exists('Rmmigrate_Multisite_Scope')) {
             $patterns = Rmmigrate_Multisite_Scope::plugin_runtime_table_patterns();
         }
         foreach ($patterns as $pattern) {
@@ -279,7 +298,7 @@ class Rmmigrate_Restore_Topology_Db_Action
     {
         if ($blog_id > 1) {
             $suffix = $blog_id . '_';
-            if ($suffix !== '' && substr($blog_prefix, -strlen($suffix)) === $suffix) {
+            if (substr($blog_prefix, -strlen($suffix)) === $suffix) {
                 return substr($blog_prefix, 0, -strlen($suffix));
             }
         }
@@ -308,7 +327,7 @@ class Rmmigrate_Restore_Topology_Db_Action
         return $blog_prefix !== '' && strpos($table, $blog_prefix) === 0;
     }
 
-    private static function drop_prefixed_tables(PDO $pdo, string $prefix): int
+    private static function drop_prefixed_tables(PDO $pdo, string $prefix, string $base_prefix = '', int $blog_id = 0): int
     {
         if ($prefix === '') {
             return 0;
@@ -319,8 +338,12 @@ class Rmmigrate_Restore_Topology_Db_Action
             if (strpos($table, $prefix) !== 0) {
                 continue;
             }
-            // Guard: when prefix is the network base (wp_), never drop other blogs' tables.
-            if (preg_match('/^' . preg_quote($prefix, '/') . '\d+_/', $table)) {
+            if ($base_prefix !== '') {
+                if (!self::is_blog_owned_table($table, $prefix, $base_prefix, $blog_id > 0 ? $blog_id : 1)) {
+                    continue;
+                }
+            } elseif (preg_match('/^' . preg_quote($prefix, '/') . '\d+_/', $table)) {
+                // Guard: when prefix is the network base (wp_), never drop other blogs' tables.
                 continue;
             }
             if (self::is_plugin_runtime_table($table)) {

@@ -46,6 +46,7 @@ final class Rmmigrate_Plugin
 
         $this->require_if($includes . 'class-activator.php', 'Rmmigrate_Activator');
         $this->require_if($includes . 'class-deactivator.php', 'Rmmigrate_Deactivator');
+        require_once $includes . 'class-bootstrap.php';
         require_once $includes . 'class-upgrader.php';
         require_once $includes . 'class-capabilities.php';
         require_once $includes . 'class-settings.php';
@@ -61,6 +62,7 @@ final class Rmmigrate_Plugin
         require_once $includes . 'class-io-helpers.php';
         require_once $includes . 'class-user-error-messages.php';
         require_once $includes . 'class-error-codes.php';
+        require_once $includes . 'class-error-recorder.php';
         require_once $includes . 'class-job-exception.php';
         require_once $includes . 'class-hosting-detection.php';
         require_once $includes . 'class-post-migration.php';
@@ -155,7 +157,7 @@ final class Rmmigrate_Plugin
 
     public function run(): void
     {
-        add_filter('cron_schedules', array($this, 'add_cron_schedules'));
+        Rmmigrate_Bootstrap::register_cron_schedules_filter();
         // WP 6.7+: load translations on init (not plugins_loaded) to avoid JIT notices.
         add_action('init', array($this, 'load_textdomain'), 0);
         add_action('plugins_loaded', array($this, 'init'));
@@ -191,6 +193,7 @@ final class Rmmigrate_Plugin
         Rmmigrate_Admin_Assets::register();
         Rmmigrate_Ajax_Handler::register();
         Rmmigrate_Hosting_Detection::register();
+        Rmmigrate_Engine_Config::register_http_hooks();
         Rmmigrate_Retention::register();
         Rmmigrate_Job_Cleanup::register();
         Rmmigrate_Scheduler::register();
@@ -210,6 +213,7 @@ final class Rmmigrate_Plugin
         // Pro owns Ops-MCP when the commercial plugin is active (standalone or addon).
         if (!defined('RMMIGRATE_PRO_VERSION')) {
             Rmmigrate_OAuth_Store::ensure_tables();
+            Rmmigrate_OAuth_Store::register_cron();
             Rmmigrate_OAuth_Bearer_Auth::register();
             Rmmigrate_OAuth_Server::register();
             Rmmigrate_Ai_Agents_Rest::register();
@@ -220,10 +224,8 @@ final class Rmmigrate_Plugin
 
         if (is_multisite()) {
             Rmmigrate_Network_Admin::register();
-            Rmmigrate_Site_Admin::register();
-        } else {
-            Rmmigrate_Site_Admin::register();
         }
+        Rmmigrate_Site_Admin::register();
     }
 
     /**
@@ -246,7 +248,8 @@ final class Rmmigrate_Plugin
      */
     public static function backups_dir(): string
     {
-        if (isset($GLOBALS['rmmigrate_test_backup_dir'])) {
+        if (defined('RMMIGRATE_UNIT_TEST') && RMMIGRATE_UNIT_TEST
+            && isset($GLOBALS['rmmigrate_test_backup_dir'])) {
             return (string) $GLOBALS['rmmigrate_test_backup_dir'];
         }
         return Rmmigrate_Engine_Config::resolve_local_storage_path();
@@ -271,14 +274,24 @@ final class Rmmigrate_Plugin
         if (Rmmigrate_Engine_Config::storage_htaccess_enabled()) {
             if (!Rmmigrate_Filesystem::exists($htaccess)) {
                 $rules = "<IfModule mod_authz_core.c>\n    Require all denied\n</IfModule>\n<IfModule !mod_authz_core.c>\n    Deny from all\n</IfModule>\n";
-                Rmmigrate_Filesystem::put_contents($htaccess, $rules);
+                if (Rmmigrate_Filesystem::put_contents($htaccess, $rules) === false) {
+                    if (class_exists('Rmmigrate_Logger', false)) {
+                        Rmmigrate_Logger::log('Could not write backup storage .htaccess protection file.');
+                    }
+                    return false;
+                }
             }
         } elseif (Rmmigrate_Filesystem::exists($htaccess)) {
             Rmmigrate_Filesystem::delete($htaccess);
         }
         $index = $dir . '/index.php';
         if (!Rmmigrate_Filesystem::exists($index)) {
-            Rmmigrate_Filesystem::put_contents($index, "<?php\nif (!defined('ABSPATH')) {\n    exit;\n}\n// Silence is golden.\n");
+            if (Rmmigrate_Filesystem::put_contents($index, "<?php\nif (!defined('ABSPATH')) {\n    exit;\n}\n// Silence is golden.\n") === false) {
+                if (class_exists('Rmmigrate_Logger', false)) {
+                    Rmmigrate_Logger::log('Could not write backup storage index.php protection file.');
+                }
+                return false;
+            }
         }
         return true;
     }

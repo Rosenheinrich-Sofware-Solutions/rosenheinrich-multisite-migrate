@@ -23,6 +23,22 @@ class Rmmigrate_Ajax_Backup
         add_action('wp_ajax_rmmigrate_dismiss_last_error', array(__CLASS__, 'dismiss_last_error'));
         add_action('wp_ajax_rmmigrate_test_hosting', array(__CLASS__, 'test_hosting'));
         add_action('wp_ajax_rmmigrate_test_destination', array(__CLASS__, 'test_destination'));
+        add_action('wp_ajax_rmmigrate_search_subsites', array(__CLASS__, 'search_subsites'));
+    }
+
+    public static function search_subsites(): void
+    {
+        self::verify_request();
+        self::assert_network_management();
+        if (!is_multisite()) {
+            wp_send_json_success(array('sites' => array()));
+        }
+        $search = sanitize_text_field(Rmmigrate_Request_Input::post_text('search'));
+        $offset = max(0, Rmmigrate_Request_Input::post_int('offset'));
+        wp_send_json_success(array(
+            'sites' => Rmmigrate_Multisite_Scope::search_network_sites($search, 25, $offset),
+            'total' => (int) get_sites(array('count' => true)),
+        ));
     }
 
     public static function test_destination(): void
@@ -53,9 +69,10 @@ class Rmmigrate_Ajax_Backup
     public static function dismiss_last_error(): void
     {
         self::verify_request();
+        self::assert_network_management();
         $error = Rmmigrate_Job::resolve_admin_last_error(is_network_admin());
         if ((string) ($error['message'] ?? '') === '') {
-            wp_send_json_error(array('message' => __('Nothing to dismiss.', 'rosenheinrich-multisite-migrate')), 403);
+            wp_send_json_error(array('message' => __('Nothing to dismiss.', 'rosenheinrich-multisite-migrate')), 400);
         }
         delete_site_option('rmmigrate_last_error');
         wp_send_json_success();
@@ -116,9 +133,22 @@ class Rmmigrate_Ajax_Backup
         }
         Rmmigrate_Runner::note_worker_request($job_id, $source);
 
-        $result = Rmmigrate_Runner::process($job_id);
-
-        wp_send_json_success($result);
+        try {
+            $result = Rmmigrate_Runner::process($job_id);
+            wp_send_json_success($result);
+        } catch (Rmmigrate_Service_Exception $e) {
+            $ctx = $e->get_context();
+            self::backup_start_error(
+                $e->getMessage(),
+                array_merge(array('phase' => 'worker', 'job_id' => $job_id), $ctx),
+                isset($ctx['capability']) ? 403 : null
+            );
+        } catch (Throwable $e) {
+            self::rethrow_test_ajax_exit($e);
+            $message = self::json_error_message($e);
+            self::log_operation_failure('backup', $message, $job_id, array('phase' => 'worker'));
+            wp_send_json_error(array('message' => $message));
+        }
     }
 
     public static function status(): void
@@ -154,14 +184,15 @@ class Rmmigrate_Ajax_Backup
         $job_id = Rmmigrate_Request_Input::post_int('job_id');
         try {
             $result = Rmmigrate_Backup_Service::delete_job($job_id);
+            $message = (string) ($result['message'] ?? '');
             wp_send_json_success(array(
                 'queued'  => !empty($result['queued']),
-                'message' => $result['message'] !== ''
-                    ? $result['message']
+                'message' => $message !== ''
+                    ? $message
                     : __('Deleting…', 'rosenheinrich-multisite-migrate'),
             ));
         } catch (Rmmigrate_Service_Exception $e) {
-            wp_send_json_error(array('message' => $e->getMessage()));
+            self::respond_service_exception($e, 'backup', $job_id);
         }
     }
 
@@ -173,7 +204,7 @@ class Rmmigrate_Ajax_Backup
                 Rmmigrate_Request_Input::post_int_array('job_ids')
             ));
         } catch (Rmmigrate_Service_Exception $e) {
-            wp_send_json_error(array('message' => $e->getMessage()));
+            self::respond_service_exception($e, 'backup');
         }
     }
 
@@ -181,12 +212,12 @@ class Rmmigrate_Ajax_Backup
 
     public static function download(): void
     {
-        if (!self::user_can_download()) {
-            wp_die(esc_html__('Permission denied.', 'rosenheinrich-multisite-migrate'));
-        }
         $job_id = Rmmigrate_Request_Input::get_int('job_id');
         if (!wp_verify_nonce(Rmmigrate_Request_Input::get_text('nonce'), 'rmmigrate_admin')) {
             wp_die(esc_html__('Invalid nonce.', 'rosenheinrich-multisite-migrate'));
+        }
+        if (!self::user_can_download()) {
+            wp_die(esc_html__('Permission denied.', 'rosenheinrich-multisite-migrate'));
         }
         $job = Rmmigrate_Job::get($job_id);
         if ($job === null) {
@@ -194,12 +225,12 @@ class Rmmigrate_Ajax_Backup
         }
         self::assert_job_access($job);
         $path = Rmmigrate_Runner::resolve_local_path($job);
-        if (!Rmmigrate_Filesystem::exists($path)) {
-            wp_die(esc_html__('File not found.', 'rosenheinrich-multisite-migrate'));
-        }
         // Path-safety: current or legacy storage roots (pre DIR_NAME rename).
         if (!Rmmigrate_Engine_Config::is_path_under_allowed_storage($path)) {
             wp_die(esc_html__('Invalid backup path.', 'rosenheinrich-multisite-migrate'));
+        }
+        if (!Rmmigrate_Filesystem::exists($path)) {
+            wp_die(esc_html__('File not found.', 'rosenheinrich-multisite-migrate'));
         }
         self::prepare_binary_download_response();
         $ext = strtolower(pathinfo($path, PATHINFO_EXTENSION));
@@ -211,8 +242,12 @@ class Rmmigrate_Ajax_Backup
         } elseif ($ext === 'venc') {
             $mime = 'application/octet-stream';
         }
+        $filename = sanitize_file_name(basename($path));
+        if ($filename === '') {
+            $filename = 'archive.' . $ext;
+        }
         header('Content-Type: ' . $mime);
-        header('Content-Disposition: attachment; filename="' . basename($path) . '"');
+        header('Content-Disposition: attachment; filename="' . $filename . '"');
         header('Content-Length: ' . Rmmigrate_Filesystem::filesize($path));
         Rmmigrate_Filesystem::stream_to_stdout($path);
         exit;

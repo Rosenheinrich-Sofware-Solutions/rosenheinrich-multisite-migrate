@@ -40,7 +40,8 @@ class Rmmigrate_Admin_Menu
     public static function submenu_items(callable $callback): array
     {
         $titles = self::page_titles();
-        $items = array(
+
+        return array(
             array('slug' => 'multisite-migrate-archives', 'label' => $titles['multisite-migrate-archives'], 'callback' => $callback),
             array('slug' => 'multisite-migrate-migrate', 'label' => $titles['multisite-migrate-migrate'], 'callback' => $callback),
             array('slug' => 'multisite-migrate-schedule', 'label' => $titles['multisite-migrate-schedule'], 'callback' => $callback),
@@ -53,8 +54,6 @@ class Rmmigrate_Admin_Menu
                 'callback' => $callback,
             ),
         );
-
-        return $items;
     }
 
     /**
@@ -99,6 +98,8 @@ class Rmmigrate_Admin_Menu
             $menu_icon,
             58
         );
+
+        remove_submenu_page($first['slug'], $first['slug']);
 
         foreach ($visible_items as $item) {
             add_submenu_page(
@@ -150,14 +151,16 @@ class Rmmigrate_Admin_Menu
                 $callback
             );
         } else {
+            // Hidden-but-routable: register for direct URL access, then remove from submenu.
             add_submenu_page(
-                null,
+                $parent,
                 __('Setup Wizard', 'rosenheinrich-multisite-migrate'),
                 __('Setup Wizard', 'rosenheinrich-multisite-migrate'),
                 $cap,
                 'multisite-migrate-setup',
                 $callback
             );
+            remove_submenu_page($parent, 'multisite-migrate-setup');
         }
     }
 
@@ -166,9 +169,6 @@ class Rmmigrate_Admin_Menu
         return Rmmigrate_Request_Input::get_key('page', self::parent_slug());
     }
 
-    /**
-     * @return array<int,string>
-     */
     /**
      * @return array<int,string>
      */
@@ -203,9 +203,6 @@ class Rmmigrate_Admin_Menu
         }
         if (strpos($hook, 'multisite-migrate-schedule') !== false || strpos($hook, 'multisite-migrate-automate') !== false) {
             $needs[] = 'schedule';
-        }
-        if ($hook === 'toplevel_page_multisite-migrate-archives' || $hook === 'tools_page_multisite-migrate-archives') {
-            $needs = array_merge($needs, array('admin-tools', 'backup-create'));
         }
 
         return array_values(array_unique($needs));

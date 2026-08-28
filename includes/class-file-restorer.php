@@ -29,10 +29,13 @@ class Rmmigrate_File_Restorer
             );
         }
 
+        $queue = $this->load_queue(
+            $this->job->get_progress()['file_restore'] ?? array(),
+            $files_root
+        );
+
         $progress = $this->job->get_progress();
         $restore = $progress['file_restore'] ?? array();
-
-        $queue = $this->load_queue($restore, $files_root);
         $index = (int) ($restore['index'] ?? 0);
         $missing_count = (int) ($restore['missing_count'] ?? 0);
         $skipped_count = (int) ($restore['skipped_count'] ?? 0);
@@ -106,12 +109,21 @@ class Rmmigrate_File_Restorer
     private function load_queue(array $restore, string $files_root): array
     {
         $path = trailingslashit($this->job->get_work_dir()) . self::QUEUE_FILE;
+        $work_dir = wp_normalize_path(trailingslashit($this->job->get_work_dir()));
         if (Rmmigrate_Filesystem::exists($path)) {
             $contents = Rmmigrate_Filesystem::get_contents($path);
             if ($contents !== false) {
                 $decoded = json_decode($contents, true);
                 if (is_array($decoded)) {
-                    return $decoded;
+                    if (isset($decoded['queue']) && is_array($decoded['queue'])
+                        && $this->is_valid_queue_cache($decoded, $work_dir)) {
+                        return $decoded['queue'];
+                    }
+                    if ($this->is_valid_queue_list($decoded)) {
+                        $this->save_queue($decoded);
+
+                        return $decoded;
+                    }
                 }
             }
         }
@@ -140,10 +152,58 @@ class Rmmigrate_File_Restorer
      */
     private function save_queue(array $queue): void
     {
+        $payload = array(
+            'version'  => 1,
+            'work_dir' => wp_normalize_path(trailingslashit($this->job->get_work_dir())),
+            'length'   => count($queue),
+            'checksum' => hash('sha256', (string) wp_json_encode($queue)),
+            'queue'    => $queue,
+        );
         Rmmigrate_Filesystem::put_contents(
             trailingslashit($this->job->get_work_dir()) . self::QUEUE_FILE,
-            wp_json_encode($queue)
+            wp_json_encode($payload)
         );
+    }
+
+    /**
+     * @param array<string,mixed> $envelope
+     */
+    private function is_valid_queue_cache(array $envelope, string $work_dir): bool
+    {
+        if ((string) ($envelope['work_dir'] ?? '') !== $work_dir) {
+            return false;
+        }
+        $queue = $envelope['queue'] ?? null;
+        if (!is_array($queue)) {
+            return false;
+        }
+        if ((int) ($envelope['length'] ?? -1) !== count($queue)) {
+            return false;
+        }
+        $checksum = (string) ($envelope['checksum'] ?? '');
+        if ($checksum === ''
+            || !hash_equals($checksum, hash('sha256', (string) wp_json_encode($queue)))) {
+            return false;
+        }
+
+        return $this->is_valid_queue_list($queue);
+    }
+
+    /**
+     * @param array<int,mixed> $queue
+     */
+    private function is_valid_queue_list(array $queue): bool
+    {
+        foreach ($queue as $entry) {
+            if (!is_array($entry)
+                || !array_key_exists('src', $entry)
+                || !array_key_exists('dest', $entry)
+                || !array_key_exists('replace', $entry)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /**
@@ -153,6 +213,7 @@ class Rmmigrate_File_Restorer
     {
         $queue = array();
         $root = $this->job->get_restore_root();
+        $files_root = wp_normalize_path($files_root);
 
         $wp_config = $files_root . 'wp-config.php';
         $skip_wp_config = $this->should_skip_wp_config_restore();
@@ -173,14 +234,15 @@ class Rmmigrate_File_Restorer
                 }
                 $iterator = new RecursiveIteratorIterator(
                     new RecursiveDirectoryIterator($src_dir, RecursiveDirectoryIterator::SKIP_DOTS),
-                    RecursiveIteratorIterator::SELF_FIRST
+                    RecursiveIteratorIterator::SELF_FIRST,
+                    RecursiveIteratorIterator::CATCH_GET_CHILD
                 );
                 foreach ($iterator as $file) {
                     /** @var SplFileInfo $file */
                     if (!$file->isFile()) {
                         continue;
                     }
-                    $src = $file->getPathname();
+                    $src = wp_normalize_path($file->getPathname());
                     $rel = substr($src, strlen($files_root));
                     $queue[] = array('src' => $src, 'dest' => $root . $rel, 'replace' => false);
                 }
@@ -195,17 +257,21 @@ class Rmmigrate_File_Restorer
             }
         }
 
-        $content_root = $files_root . 'wp-content/';
+        $content_root = wp_normalize_path($files_root . 'wp-content/');
         if (Rmmigrate_Filesystem::is_dir($content_root)) {
             $uploads_only = $this->should_limit_to_subsite_uploads();
             $allowed_roots = $uploads_only ? $this->subsite_upload_dest_roots() : array();
             $iterator = new RecursiveIteratorIterator(
                 new RecursiveDirectoryIterator($content_root, RecursiveDirectoryIterator::SKIP_DOTS),
-                RecursiveIteratorIterator::SELF_FIRST
+                RecursiveIteratorIterator::SELF_FIRST,
+                RecursiveIteratorIterator::CATCH_GET_CHILD
             );
             foreach ($iterator as $file) {
                 /** @var SplFileInfo $file */
-                $src = $file->getPathname();
+                if (!$file->isFile()) {
+                    continue;
+                }
+                $src = wp_normalize_path($file->getPathname());
                 $rel = substr($src, strlen($content_root));
                 $dest = trailingslashit(WP_CONTENT_DIR) . $rel;
                 if ($uploads_only && !$this->dest_under_allowed_roots($dest, $allowed_roots)) {
@@ -314,13 +380,6 @@ class Rmmigrate_File_Restorer
             wp_mkdir_p($dest_dir);
         }
 
-        if (Rmmigrate_Filesystem::is_dir($src)) {
-            if (!Rmmigrate_Filesystem::is_dir($dest)) {
-                wp_mkdir_p($dest);
-            }
-            return $none;
-        }
-
         if ($search_replace !== null && !empty($item['replace'])) {
             $contents = Rmmigrate_Filesystem::get_contents($src);
             if ($contents !== false) {
@@ -328,7 +387,17 @@ class Rmmigrate_File_Restorer
                 if ($this->destination_matches_contents($dest, $transformed)) {
                     return $unchanged;
                 }
-                Rmmigrate_Filesystem::put_contents($dest, $transformed);
+                if (Rmmigrate_Filesystem::put_contents($dest, $transformed) === false) {
+                    Rmmigrate_Logger::log(
+                        sprintf(
+                            /* translators: 1: file name, 2: destination path */
+                            __('Could not write search-replace output for %1$s (%2$s); keeping the destination and continuing.', 'rosenheinrich-multisite-migrate'),
+                            basename($src),
+                            $dest
+                        )
+                    );
+                    return array('missing' => 0, 'skipped' => 1, 'unchanged' => 0);
+                }
                 return $none;
             }
         }
@@ -338,9 +407,6 @@ class Rmmigrate_File_Restorer
         }
 
         if (!Rmmigrate_Filesystem::copy($src, $dest)) {
-            if (Rmmigrate_Filesystem::files_identical($src, $dest)) {
-                return $unchanged;
-            }
             Rmmigrate_Logger::log(
                 sprintf(
                     /* translators: 1: file name, 2: destination path */

@@ -61,6 +61,7 @@
          */
         bindOverlayA11y: function (opts) {
             var focusReturn = document.activeElement;
+            var previousRelease = rmmigrateAdminUI._overlayRelease;
             var releaseTrap = rmmigrateAdminUI.trapFocus(opts.$container);
             var ns = opts.ns || 'mmOverlay';
             var $focus = opts.$initialFocus && opts.$initialFocus.length
@@ -85,7 +86,7 @@
                 $(document).off('keydown.' + ns);
                 releaseTrap();
                 if (rmmigrateAdminUI._overlayRelease === releaseAll) {
-                    rmmigrateAdminUI._overlayRelease = null;
+                    rmmigrateAdminUI._overlayRelease = previousRelease || null;
                 }
                 if (focusReturn && typeof focusReturn.focus === 'function') {
                     focusReturn.focus();
@@ -145,19 +146,26 @@
             }
 
             var isSimple = !title;
-            var bannerHtml = '<div class="mm-banner ' + variantClass + ' mm-notice-card mm-dynamic-notice" role="alert">';
-            bannerHtml += '<div class="mm-notice-card__inner">';
-            bannerHtml += '<span class="mm-notice-card__icon dashicons dashicons-' + iconName + '" aria-hidden="true"></span>';
-            bannerHtml += '<div class="mm-notice-card__content">';
+            var $notice = $('<div class="mm-banner ' + variantClass + ' mm-notice-card mm-dynamic-notice" role="alert"></div>');
+            var $inner = $('<div class="mm-notice-card__inner"></div>');
+            $inner.append('<span class="mm-notice-card__icon dashicons dashicons-' + iconName + '" aria-hidden="true"></span>');
+            var $content = $('<div class="mm-notice-card__content"></div>');
             if (title) {
-                bannerHtml += '<p class="mm-notice-card__title">' + $('<div/>').text(title).html() + '</p>';
+                $content.append($('<p class="mm-notice-card__title"></p>').text(title));
             }
-            bannerHtml += '<p class="mm-notice-card__text">' + $('<div/>').text(message).html() + '</p>';
-            bannerHtml += '</div>';
-            bannerHtml += '<button type="button" class="mm-banner__dismiss mm-notice-card__dismiss" aria-label="Dismiss notice"><span class="screen-reader-text">Dismiss</span></button>';
-            bannerHtml += '</div></div>';
-
-            var $notice = $(bannerHtml);
+            $content.append($('<p class="mm-notice-card__text"></p>').text(message));
+            $inner.append($content);
+            var dismissLabel = rmmigrateAdminUI.i18n('dismissNotice', 'Dismiss notice');
+            var dismissBtn = document.createElement('button');
+            dismissBtn.type = 'button';
+            dismissBtn.className = 'mm-banner__dismiss mm-notice-card__dismiss';
+            dismissBtn.setAttribute('aria-label', dismissLabel);
+            var dismissSr = document.createElement('span');
+            dismissSr.className = 'screen-reader-text';
+            dismissSr.textContent = dismissLabel;
+            dismissBtn.appendChild(dismissSr);
+            $inner.append(dismissBtn);
+            $notice.append($inner);
             $banners.prepend($notice);
 
             rmmigrateAdminUI.speak(message, isError ? 'assertive' : 'polite');
@@ -187,7 +195,7 @@
         },
 
         confirm: function (message, onConfirm) {
-            var descId = 'mm-confirm-desc-' + String(Date.now());
+            var descId = 'mm-confirm-desc-' + String(Date.now()) + '-' + Math.random().toString(36).slice(2, 9);
             var $overlay = $('<div class="mm-confirm-overlay"></div>');
             var $modal = $('<div class="mm-confirm-modal" role="alertdialog" aria-modal="true" aria-describedby="' + descId + '"></div>');
             $modal.attr('aria-label', rmmigrateAdminUI.i18n('confirm', 'Confirm'));
@@ -231,7 +239,7 @@
         },
 
         alert: function (message) {
-            var descId = 'mm-alert-desc-' + String(Date.now());
+            var descId = 'mm-alert-desc-' + String(Date.now()) + '-' + Math.random().toString(36).slice(2, 9);
             var $overlay = $('<div class="mm-confirm-overlay"></div>');
             var $modal = $('<div class="mm-confirm-modal" role="alertdialog" aria-modal="true" aria-describedby="' + descId + '"></div>');
             $modal.attr('aria-label', rmmigrateAdminUI.i18n('alertTitle', 'Notice'));
@@ -278,6 +286,7 @@
             var $fill = options.$fill;
             var $text = options.$text;
             var pollTimer = null;
+            var stopped = false;
 
             function resolveProgressMessage(data) {
                 var msg = (data && data.message) ? data.message : '';
@@ -300,7 +309,13 @@
                 }
             }
 
+            var pollFailures = 0;
+            var pollFailureLimit = 15;
+
             function poll() {
+                if (stopped) {
+                    return;
+                }
                 if (pollTimer) {
                     clearTimeout(pollTimer);
                 }
@@ -309,10 +324,23 @@
                     job_id: jobId,
                     nonce: rmmigrateAdmin.nonce
                 }).done(function (res) {
+                    if (stopped) {
+                        return;
+                    }
                     if (!res.success || !res.data) {
+                        pollFailures++;
+                        if (pollFailures >= pollFailureLimit) {
+                            var failPayload = { error: rmmigrateAdminUI.i18n('jobFailed', 'Failed') };
+                            rmmigrateAdminUI.toast(failPayload.error, 'error');
+                            if (typeof options.onError === 'function') {
+                                options.onError(failPayload);
+                            }
+                            return;
+                        }
                         pollTimer = setTimeout(poll, 2000);
                         return;
                     }
+                    pollFailures = 0;
                     var d = res.data;
                     var pct = d.percent || 0;
                     update(pct, resolveProgressMessage(d));
@@ -371,6 +399,18 @@
                         options.onComplete(d);
                     }
                 }).fail(function () {
+                    if (stopped) {
+                        return;
+                    }
+                    pollFailures++;
+                    if (pollFailures >= pollFailureLimit) {
+                        var failPayload = { error: rmmigrateAdminUI.i18n('jobFailed', 'Failed') };
+                        rmmigrateAdminUI.toast(failPayload.error, 'error');
+                        if (typeof options.onError === 'function') {
+                            options.onError(failPayload);
+                        }
+                        return;
+                    }
                     pollTimer = setTimeout(poll, 2000);
                 });
             }
@@ -378,6 +418,7 @@
             poll();
             return {
                 stop: function () {
+                    stopped = true;
                     if (pollTimer) {
                         clearTimeout(pollTimer);
                     }

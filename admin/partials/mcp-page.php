@@ -101,18 +101,18 @@ if (!defined('ABSPATH')) {
 			</div>
 			<div class="mm-nav-tabs-scroll mm-mcp-tabs-scroll">
 				<div class="mm-nav-tabs" role="tablist" aria-label="<?php echo esc_attr__('AI clients', 'rosenheinrich-multisite-migrate'); ?>">
-					<button type="button" class="mm-nav-tab is-active" role="tab" aria-selected="true" data-tab="claude-desktop">Claude Desktop</button>
-					<button type="button" class="mm-nav-tab" role="tab" aria-selected="false" data-tab="claude-code">Claude Code</button>
-					<button type="button" class="mm-nav-tab" role="tab" aria-selected="false" data-tab="cursor">Cursor</button>
-					<button type="button" class="mm-nav-tab" role="tab" aria-selected="false" data-tab="vscode">VS Code</button>
-					<button type="button" class="mm-nav-tab" role="tab" aria-selected="false" data-tab="gemini">Gemini</button>
-					<button type="button" class="mm-nav-tab" role="tab" aria-selected="false" data-tab="windsurf">Windsurf</button>
-					<button type="button" class="mm-nav-tab" role="tab" aria-selected="false" data-tab="chatgpt">ChatGPT</button>
+					<button type="button" class="mm-nav-tab is-active" role="tab" id="mm-mcp-tab-claude-desktop" aria-selected="true" aria-controls="mm-mcp-panel-claude-desktop" data-tab="claude-desktop">Claude Desktop</button>
+					<button type="button" class="mm-nav-tab" role="tab" id="mm-mcp-tab-claude-code" aria-selected="false" aria-controls="mm-mcp-panel-claude-code" data-tab="claude-code">Claude Code</button>
+					<button type="button" class="mm-nav-tab" role="tab" id="mm-mcp-tab-cursor" aria-selected="false" aria-controls="mm-mcp-panel-cursor" data-tab="cursor">Cursor</button>
+					<button type="button" class="mm-nav-tab" role="tab" id="mm-mcp-tab-vscode" aria-selected="false" aria-controls="mm-mcp-panel-vscode" data-tab="vscode">VS Code</button>
+					<button type="button" class="mm-nav-tab" role="tab" id="mm-mcp-tab-gemini" aria-selected="false" aria-controls="mm-mcp-panel-gemini" data-tab="gemini">Gemini</button>
+					<button type="button" class="mm-nav-tab" role="tab" id="mm-mcp-tab-windsurf" aria-selected="false" aria-controls="mm-mcp-panel-windsurf" data-tab="windsurf">Windsurf</button>
+					<button type="button" class="mm-nav-tab" role="tab" id="mm-mcp-tab-chatgpt" aria-selected="false" aria-controls="mm-mcp-panel-chatgpt" data-tab="chatgpt">ChatGPT</button>
 				</div>
 			</div>
 
 			<div class="mm-mcp-tab-panels">
-				<div class="mm-mcp-tab-panel is-active" data-panel="claude-desktop" role="tabpanel">
+				<div class="mm-mcp-tab-panel is-active" id="mm-mcp-panel-claude-desktop" data-panel="claude-desktop" role="tabpanel" aria-labelledby="mm-mcp-tab-claude-desktop">
 					<p><?php echo esc_html__('Paste this JSON into Claude Desktop MCP config (stdio via mcp-wordpress-remote).', 'rosenheinrich-multisite-migrate'); ?></p>
 					<ol class="mm-mcp-howto">
 						<li><?php echo esc_html__('Finish Setup and generate an Application Password, then Copy.', 'rosenheinrich-multisite-migrate'); ?></li>
@@ -124,7 +124,7 @@ if (!defined('ABSPATH')) {
 						<button type="button" class="button mm-mcp-copy" data-copy="mm-mcp-snip-stdio"><?php echo esc_html__('Copy', 'rosenheinrich-multisite-migrate'); ?></button>
 					</p>
 				</div>
-				<div class="mm-mcp-tab-panel" data-panel="claude-code" role="tabpanel" hidden>
+				<div class="mm-mcp-tab-panel" id="mm-mcp-panel-claude-code" data-panel="claude-code" role="tabpanel" aria-labelledby="mm-mcp-tab-claude-code" hidden>
 					<p><?php echo esc_html__('Run this once in a terminal where the Claude Code CLI is installed.', 'rosenheinrich-multisite-migrate'); ?></p>
 					<ol class="mm-mcp-howto">
 						<li><?php echo esc_html__('Generate an Application Password in Setup, then Copy the command.', 'rosenheinrich-multisite-migrate'); ?></li>
@@ -136,7 +136,7 @@ if (!defined('ABSPATH')) {
 						<button type="button" class="button mm-mcp-copy" data-copy="mm-mcp-snip-claude-code"><?php echo esc_html__('Copy', 'rosenheinrich-multisite-migrate'); ?></button>
 					</p>
 				</div>
-				<div class="mm-mcp-tab-panel" data-panel="cursor" role="tabpanel" hidden>
+				<div class="mm-mcp-tab-panel" id="mm-mcp-panel-cursor" data-panel="cursor" role="tabpanel" aria-labelledby="mm-mcp-tab-cursor" hidden>
 					<p><?php echo esc_html__('Add this JSON to Cursor MCP config.', 'rosenheinrich-multisite-migrate'); ?></p>
 					<ol class="mm-mcp-howto">
 						<li><?php echo esc_html__('Finish Setup, generate an Application Password, then Copy.', 'rosenheinrich-multisite-migrate'); ?></li>
@@ -150,7 +150,7 @@ if (!defined('ABSPATH')) {
 						<button type="button" class="button mm-mcp-copy" data-copy="mm-mcp-snip-cursor"><?php echo esc_html__('Copy', 'rosenheinrich-multisite-migrate'); ?></button>
 					</p>
 				</div>
-				<div class="mm-mcp-tab-panel" data-panel="vscode" role="tabpanel" hidden>
+				<div class="mm-mcp-tab-panel" id="mm-mcp-panel-vscode" data-panel="vscode" role="tabpanel" aria-labelledby="mm-mcp-tab-vscode" hidden>
 					<p><?php echo esc_html__('Add this JSON for VS Code / GitHub Copilot MCP.', 'rosenheinrich-multisite-migrate'); ?></p>
 					<ol class="mm-mcp-howto">
 						<li><?php echo esc_html__('Generate an Application Password in Setup, then Copy.', 'rosenheinrich-multisite-migrate'); ?></li>
@@ -162,7 +162,7 @@ if (!defined('ABSPATH')) {
 						<button type="button" class="button mm-mcp-copy" data-copy="mm-mcp-snip-vscode"><?php echo esc_html__('Copy', 'rosenheinrich-multisite-migrate'); ?></button>
 					</p>
 				</div>
-				<div class="mm-mcp-tab-panel" data-panel="gemini" role="tabpanel" hidden>
+				<div class="mm-mcp-tab-panel" id="mm-mcp-panel-gemini" data-panel="gemini" role="tabpanel" aria-labelledby="mm-mcp-tab-gemini" hidden>
 					<p><?php echo esc_html__('Add this under mcpServers in Gemini CLI settings.', 'rosenheinrich-multisite-migrate'); ?></p>
 					<ol class="mm-mcp-howto">
 						<li><?php echo esc_html__('Generate an Application Password in Setup, then Copy.', 'rosenheinrich-multisite-migrate'); ?></li>
@@ -174,7 +174,7 @@ if (!defined('ABSPATH')) {
 						<button type="button" class="button mm-mcp-copy" data-copy="mm-mcp-snip-gemini"><?php echo esc_html__('Copy', 'rosenheinrich-multisite-migrate'); ?></button>
 					</p>
 				</div>
-				<div class="mm-mcp-tab-panel" data-panel="windsurf" role="tabpanel" hidden>
+				<div class="mm-mcp-tab-panel" id="mm-mcp-panel-windsurf" data-panel="windsurf" role="tabpanel" aria-labelledby="mm-mcp-tab-windsurf" hidden>
 					<p><?php echo esc_html__('Paste this into Windsurf MCP settings.', 'rosenheinrich-multisite-migrate'); ?></p>
 					<ol class="mm-mcp-howto">
 						<li><?php echo esc_html__('Generate an Application Password in Setup, then Copy.', 'rosenheinrich-multisite-migrate'); ?></li>
@@ -186,7 +186,7 @@ if (!defined('ABSPATH')) {
 						<button type="button" class="button mm-mcp-copy" data-copy="mm-mcp-snip-windsurf"><?php echo esc_html__('Copy', 'rosenheinrich-multisite-migrate'); ?></button>
 					</p>
 				</div>
-				<div class="mm-mcp-tab-panel" data-panel="chatgpt" role="tabpanel" hidden>
+				<div class="mm-mcp-tab-panel" id="mm-mcp-panel-chatgpt" data-panel="chatgpt" role="tabpanel" aria-labelledby="mm-mcp-tab-chatgpt" hidden>
 					<p><?php echo esc_html__('ChatGPT Developer Mode connectors require OAuth (not Application Passwords alone).', 'rosenheinrich-multisite-migrate'); ?></p>
 					<p class="mm-mcp-step__actions">
 						<button type="button" class="button button-primary" id="mm-mcp-generate-oauth"><?php echo esc_html__('Generate ChatGPT OAuth credentials', 'rosenheinrich-multisite-migrate'); ?></button>
@@ -215,7 +215,7 @@ if (!defined('ABSPATH')) {
 							<li><?php echo esc_html__('Create connector → Auth = OAuth → paste MCP Server URL, Client ID/Secret, Authorization URL, Token URL', 'rosenheinrich-multisite-migrate'); ?></li>
 							<li><?php echo esc_html__('Authorize on this WordPress site when prompted. Copy the Client Secret now (shown once).', 'rosenheinrich-multisite-migrate'); ?></li>
 						</ol>
-						<p class="description"><?php echo esc_html__('ChatGPT Plus/Team + Developer Mode is a client requirement.', 'rosenheinrich-multisite-migrate'); ?></p>
+						<p class="description"><?php echo esc_html__('Creating OAuth credentials requires a WordPress administrator (or network owner on Multisite). On ChatGPT, Pro offers read/fetch-only MCP connector access; Business, Enterprise, and Education plans support write-capable MCP connectors. Pro users can enable Developer Mode themselves; Enterprise and Education users need an administrator or owner to grant access (RBAC delegation may apply). ChatGPT Plus offers limited connector access.', 'rosenheinrich-multisite-migrate'); ?></p>
 					</div>
 					<p class="mm-mcp-oauth-msg" id="mm-mcp-oauth-msg" aria-live="polite"></p>
 					<div class="mm-mcp-oauth-clients">

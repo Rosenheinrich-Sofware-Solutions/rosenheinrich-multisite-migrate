@@ -25,7 +25,14 @@ class Rmmigrate_Restore_Topology_Network_To_Subsite
         $target_prefix = (string) ($context['target_prefix'] ?? $context['db_prefix'] ?? $manifest['db_prefix'] ?? 'wp_');
         $source_prefix = Rmmigrate_Restore_Topology_Manifest::source_blog_prefix($manifest);
         if ($source_prefix !== $target_prefix) {
-            $remap = Rmmigrate_Restore_Topology_Prefix_Remap::remap_tables($pdo, $source_prefix, $target_prefix);
+            $dest_base = Rmmigrate_Restore_Topology_Standalone::base_table_prefix($target_prefix);
+            $preserve = Rmmigrate_Restore_Topology_Db_Action::network_global_table_names($dest_base);
+            $remap = Rmmigrate_Restore_Topology_Prefix_Remap::remap_tables(
+                $pdo,
+                $source_prefix,
+                $target_prefix,
+                $preserve
+            );
             $report['prefix_remapped'] = (int) ($remap['tables_renamed'] ?? 0);
         }
 
@@ -37,7 +44,7 @@ class Rmmigrate_Restore_Topology_Network_To_Subsite
             $host = (string) wp_parse_url($new_url, PHP_URL_HOST);
             $path = (string) (wp_parse_url($new_url, PHP_URL_PATH) ?? '/');
             if ($host !== '') {
-                $stmt = $pdo->prepare("UPDATE `{$blogs_table}` SET domain = ?, path = ? WHERE blog_id = ?");
+                $stmt = $pdo->prepare('UPDATE ' . self::quote_table_name($blogs_table) . ' SET domain = ?, path = ? WHERE blog_id = ?');
                 $stmt->execute(array($host, self::trailingslashit($path), $target_blog_id));
                 $report['target_blog_updated'] = $stmt->rowCount() > 0;
             }
@@ -52,12 +59,22 @@ class Rmmigrate_Restore_Topology_Network_To_Subsite
         return $report;
     }
 
+    private static function quote_table_name(string $table): string
+    {
+        return '`' . str_replace('`', '``', $table) . '`';
+    }
+
     private static function table_exists(PDO $pdo, string $table): bool
     {
         $stmt = $pdo->prepare('SHOW TABLES LIKE ?');
-        $stmt->execute(array($table));
+        $stmt->execute(array(self::escape_like_literal($table)));
 
         return (bool) $stmt->fetchColumn();
+    }
+
+    private static function escape_like_literal(string $value): string
+    {
+        return str_replace(array('\\', '%', '_'), array('\\\\', '\\%', '\\_'), $value);
     }
 
     private static function trailingslashit(string $path): string

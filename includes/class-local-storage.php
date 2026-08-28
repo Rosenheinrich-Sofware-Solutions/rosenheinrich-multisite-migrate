@@ -104,20 +104,6 @@ class Rmmigrate_Local_Storage
 
     private static function normalize_work_dir_rel(Rmmigrate_Job $job): string
     {
-        $job_id = $job->get_id();
-        $expected = 'jobs/' . $job_id . '/';
-        $progress = $job->get_progress();
-        $stored = isset($progress['init']['work_dir']) ? (string) $progress['init']['work_dir'] : '';
-        $stored = str_replace('\\', '/', ltrim($stored, '/'));
-
-        if ($stored === '' || $stored === 'jobs/' . $job_id || $stored === $expected) {
-            return $expected;
-        }
-
-        if (preg_match('#^jobs/' . preg_quote((string) $job_id, '#') . '/?$#', $stored)) {
-            return $expected;
-        }
-
-        return $expected;
+        return 'jobs/' . $job->get_id() . '/';
     }
 }

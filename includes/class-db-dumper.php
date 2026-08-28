@@ -104,7 +104,8 @@ class Rmmigrate_DB_Dumper
             $this->migrate_table_meta_from_progress();
             while ((microtime(true) - $start) < $budget_sec) {
                 Rmmigrate_Runner::refresh_sql_lock($this->job->get_id());
-                $done = $this->run_php_inserts_batch();
+                $remaining_budget = max(1, (int) floor($budget_sec - (microtime(true) - $start)));
+                $done = $this->run_php_inserts_batch($remaining_budget);
                 if ($done) {
                     $this->append_eof_marker();
                     $this->sync_sql_bytes_written();
@@ -188,16 +189,6 @@ class Rmmigrate_DB_Dumper
         return $available > 0 && $needed > (int) ($available * 0.45);
     }
 
-    private function insert_batch_size(): int
-    {
-        $available = self::available_php_memory_bytes();
-        if ($available > 0 && $available < 268435456) {
-            return self::INSERT_BATCH_LOW_MEMORY;
-        }
-
-        return self::INSERT_BATCH;
-    }
-
     public static function insert_query_limit(): int
     {
         $settings = Rmmigrate_Settings::get();
@@ -253,12 +244,15 @@ class Rmmigrate_DB_Dumper
 
     public static function apply_mysqldump_line_fixes(string $line): string
     {
-        $line = preg_replace('/^(\s*CREATE\s+TABLE)(\s+`.+`.*)$/im', '$1 IF NOT EXISTS$2', $line);
-        if ($line === null) {
-            return '';
+        $replaced = preg_replace('/^(\s*CREATE\s+TABLE)(\s+`.+`.*)$/im', '$1 IF NOT EXISTS$2', $line);
+        if ($replaced !== null) {
+            $line = $replaced;
         }
-        $line = preg_replace('/^(\s*INSERT)(\s+INTO\s+`.+`.*)$/im', '$1 IGNORE$2', $line);
-        return $line === null ? '' : $line;
+        $replaced = preg_replace('/^(\s*INSERT)(\s+INTO\s+`.+`.*)$/im', '$1 IGNORE$2', $line);
+        if ($replaced !== null) {
+            $line = $replaced;
+        }
+        return $line;
     }
 
     private static function parse_memory_limit(string $limit): int
@@ -397,10 +391,12 @@ class Rmmigrate_DB_Dumper
 
             Rmmigrate_Logger::log(sprintf('mysqldump schema pass for %d tables (bulk)', $total));
             $schema_budget = max(1, min($budget_sec, self::MYSQLDUMP_SCHEMA_BULK_BUDGET_SEC));
+            $db_host = $this->parse_db_host();
             $result = $this->stream_mysqldump_pass(
                 $this->get_mysqldump_path(),
-                $this->parse_db_host()['host'],
-                $this->parse_db_host()['port'],
+                $db_host['host'],
+                $db_host['port'],
+                $db_host['socket'],
                 $tables,
                 array('--no-data'),
                 false,
@@ -482,10 +478,12 @@ class Rmmigrate_DB_Dumper
         if (count($batch) === 1) {
             $where = $this->revision_exclude_sql_clause($batch[0]);
         }
+        $db_host = $this->parse_db_host();
         $result = $this->stream_mysqldump_pass(
             $this->get_mysqldump_path(),
-            $this->parse_db_host()['host'],
-            $this->parse_db_host()['port'],
+            $db_host['host'],
+            $db_host['port'],
+            $db_host['socket'],
             $batch,
             array('--no-create-info', '--no-create-db', '--insert-ignore'),
             true,
@@ -547,10 +545,12 @@ class Rmmigrate_DB_Dumper
     {
         Rmmigrate_Logger::log(sprintf('mysqldump data pass for %d tables (bulk)', $total));
         $bulk_budget = max(1, min($budget_sec, self::MYSQLDUMP_DATA_BULK_BUDGET_SEC));
+        $db_host = $this->parse_db_host();
         $result = $this->stream_mysqldump_pass(
             $this->get_mysqldump_path(),
-            $this->parse_db_host()['host'],
-            $this->parse_db_host()['port'],
+            $db_host['host'],
+            $db_host['port'],
+            $db_host['socket'],
             $tables,
             array('--no-create-info', '--no-create-db', '--insert-ignore'),
             true,
@@ -654,10 +654,12 @@ class Rmmigrate_DB_Dumper
         $slice_start = Rmmigrate_Filesystem::exists($this->sql_path)
             ? (int) Rmmigrate_Filesystem::filesize($this->sql_path)
             : 0;
+        $db_host = $this->parse_db_host();
         $result = $this->stream_mysqldump_pass(
             $this->get_mysqldump_path(),
-            $this->parse_db_host()['host'],
-            $this->parse_db_host()['port'],
+            $db_host['host'],
+            $db_host['port'],
+            $db_host['socket'],
             array($table),
             array('--no-data'),
             $index > 0,
@@ -687,16 +689,58 @@ class Rmmigrate_DB_Dumper
     }
 
     /**
-     * @return array{host:string,port:?string}
+     * @return array{host:string,port:?string,socket:?string}
      */
     private function parse_db_host(): array
     {
-        $host = DB_HOST;
+        $host = trim((string) DB_HOST);
         $port = null;
-        if (strpos($host, ':') !== false) {
-            list($host, $port) = explode(':', $host, 2);
+        $socket = null;
+        if (preg_match('|^([^:]+):(\d+)$|', $host, $matches)) {
+            $host = $matches[1];
+            $port = $matches[2];
+        } elseif (preg_match('|^([^:]+):(.+)$|', $host, $matches)) {
+            $host = $matches[1];
+            $socket = $matches[2];
+        } elseif (preg_match('|^(.+\.sock)$|', $host)) {
+            $socket = $host;
+            $host = 'localhost';
         }
-        return array('host' => $host, 'port' => $port);
+        return array('host' => $host, 'port' => $port, 'socket' => $socket);
+    }
+
+    /**
+     * @return string|null Absolute path to a 0600 MySQL defaults-extra-file, or null on failure.
+     */
+    private function create_mysqldump_defaults_extra_file(): ?string
+    {
+        $dir = trailingslashit(get_temp_dir());
+        if (!Rmmigrate_Filesystem::ensure_directory($dir)) {
+            return null;
+        }
+        $path = $dir . 'mysqldump-' . wp_generate_password(12, false, false) . '.cnf';
+        if ($path === '') {
+            return null;
+        }
+        $escaped = str_replace(array('\\', '"'), array('\\\\', '\\"'), (string) DB_PASSWORD);
+        $content = "[client]\npassword=\"{$escaped}\"\n";
+        if (Rmmigrate_Filesystem::put_contents($path, $content) === false) {
+            Rmmigrate_Filesystem::delete($path);
+            return null;
+        }
+        // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_chmod -- Temp cred file must be owner-only.
+        if (!@chmod($path, 0600)) {
+            Rmmigrate_Filesystem::delete($path);
+            return null;
+        }
+        return $path;
+    }
+
+    private function delete_mysqldump_defaults_extra_file(?string $path): void
+    {
+        if ($path !== null && $path !== '' && Rmmigrate_Filesystem::exists($path)) {
+            Rmmigrate_Filesystem::delete($path);
+        }
     }
 
     /**
@@ -712,7 +756,13 @@ class Rmmigrate_DB_Dumper
         if ($expected <= 0) {
             return $file_size >= 10;
         }
-        return $file_size + self::MYSQLDUMP_SIZE_TOLERANCE >= $expected;
+        $tolerance = max(
+            self::MYSQLDUMP_SIZE_TOLERANCE,
+            (int) round($expected * 0.15),
+            1048576
+        );
+
+        return $file_size + $tolerance >= $expected;
     }
 
     /**
@@ -720,40 +770,50 @@ class Rmmigrate_DB_Dumper
      * @param string[] $extra_flags
      * @return int 0 success, 1 slice budget reached, 2 cancelled, -1 failure
      */
-    private function stream_mysqldump_pass(string $bin, string $host, $port, array $tables, array $extra_flags, bool $append, int $budget_sec, string $where = ''): int
+    private function stream_mysqldump_pass(string $bin, string $host, $port, ?string $socket, array $tables, array $extra_flags, bool $append, int $budget_sec, string $where = ''): int
     {
-        $cmd = array_merge(
-            array(
-                $bin,
-                '--no-tablespaces',
-                '--single-transaction',
-                '--quick',
-                '--skip-lock-tables',
-                '--extended-insert',
-                '--hex-blob',
-                '--skip-comments',
-                '--net_buffer_length=' . (string) self::insert_query_limit(),
-                '-h',
-                $host,
-                '-u',
-                DB_USER,
-            ),
-            $extra_flags
-        );
-        if ($port) {
-            $cmd[] = '-P';
-            $cmd[] = $port;
-        }
-        if ($where !== '' && count($tables) === 1) {
-            $cmd[] = '--where=' . $where;
-        }
-        $cmd[] = '-p' . DB_PASSWORD;
-        $cmd[] = DB_NAME;
-        foreach ($tables as $table) {
-            $cmd[] = $table;
+        $creds_file = $this->create_mysqldump_defaults_extra_file();
+        if ($creds_file === null) {
+            Rmmigrate_Logger::log('mysqldump failed: could not create credentials file');
+            return -1;
         }
 
-        $descriptors = array(
+        try {
+            $cmd = array_merge(
+                array(
+                    $bin,
+                    '--defaults-extra-file=' . $creds_file,
+                    '--no-tablespaces',
+                    '--single-transaction',
+                    '--quick',
+                    '--skip-lock-tables',
+                    '--extended-insert',
+                    '--hex-blob',
+                    '--skip-comments',
+                    '--net_buffer_length=' . (string) self::insert_query_limit(),
+                    '-h',
+                    $host,
+                    '-u',
+                    DB_USER,
+                ),
+                $extra_flags
+            );
+            if ($socket !== null && $socket !== '') {
+                $cmd[] = '-S';
+                $cmd[] = $socket;
+            } elseif ($port) {
+                $cmd[] = '-P';
+                $cmd[] = $port;
+            }
+            if ($where !== '' && count($tables) === 1) {
+                $cmd[] = '--where=' . $where;
+            }
+            $cmd[] = DB_NAME;
+            foreach ($tables as $table) {
+                $cmd[] = $table;
+            }
+
+            $descriptors = array(
             0 => array('pipe', 'r'),
             1 => array('pipe', 'w'),
             2 => array('pipe', 'w'),
@@ -799,6 +859,7 @@ class Rmmigrate_DB_Dumper
         $line_buffer = '';
         $bytes_since_sync = 0;
         $deadline = microtime(true) + max(1, $budget_sec);
+        $last_maintenance_at = 0.0;
         $stdout = $pipes[1];
         while (true) {
             if (microtime(true) >= $deadline) {
@@ -811,13 +872,18 @@ class Rmmigrate_DB_Dumper
                 return 1;
             }
 
-            Rmmigrate_Runner::refresh_sql_lock($this->job->get_id());
+            $now = microtime(true);
+            if ($now - $last_maintenance_at >= 2.0) {
+                Rmmigrate_Runner::refresh_sql_lock($this->job->get_id());
 
-            if ($this->job_is_cancelled()) {
-                if ($bytes_since_sync > 0) {
-                    $this->sync_sql_bytes_written();
+                if ($this->job_is_cancelled()) {
+                    if ($bytes_since_sync > 0) {
+                        $this->sync_sql_bytes_written();
+                    }
+                    return $this->abort_mysqldump_pass($process, $pipes, $fh);
                 }
-                return $this->abort_mysqldump_pass($process, $pipes, $fh);
+
+                $last_maintenance_at = $now;
             }
 
             $read = array($stdout);
@@ -831,12 +897,23 @@ class Rmmigrate_DB_Dumper
             }
             $ready = @stream_select($read, $write, $except, $sec, $usec);
             if ($ready === false) {
+                $stderr = $this->drain_process_stderr($pipes[2] ?? null);
                 $this->log_mysqldump_failure(
                     'stream_select',
                     -1,
-                    $this->drain_process_stderr($pipes[2] ?? null)
+                    $stderr
                 );
-                break;
+                Rmmigrate_Process::terminate($process, array($pipes[1], $pipes[2]));
+                if ($bytes_since_sync > 0) {
+                    $this->sync_sql_bytes_written();
+                }
+                $fh->close();
+                Rmmigrate_Filesystem::fclose_pipe($pipes[1]);
+                if (is_resource($pipes[2])) {
+                    Rmmigrate_Filesystem::fclose_pipe($pipes[2]);
+                }
+                Rmmigrate_Process::close($process);
+                return -1;
             }
             if ($ready === 0) {
                 if (feof($stdout)) {
@@ -915,6 +992,9 @@ class Rmmigrate_DB_Dumper
         }
 
         return 0;
+        } finally {
+            $this->delete_mysqldump_defaults_extra_file($creds_file);
+        }
     }
 
     /**
@@ -1095,7 +1175,7 @@ class Rmmigrate_DB_Dumper
         return $create_index >= $total;
     }
 
-    private function run_php_inserts_batch(): bool
+    private function run_php_inserts_batch(?int $budget_sec = null): bool
     {
         global $wpdb;
 
@@ -1135,31 +1215,31 @@ class Rmmigrate_DB_Dumper
         // Scale batch size dynamically up to 5000 rows, strictly bound by the 4MB / 10% free memory budget
         $batch_size = max(1, min(5000, (int) floor($target_batch_bytes / $avg_row_length)));
 
-        // Determine if we can safely use WHERE PK > offset pagination (only for single integer PKs)
-        $use_pk_pagination = false;
-        if (count($pk_cols) === 1) {
-            $pk_col = $pk_cols[0];
-            $pk_type = strtolower($col_types[$pk_col] ?? '');
-            if (strpos($pk_type, 'int') !== false) {
-                $use_pk_pagination = true;
-            }
-        }
+        // Keyset pagination for any primary key; offset fallback only when no PK exists.
+        $use_pk_pagination = !empty($pk_cols);
 
-        if ($use_pk_pagination && $pk_offset !== null && $pk_offset !== '') {
-            $where = Rmmigrate_Snap_DB::build_pk_where($table, $pk_cols, $pk_offset);
-            $order_cols = Rmmigrate_Snap_DB::quote_identifier($pk_cols[0]);
+        if ($use_pk_pagination) {
+            $where = '';
+            if ($pk_offset !== null && $pk_offset !== '') {
+                $where = Rmmigrate_Snap_DB::build_pk_where($pk_cols, $pk_offset);
+            }
+            $order_cols = implode(',', array_map(array('Rmmigrate_Snap_DB', 'quote_identifier'), $pk_cols));
             $rev = $this->revision_exclude_sql_clause($table);
             if ($rev !== '') {
-                $where .= ' AND (' . $rev . ')';
+                if ($where === '') {
+                    $where = 'WHERE (' . $rev . ')';
+                } else {
+                    $where .= ' AND (' . $rev . ')';
+                }
             }
-            $sql = 'SELECT * FROM ' . $quoted_table . ' ' . $where . ' ORDER BY ' . $order_cols . ' ASC LIMIT ' . (int) $batch_size;
+            $sql = 'SELECT * FROM ' . $quoted_table . ($where !== '' ? ' ' . $where : '') . ' ORDER BY ' . $order_cols . ' ASC LIMIT ' . (int) $batch_size;
         } else {
-            // For composite PKs, binary PKs, or tables without PKs, use integer offset pagination
+            // Tables without PKs use integer offset pagination.
             $offset = (int) $table_rows_done;
             $rev = $this->revision_exclude_sql_clause($table);
             $rev_sql = $rev !== '' ? ' WHERE (' . $rev . ')' : '';
-            if (!empty($pk_cols)) {
-                $order_cols = implode(',', array_map(array('Rmmigrate_Snap_DB', 'quote_identifier'), $pk_cols));
+            $order_cols = implode(',', array_map(array('Rmmigrate_Snap_DB', 'quote_identifier'), array_keys($col_types)));
+            if ($order_cols !== '') {
                 $sql = 'SELECT * FROM ' . $quoted_table . $rev_sql . ' ORDER BY ' . $order_cols . ' ASC LIMIT ' . $offset . ', ' . (int) $batch_size;
             } else {
                 $sql = 'SELECT * FROM ' . $quoted_table . $rev_sql . ' LIMIT ' . $offset . ', ' . (int) $batch_size;
@@ -1193,9 +1273,8 @@ class Rmmigrate_DB_Dumper
         $cols = array();
         $all_values = array();
         $current_query_size = 0;
-        $budget_sec = Rmmigrate_Hosting_Detection::worker_budget_sec();
+        $budget_sec = $budget_sec ?? Rmmigrate_Hosting_Detection::worker_budget_sec();
         $start_time = microtime(true);
-        $time_exhausted = false;
         $has_rows = false;
         $current_sql_bytes = (int) ($db['sql_bytes_written'] ?? 0);
 
@@ -1283,7 +1362,6 @@ class Rmmigrate_DB_Dumper
             Rmmigrate_Engine_Config::apply_throttle();
 
             if (microtime(true) - $start_time >= $budget_sec) {
-                $time_exhausted = true;
                 break;
             }
         }
@@ -1349,7 +1427,7 @@ class Rmmigrate_DB_Dumper
         if (!isset($entry['avg_row_length'])) {
             global $wpdb;
             $status = $wpdb->get_row(
-                $wpdb->prepare('SHOW TABLE STATUS LIKE %s', $table),
+                $wpdb->prepare('SHOW TABLE STATUS LIKE %s', $wpdb->esc_like($table)),
                 ARRAY_A
             );
             $entry['avg_row_length'] = (int) ($status['Avg_row_length'] ?? 1024);
@@ -1615,6 +1693,12 @@ class Rmmigrate_DB_Dumper
             return true;
         }
         if (!file_exists($sql_path)) {
+            if ($expected_bytes !== 0) {
+                Rmmigrate_Logger::log(
+                    'SQL checkpoint realignment failed: file missing with expected_bytes='
+                    . (string) $expected_bytes
+                );
+            }
             return $expected_bytes === 0;
         }
         $current = (int) filesize($sql_path);
@@ -1672,16 +1756,6 @@ class Rmmigrate_DB_Dumper
         return 2;
     }
 
-    private function sql_export_complete(): bool
-    {
-        if (!Rmmigrate_Filesystem::exists($this->sql_path)) {
-            return false;
-        }
-        $size = Rmmigrate_Filesystem::filesize($this->sql_path);
-        $tail = Rmmigrate_Filesystem::get_contents($this->sql_path, max(0, $size - 512));
-        return is_string($tail) && strpos($tail, RMMIGRATE_DB_EOF) !== false;
-    }
-
     private function append_eof_marker(): void
     {
         Rmmigrate_Filesystem::put_contents($this->sql_path, "\n-- " . RMMIGRATE_DB_EOF . "\n", FILE_APPEND);
@@ -1702,7 +1776,12 @@ class Rmmigrate_DB_Dumper
         if (!$this->should_exclude_revisions()) {
             return '';
         }
-        $base = preg_replace('/^.*_/', '', $table);
+        global $wpdb;
+        // Match only <base_prefix>[<blog_id>_]posts / postmeta.
+        if (!preg_match('/^' . preg_quote($wpdb->base_prefix, '/') . '(?:\d+_)?(posts|postmeta)$/', $table, $m)) {
+            return '';
+        }
+        $base = $m[1];
         if ($base === 'posts') {
             return "`post_type` <> 'revision'";
         }

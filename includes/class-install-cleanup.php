@@ -15,7 +15,7 @@ class Rmmigrate_Install_Cleanup
     public const README_FILE = 'README.txt';
 
     /**
-     * @return list<array{path:string,label:string,size:int,type:string}>
+     * @return list<array{path:string,label:string,size:int,type:string,size_complete:bool}>
      */
     public static function scan(string $root = ''): array
     {
@@ -64,7 +64,8 @@ class Rmmigrate_Install_Cleanup
      */
     public static function delete(string $root = ''): array
     {
-        $items = self::scan($root);
+        $base = self::normalize_root($root);
+        $items = self::scan($base);
         $deleted = array();
         $failed = array();
 
@@ -80,17 +81,17 @@ class Rmmigrate_Install_Cleanup
 
         foreach ($files as $path) {
             if (Rmmigrate_Filesystem::delete($path)) {
-                $deleted[] = self::relative_label($path, $root !== '' ? $root : self::normalize_root(''));
+                $deleted[] = self::relative_label($path, $base);
             } else {
-                $failed[] = self::relative_label($path, $root !== '' ? $root : self::normalize_root(''));
+                $failed[] = self::relative_label($path, $base);
             }
         }
 
         foreach ($dirs as $path) {
             if (Rmmigrate_Filesystem::delete_directory($path)) {
-                $deleted[] = self::relative_label($path, $root !== '' ? $root : self::normalize_root(''));
+                $deleted[] = self::relative_label($path, $base);
             } else {
-                $failed[] = self::relative_label($path, $root !== '' ? $root : self::normalize_root(''));
+                $failed[] = self::relative_label($path, $base);
             }
         }
 
@@ -151,7 +152,7 @@ class Rmmigrate_Install_Cleanup
         }
 
         $dest_norm = str_replace('\\', '/', $candidate);
-        if (strpos($dest_norm, rtrim($root_prefix, '/')) !== 0) {
+        if (strpos($dest_norm, $root_prefix) !== 0) {
             return null;
         }
         return $candidate;
@@ -199,17 +200,27 @@ class Rmmigrate_Install_Cleanup
     }
 
     /**
-     * @return array{path:string,label:string,size:int,type:string}
+     * @return array{path:string,label:string,size:int,type:string,size_complete:bool}
      */
     private static function make_item(string $path, string $label, string $type): array
     {
+        if ($type === 'dir') {
+            $bounded = Rmmigrate_Filesystem::directory_size_bounded($path, 0.25);
+            return array(
+                'path'           => $path,
+                'label'          => $label,
+                'size'           => (int) ($bounded['size'] ?? 0),
+                'type'           => $type,
+                'size_complete'  => !empty($bounded['complete']),
+            );
+        }
+
         return array(
-            'path'  => $path,
-            'label' => $label,
-            'size'  => $type === 'dir'
-                ? (int) (Rmmigrate_Filesystem::directory_size_bounded($path, 0.25)['size'] ?? 0)
-                : Rmmigrate_Filesystem::filesize($path),
-            'type'  => $type,
+            'path'          => $path,
+            'label'         => $label,
+            'size'          => Rmmigrate_Filesystem::filesize($path),
+            'type'          => $type,
+            'size_complete' => true,
         );
     }
 

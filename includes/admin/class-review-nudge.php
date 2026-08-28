@@ -24,16 +24,10 @@ final class Rmmigrate_Review_Nudge
         'negative'  => true,
     );
 
-    /** @var bool|null Cached result for the current request. */
-    private static $global_notice_will_show;
-
     public static function register(): void
     {
         add_action('wp_ajax_rmmigrate_review_nudge_dismiss', array(__CLASS__, 'ajax_dismiss'));
         add_action('wp_ajax_rmmigrate_review_nudge_feedback', array(__CLASS__, 'ajax_feedback'));
-        add_action('admin_notices', array(__CLASS__, 'render_global_notice'));
-        add_action('network_admin_notices', array(__CLASS__, 'render_global_notice'));
-        add_action('admin_enqueue_scripts', array(__CLASS__, 'enqueue_global_assets'));
     }
 
     public static function should_show(string $page_slug, bool $is_network): bool
@@ -90,6 +84,7 @@ final class Rmmigrate_Review_Nudge
     public static function ajax_dismiss(): void
     {
         self::verify_ajax();
+        self::mark_cooldown();
         self::set_user_state('dismissed');
         Rmmigrate_Telemetry::record_event('review_nudge', array('action' => 'dismiss'));
         wp_send_json_success();
@@ -101,67 +96,14 @@ final class Rmmigrate_Review_Nudge
         $feedback = Rmmigrate_Request_Input::post_text('feedback');
         if ($feedback === 'reviewed' || $feedback === 'negative') {
             self::set_user_state($feedback);
+            if ($feedback === 'negative') {
+                self::mark_cooldown();
+            }
             Rmmigrate_Telemetry::record_event('review_nudge', array('action' => $feedback));
             wp_send_json_success();
         }
 
         wp_send_json_error(array('message' => __('Invalid feedback.', 'rosenheinrich-multisite-migrate')), 400);
-    }
-
-    public static function render_global_notice(): void
-    {
-        $page_slug = Rmmigrate_Request_Input::get_text('page');
-        $is_network = is_multisite() && is_network_admin();
-
-        if (self::is_plugin_admin_page($page_slug)) {
-            return;
-        }
-
-        self::render($page_slug, $is_network);
-    }
-
-    public static function enqueue_global_assets(string $hook): void
-    {
-        $page_slug = Rmmigrate_Request_Input::get_text('page');
-
-        if (self::is_plugin_admin_page($page_slug)) {
-            return;
-        }
-
-        $is_network = is_multisite() && is_network_admin();
-        self::$global_notice_will_show = self::should_show($page_slug, $is_network);
-
-        if (!self::$global_notice_will_show) {
-            return;
-        }
-
-        $ver = defined('RMMIGRATE_VERSION') ? (string) RMMIGRATE_VERSION : '1.0.0';
-
-        wp_enqueue_style(
-            'rmmigrate-tokens',
-            RMMIGRATE_URL . 'assets/css/multisite-migrate-tokens.css',
-            array(),
-            $ver
-        );
-        wp_enqueue_style(
-            'rmmigrate-components',
-            RMMIGRATE_URL . 'assets/css/multisite-migrate-components.css',
-            array('rmmigrate-tokens'),
-            $ver
-        );
-        wp_enqueue_script(
-            'rmmigrate-review-nudge',
-            RMMIGRATE_URL . 'assets/js/review-nudge.js',
-            array('jquery'),
-            $ver,
-            true
-        );
-        wp_localize_script('rmmigrate-review-nudge', 'rmmigrateReviewNudge', array(
-            'ajaxUrl'        => admin_url('admin-ajax.php'),
-            'nonce'          => wp_create_nonce('rmmigrate_admin'),
-            'dismissAction'  => 'rmmigrate_review_nudge_dismiss',
-            'feedbackAction' => 'rmmigrate_review_nudge_feedback',
-        ));
     }
 
     public static function ensure_first_activated_timestamp(): void
@@ -175,10 +117,15 @@ final class Rmmigrate_Review_Nudge
 
     private static function has_been_active_long_enough(): bool
     {
-        if (isset($GLOBALS['mm_test_review_nudge_activated_at'])) {
+        if (defined('RMMIGRATE_UNIT_TEST') && RMMIGRATE_UNIT_TEST && array_key_exists('mm_test_review_nudge_activated_at', $GLOBALS)) {
             $activated_at = (int) $GLOBALS['mm_test_review_nudge_activated_at'];
         } else {
-            $activated_at = (int) get_site_option(self::ACTIVATED_OPTION, 0);
+            $override = apply_filters('rmmigrate_review_nudge_activated_at', null);
+            if ($override !== null) {
+                $activated_at = (int) $override;
+            } else {
+                $activated_at = (int) get_site_option(self::ACTIVATED_OPTION, 0);
+            }
         }
 
         if ($activated_at <= 0) {
@@ -246,8 +193,13 @@ final class Rmmigrate_Review_Nudge
 
     private static function completed_backup_count(): int
     {
-        if (isset($GLOBALS['mm_test_review_nudge_backup_count'])) {
+        if (defined('RMMIGRATE_UNIT_TEST') && RMMIGRATE_UNIT_TEST && array_key_exists('mm_test_review_nudge_backup_count', $GLOBALS)) {
             return (int) $GLOBALS['mm_test_review_nudge_backup_count'];
+        }
+
+        $override = apply_filters('rmmigrate_review_nudge_backup_count', null);
+        if ($override !== null) {
+            return (int) $override;
         }
 
         $jobs = Rmmigrate_Job::list_jobs(array(
@@ -269,9 +221,14 @@ final class Rmmigrate_Review_Nudge
 
     private static function resolve_admin_last_error_for_nudge(bool $is_network): array
     {
-        if (array_key_exists('mm_test_review_nudge_last_error', $GLOBALS)) {
-            $error = $GLOBALS['mm_test_review_nudge_last_error'];
-            return is_array($error) ? $error : array();
+        if (defined('RMMIGRATE_UNIT_TEST') && RMMIGRATE_UNIT_TEST && array_key_exists('mm_test_review_nudge_last_error', $GLOBALS)) {
+            $override = $GLOBALS['mm_test_review_nudge_last_error'];
+            return is_array($override) ? $override : array();
+        }
+
+        $override = apply_filters('rmmigrate_review_nudge_last_error', null);
+        if ($override !== null) {
+            return is_array($override) ? $override : array();
         }
 
         return Rmmigrate_Job::resolve_admin_last_error($is_network);
@@ -279,8 +236,13 @@ final class Rmmigrate_Review_Nudge
 
     private static function has_recent_failure(bool $is_network): bool
     {
-        if (isset($GLOBALS['mm_test_review_nudge_has_recent_failure'])) {
+        if (defined('RMMIGRATE_UNIT_TEST') && RMMIGRATE_UNIT_TEST && array_key_exists('mm_test_review_nudge_has_recent_failure', $GLOBALS)) {
             return (bool) $GLOBALS['mm_test_review_nudge_has_recent_failure'];
+        }
+
+        $override = apply_filters('rmmigrate_review_nudge_has_recent_failure', null);
+        if ($override !== null) {
+            return (bool) $override;
         }
 
         $error = self::resolve_admin_last_error_for_nudge($is_network);
@@ -314,8 +276,13 @@ final class Rmmigrate_Review_Nudge
 
     private static function has_active_job(): bool
     {
-        if (isset($GLOBALS['mm_test_review_nudge_has_active_job'])) {
+        if (defined('RMMIGRATE_UNIT_TEST') && RMMIGRATE_UNIT_TEST && array_key_exists('mm_test_review_nudge_has_active_job', $GLOBALS)) {
             return (bool) $GLOBALS['mm_test_review_nudge_has_active_job'];
+        }
+
+        $override = apply_filters('rmmigrate_review_nudge_has_active_job', null);
+        if ($override !== null) {
+            return (bool) $override;
         }
 
         return Rmmigrate_Job::get_active() !== null;
@@ -333,10 +300,6 @@ final class Rmmigrate_Review_Nudge
         }
 
         if (apply_filters('rmmigrate_review_nudge_license_notice_blocks', false, $page_slug, $is_network)) {
-            return true;
-        }
-
-        if (!empty($GLOBALS['mm_test_review_nudge_license_blocks'])) {
             return true;
         }
 

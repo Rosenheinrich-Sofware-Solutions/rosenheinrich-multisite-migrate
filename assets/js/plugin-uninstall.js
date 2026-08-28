@@ -19,6 +19,8 @@
         }).join(',');
     }
 
+    var pluginRowSelector = rowSelector();
+
     // WP wraps plugin row actions in <span class="deactivate"><a>…</a></span>.
     function actionLinkInRow(row, action) {
         return row.querySelector('span.' + action + ' a');
@@ -96,7 +98,7 @@
                 return;
             }
             var id = 'mm-deactivate-reason-' + item.id;
-            var $li = $('<li></li>');
+            var $li = $('<li role="none"></li>');
             var $label = $('<label class="mm-deactivate-survey-option"></label>').attr('for', id);
             var $input = $('<input type="radio">')
                 .attr({
@@ -115,14 +117,12 @@
             .text(t('surveyDetails', 'Anything else? (optional)'));
         var $msg = $('<textarea id="mm-deactivate-reason-message" class="mm-deactivate-survey-message" rows="3" maxlength="1000"></textarea>')
             .attr('placeholder', t('surveyDetailsPlaceholder', ''));
-        var defaultEmail = (cfg.defaultContactEmail || '').toString();
         var $emailLabel = $('<label class="mm-deactivate-survey-message-label"></label>')
             .attr('for', 'mm-deactivate-contact-email')
             .text(t('surveyContactLabel', 'Email for follow-up (optional)'));
         var $emailHint = $('<p class="mm-deactivate-survey-contact-hint"></p>')
             .text(t('surveyContactHint', 'We may contact you if we need more details about a problem.'));
-        var $email = $('<input type="email" id="mm-deactivate-contact-email" class="mm-deactivate-survey-email" maxlength="100" autocomplete="email">')
-            .val(defaultEmail);
+        var $email = $('<input type="email" id="mm-deactivate-contact-email" class="mm-deactivate-survey-email" maxlength="100" autocomplete="email">');
         var $contact = $('<div class="mm-deactivate-survey-contact"></div>');
         $contact.append($emailLabel, $email, $emailHint);
         $details.append($msgLabel, $msg, $contact);
@@ -180,6 +180,7 @@
                 window.location.assign(res.data.redirect);
                 return;
             }
+            $button.prop('disabled', false).text(idleText);
             var ui = window.rmmigrateAdminUI || window.rmmigrateProAdminUI;
             var errMsg = (res && res.data && res.data.message) || failText;
             if (ui && typeof ui.alert === 'function') {
@@ -191,7 +192,7 @@
             $button.prop('disabled', false).text(idleText);
             var message = failText;
             if (textStatus === 'timeout') {
-                message = t('deactivateFailed', failText);
+                message = failText;
             } else if (xhr.responseJSON && xhr.responseJSON.data && xhr.responseJSON.data.message) {
                 message = xhr.responseJSON.data.message;
             }
@@ -244,6 +245,7 @@
         $('body').append($overlay);
 
         var releaseUninstallA11y = null;
+        var surveyClosed = false;
 
         function setKeepAll() {
             $inputs.keep_all.prop('checked', true);
@@ -260,6 +262,7 @@
         }
 
         function close() {
+            surveyClosed = true;
             if (typeof releaseUninstallA11y === 'function') {
                 releaseUninstallA11y();
                 releaseUninstallA11y = null;
@@ -348,7 +351,7 @@
 
             var finished = false;
             function finishSurveyThenAct() {
-                if (finished) {
+                if (finished || surveyClosed) {
                     return;
                 }
                 finished = true;
@@ -362,7 +365,7 @@
     }
 
     document.addEventListener('click', function (e) {
-        var row = e.target.closest(rowSelector());
+        var row = e.target.closest(pluginRowSelector);
         if (!row) {
             return;
         }

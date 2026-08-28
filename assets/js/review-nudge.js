@@ -16,9 +16,13 @@
             action: action,
             nonce: rmmigrateReviewNudge.nonce,
             feedback: feedback || ''
-        }).always(function (res) {
+        }).done(function (res) {
             if (typeof done === 'function') {
                 done(res);
+            }
+        }).fail(function () {
+            if (typeof done === 'function') {
+                done(null);
             }
         });
     }
@@ -26,9 +30,10 @@
     $(document).on('click', '.mm-review-nudge-dismiss, .mm-notice-card__dismiss.mm-review-nudge-dismiss', function () {
         var $notice = $(this).closest('.mm-review-nudge, .mm-notice-card');
         post(rmmigrateReviewNudge.dismissAction, '', function (res) {
-            if (res.success) {
-                fadeOut($notice);
+            if (!res || !res.success) {
+                return;
             }
+            fadeOut($notice);
         });
     });
 
@@ -36,9 +41,10 @@
         e.preventDefault();
         var $notice = $(this).closest('.mm-review-nudge, .mm-notice-card');
         post(rmmigrateReviewNudge.feedbackAction, 'negative', function (res) {
-            if (res.success) {
-                fadeOut($notice);
+            if (!res || !res.success) {
+                return;
             }
+            fadeOut($notice);
         });
     });
 

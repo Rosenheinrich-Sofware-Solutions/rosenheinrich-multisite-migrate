@@ -37,15 +37,34 @@ class Rmmigrate_Archive_Index
      */
     public static function has_core_paths(array $archive_paths): bool
     {
+        $has_wp_admin_index = false;
+        $has_index = false;
+        $has_settings = false;
+        $has_version = false;
+
         foreach ($archive_paths as $path) {
             $path = wp_normalize_path((string) $path);
-            if (strpos($path, 'files/wp-admin/') === 0 || $path === 'files/wp-admin') {
-                return true;
+            if ($path === 'files/wp-admin/index.php') {
+                $has_wp_admin_index = true;
             }
-            if ($path === 'files/index.php' || $path === 'files/wp-settings.php') {
-                return true;
+            if ($path === 'files/index.php') {
+                $has_index = true;
+            }
+            if ($path === 'files/wp-settings.php') {
+                $has_settings = true;
+            }
+            if ($path === 'files/wp-includes/version.php') {
+                $has_version = true;
             }
         }
-        return false;
+
+        if ($has_wp_admin_index) {
+            return true;
+        }
+        if ($has_index && $has_settings) {
+            return true;
+        }
+
+        return $has_version;
     }
 }

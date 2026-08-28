@@ -9,6 +9,33 @@ if (!defined('ABSPATH')) {
  */
 class Rmmigrate_Engine_Config
 {
+    /** @var bool */
+    private static $http_hooks_registered = false;
+
+    public static function register_http_hooks(): void
+    {
+        if (self::$http_hooks_registered) {
+            return;
+        }
+        self::$http_hooks_registered = true;
+        add_action('http_api_curl', array(__CLASS__, 'filter_http_api_curl'), 10, 3);
+    }
+
+    /**
+     * @param resource $handle
+     */
+    public static function filter_http_api_curl($handle, $request, $url): void
+    {
+        unset($request, $url);
+        if (!self::force_ip_resolve_v4()) {
+            return;
+        }
+        if (defined('CURLOPT_IPRESOLVE') && defined('CURL_IPRESOLVE_V4')) {
+            // phpcs:ignore WordPress.WP.AlternativeFunctions.curl_curl_setopt -- Plugin: WP http_api_curl handle; CURLOPT_IPRESOLVE has no wp_remote_* equivalent.
+            curl_setopt($handle, CURLOPT_IPRESOLVE, CURL_IPRESOLVE_V4);
+        }
+    }
+
     public static function sql_import_transactions(): bool
     {
         return !empty(Rmmigrate_Settings::get()['sql_import_transactions']);
@@ -37,7 +64,12 @@ class Rmmigrate_Engine_Config
 
     public static function ssl_verify(): bool
     {
-        return !empty(Rmmigrate_Settings::get()['ssl_verify']);
+        $settings = Rmmigrate_Settings::get();
+        if (!array_key_exists('ssl_verify', $settings)) {
+            return true;
+        }
+
+        return (bool) $settings['ssl_verify'];
     }
 
     /**
@@ -52,14 +84,6 @@ class Rmmigrate_Engine_Config
         $ca = self::ssl_ca_path();
         if ($ca !== '' && is_readable($ca) && empty($args['sslcertificates'])) {
             $args['sslcertificates'] = $ca;
-        }
-        if (self::force_ip_resolve_v4()) {
-            if (!isset($args['curl']) || !is_array($args['curl'])) {
-                $args['curl'] = array();
-            }
-            if (defined('CURL_IPRESOLVE_V4')) {
-                $args['curl'][CURLOPT_IPRESOLVE] = CURL_IPRESOLVE_V4;
-            }
         }
         return $args;
     }
@@ -132,7 +156,10 @@ class Rmmigrate_Engine_Config
 
     public static function resolve_local_storage_path(): string
     {
-        if (isset($GLOBALS['rmmigrate_test_backup_dir']) && is_string($GLOBALS['rmmigrate_test_backup_dir']) && $GLOBALS['rmmigrate_test_backup_dir'] !== '') {
+        if (defined('RMMIGRATE_UNIT_TEST') && RMMIGRATE_UNIT_TEST
+            && isset($GLOBALS['rmmigrate_test_backup_dir'])
+            && is_string($GLOBALS['rmmigrate_test_backup_dir'])
+            && $GLOBALS['rmmigrate_test_backup_dir'] !== '') {
             return wp_normalize_path($GLOBALS['rmmigrate_test_backup_dir']);
         }
 
@@ -242,10 +269,10 @@ class Rmmigrate_Engine_Config
         if ($uploads !== '') {
             $sites_root = wp_normalize_path(trailingslashit($uploads) . 'sites');
             if (Rmmigrate_Filesystem::is_dir($sites_root)) {
-                $nodes = @scandir($sites_root);
-                if (is_array($nodes)) {
+                $nodes = Rmmigrate_Filesystem::list_dir($sites_root);
+                if ($nodes !== array()) {
                     foreach ($nodes as $node) {
-                        if ($node === '.' || $node === '..' || !ctype_digit((string) $node)) {
+                        if (!ctype_digit((string) $node)) {
                             continue;
                         }
                         foreach (self::archive_dir_names() as $dir_name) {
@@ -292,11 +319,12 @@ class Rmmigrate_Engine_Config
      */
     public static function is_path_under_allowed_storage(string $path): bool
     {
-        if (self::path_looks_like_archive_storage($path)) {
-            return true;
-        }
-
         $norm = str_replace('\\', '/', wp_normalize_path($path));
+        foreach (explode('/', $norm) as $segment) {
+            if ($segment === '..') {
+                return false;
+            }
+        }
         foreach (self::allowed_local_storage_roots() as $root) {
             if ($root === '') {
                 continue;

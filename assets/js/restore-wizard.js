@@ -128,7 +128,7 @@
         }
         var newSite = $('#mm-new-site-url').val();
         if (!isValidUrl(newSite)) {
-            rmmigrateAdminUI.toast(rmmigrateAdminUI.i18n('enterNewUrl', 'Enter a valid new site URL (https://…).'), 'error');
+            rmmigrateAdminUI.toast(rmmigrateAdminUI.i18n('enterNewSiteUrl', 'Enter a valid new site URL (https://…).'), 'error');
             return false;
         }
         if (!$('#mm-home-same-as-site').is(':checked')) {
@@ -156,20 +156,49 @@
     });
 
     function buildReviewSummary() {
+        function reviewText(key, fallback) {
+            if (window.rmmigrateAdminUI && typeof rmmigrateAdminUI.i18n === 'function') {
+                return rmmigrateAdminUI.i18n(key, fallback);
+            }
+            return fallback;
+        }
+
         var type = getRestoreType();
         var mode = $('input[name="mm_restore_mode"]:checked').val() || 'both';
+        var modeLabels = {
+            both: reviewText('restoreModeBoth', 'Database and files'),
+            db: reviewText('restoreModeDb', 'Database only'),
+            files: reviewText('restoreModeFiles', 'Files only')
+        };
         var snapshot = $('#mm-safety-snapshot').is(':checked');
-        var lines = [
-            'Type: ' + (type === 'migration' ? 'Migration' : 'Same server'),
-            'Mode: ' + mode,
-            'Safety snapshot: ' + (snapshot ? 'Yes' : 'No')
+        var pairs = [
+            {
+                label: reviewText('reviewLabelType', 'Type'),
+                value: type === 'migration'
+                    ? reviewText('restoreTypeMigration', 'Migration')
+                    : reviewText('restoreTypeSameServer', 'Same server')
+            },
+            {
+                label: reviewText('reviewLabelMode', 'Mode'),
+                value: modeLabels[mode] || mode
+            },
+            {
+                label: reviewText('reviewLabelSafetySnapshot', 'Safety snapshot'),
+                value: snapshot ? reviewText('yes', 'Yes') : reviewText('no', 'No')
+            }
         ];
         if (type === 'migration') {
-            lines.push('New site URL: ' + ($('#mm-new-site-url').val() || '(not set)'));
+            pairs.push({
+                label: reviewText('reviewLabelNewSiteUrl', 'New site URL'),
+                value: $('#mm-new-site-url').val() || reviewText('notSet', 'Not set')
+            });
         }
-        $('#mm-restore-review-summary').html(lines.map(function (l) {
-            return '<dt>' + l.split(':')[0] + '</dt><dd>' + l.split(':').slice(1).join(':').trim() + '</dd>';
-        }).join(''));
+        $('#mm-restore-review-summary').empty();
+        pairs.forEach(function (pair) {
+            $('#mm-restore-review-summary')
+                .append($('<dt/>').text(pair.label))
+                .append($('<dd/>').text(pair.value));
+        });
     }
 
     window.rmmigrateAdminRestoreWizard = {
@@ -183,7 +212,7 @@
             if (presetMigration) {
                 applyMigrationDefaults();
             }
-            showStep(presetMigration ? 2 : 1);
+            showStep(getVisibleSteps()[0]);
             $('#mm-restore-confirm').prop('checked', false);
         },
         showStep: showStep

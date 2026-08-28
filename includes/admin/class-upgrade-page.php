@@ -26,22 +26,33 @@ class Rmmigrate_Upgrade_Page
 
     public static function enqueue_assets(): void
     {
+        $cap = is_network_admin() ? 'manage_network_options' : 'manage_options';
+        if (!current_user_can($cap)) {
+            return;
+        }
+
         $css = '#adminmenu .mm-upgrade-menu{color:#14b8a6 !important;font-weight:600;}'
             . '#adminmenu li:hover .mm-upgrade-menu,'
             . '#adminmenu a:focus .mm-upgrade-menu,'
             . '#adminmenu a:hover .mm-upgrade-menu{color:#5eead4 !important;}';
         wp_add_inline_style('common', $css);
 
-        wp_register_script('rmmigrate-upgrade-menu', false, array('jquery'), RMMIGRATE_VERSION, true);
+        wp_register_script('rmmigrate-upgrade-menu', false, array(), RMMIGRATE_VERSION, true);
         wp_enqueue_script('rmmigrate-upgrade-menu');
         wp_add_inline_script(
             'rmmigrate-upgrade-menu',
-            "jQuery(function ($) {
-                $('#mm-upgrade-menu-link').parent().attr({
-                    target: '_blank',
-                    rel: 'noopener noreferrer'
-                });
-            });"
+            "(function () {
+                var link = document.getElementById('mm-upgrade-menu-link');
+                if (!link || !link.parentElement) {
+                    return;
+                }
+                link.parentElement.setAttribute('target', '_blank');
+                link.parentElement.setAttribute('rel', 'noopener noreferrer');
+                var label = (link.textContent || '').trim();
+                if (label !== '') {
+                    link.setAttribute('aria-label', label + ' (opens in a new tab)');
+                }
+            })();"
         );
     }
 

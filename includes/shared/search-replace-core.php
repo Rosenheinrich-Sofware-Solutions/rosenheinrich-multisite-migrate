@@ -16,6 +16,9 @@ class Rmmigrate_Search_Replace_Core
     /** @var array<string,int> */
     private $counts = array();
 
+    /** @var int */
+    private $skipped_custom_serializable = 0;
+
     /**
      * @param array<string,mixed> $migration_map
      */
@@ -113,65 +116,175 @@ class Rmmigrate_Search_Replace_Core
             return strlen($b['search']) <=> strlen($a['search']);
         });
 
-        foreach ($this->pairs as $pair) {
-            $key = $pair['search'];
-            $before = $data;
-            $data = $this->recursive_replace($data, $pair['search'], $pair['replace']);
-            if ($data !== $before) {
-                $this->counts[$key] = ($this->counts[$key] ?? 0) + 1;
-            }
-        }
-
-        return $data;
+        return $this->replace_string_or_serialized($data);
     }
 
-    private function recursive_replace(string $data, string $search, string $replace): string
+    private function replace_string_or_serialized(string $data): string
     {
-        if ($search === '') {
+        if ($this->is_custom_serializable($data)) {
+            $this->skipped_custom_serializable++;
             return $data;
         }
 
         if ($this->is_serialized($data)) {
             $unserialized = @unserialize($data, array('allowed_classes' => false));
             if ($unserialized !== false || $data === 'b:0;') {
-                $unserialized = $this->replace_deep($unserialized, $search, $replace);
-                return serialize($unserialized);
+                return serialize($this->replace_deep($unserialized));
             }
         }
 
-        return str_replace($search, $replace, $data);
+        return $this->apply_all_pairs_to_string($data);
+    }
+
+    private function apply_all_pairs_to_string(string $original): string
+    {
+        $matches = $this->collect_non_cascading_matches($original);
+        if ($matches === array()) {
+            return $original;
+        }
+
+        usort($matches, static function ($a, $b) {
+            return $b['pos'] <=> $a['pos'];
+        });
+
+        $result = $original;
+        foreach ($matches as $match) {
+            $result = substr_replace($result, $match['replace'], $match['pos'], $match['len']);
+            $key = $match['search_key'];
+            $this->counts[$key] = ($this->counts[$key] ?? 0) + 1;
+        }
+
+        return $result;
+    }
+
+    /**
+     * @return array<int,array{pos:int,len:int,replace:string,search_key:string}>
+     */
+    private function collect_non_cascading_matches(string $original): array
+    {
+        $matches = array();
+        /** @var array<int,array{0:int,1:int}> $occupied */
+        $occupied = array();
+        $occupied_scan = 0;
+
+        foreach ($this->pairs as $pair) {
+            $search = $pair['search'];
+            if ($search === '') {
+                continue;
+            }
+
+            $search_len = strlen($search);
+            $offset = 0;
+            $occupied_scan = 0;
+            while (($pos = strpos($original, $search, $offset)) !== false) {
+                $end = $pos + $search_len;
+                if (!$this->interval_overlaps($occupied, $pos, $end, $occupied_scan)) {
+                    $matches[] = array(
+                        'pos'        => $pos,
+                        'len'        => $search_len,
+                        'replace'    => $pair['replace'],
+                        'search_key' => $search,
+                    );
+                    $this->insert_occupied_interval($occupied, $pos, $end);
+                }
+                $offset = $pos + 1;
+            }
+        }
+
+        return $matches;
+    }
+
+    /**
+     * @param array<int,array{0:int,1:int}> $occupied
+     */
+    private function insert_occupied_interval(array &$occupied, int $start, int $end): void
+    {
+        $interval = array($start, $end);
+        $count = count($occupied);
+        for ($i = 0; $i < $count; $i++) {
+            if ($start < $occupied[$i][0]) {
+                array_splice($occupied, $i, 0, array($interval));
+                return;
+            }
+        }
+        $occupied[] = $interval;
+    }
+
+    /**
+     * @param array<int,array{0:int,1:int}> $occupied
+     */
+    private function interval_overlaps(array $occupied, int $start, int $end, int &$from = 0): bool
+    {
+        $count = count($occupied);
+        while ($from < $count && $occupied[$from][1] <= $start) {
+            $from++;
+        }
+        for ($i = $from; $i < $count; $i++) {
+            if ($occupied[$i][0] >= $end) {
+                break;
+            }
+            if ($start < $occupied[$i][1] && $end > $occupied[$i][0]) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
      * @param mixed $value
      * @return mixed
      */
-    private function replace_deep($value, string $search, string $replace)
+    private function replace_deep($value, array &$seen_arrays = array(), array &$seen_objects = array())
     {
         if (is_string($value)) {
+            if ($this->is_custom_serializable($value)) {
+                $this->skipped_custom_serializable++;
+                return $value;
+            }
             if ($this->is_serialized($value)) {
                 $inner = @unserialize($value, array('allowed_classes' => false));
                 if ($inner !== false || $value === 'b:0;') {
-                    return serialize($this->replace_deep($inner, $search, $replace));
+                    return serialize($this->replace_deep($inner, $seen_arrays, $seen_objects));
                 }
             }
-            return str_replace($search, $replace, $value);
+            return $this->apply_all_pairs_to_string($value);
         }
 
         if (is_array($value)) {
-            foreach ($value as $k => $v) {
-                $value[$k] = $this->replace_deep($v, $search, $replace);
+            foreach ($seen_arrays as &$seen_array) {
+                if ($seen_array === $value) {
+                    return $value;
+                }
             }
+            unset($seen_array);
+            $seen_arrays[] = &$value;
+            foreach ($value as $k => $v) {
+                $value[$k] = $this->replace_deep($v, $seen_arrays, $seen_objects);
+            }
+            array_pop($seen_arrays);
+
             return $value;
         }
 
         if (is_object($value)) {
             if ($value instanceof __PHP_Incomplete_Class) {
-                return $this->replace_incomplete_object($value, $search, $replace);
+                $oid = spl_object_id($value);
+                if (isset($seen_objects[$oid])) {
+                    return $value;
+                }
+                $seen_objects[$oid] = true;
+                return $this->replace_incomplete_object($value, $seen_arrays, $seen_objects);
             }
+            $oid = spl_object_id($value);
+            if (isset($seen_objects[$oid])) {
+                return $value;
+            }
+            $seen_objects[$oid] = true;
             foreach (get_object_vars($value) as $k => $v) {
-                $value->$k = $this->replace_deep($v, $search, $replace);
+                $value->$k = $this->replace_deep($v, $seen_arrays, $seen_objects);
             }
+            unset($seen_objects[$oid]);
             return $value;
         }
 
@@ -187,7 +300,7 @@ class Rmmigrate_Search_Replace_Core
      * @param __PHP_Incomplete_Class $value
      * @return mixed
      */
-    private function replace_incomplete_object($value, string $search, string $replace)
+    private function replace_incomplete_object($value, array &$seen_arrays = array(), array &$seen_objects = array())
     {
         $vars = (array) $value;
         $class = isset($vars['__PHP_Incomplete_Class_Name']) ? (string) $vars['__PHP_Incomplete_Class_Name'] : '';
@@ -200,7 +313,7 @@ class Rmmigrate_Search_Replace_Core
         $serialized = 'O:' . strlen($class) . ':"' . $class . '":' . count($vars) . ':{';
         foreach ($vars as $prop_key => $prop_value) {
             $serialized .= serialize((string) $prop_key);
-            $serialized .= serialize($this->replace_deep($prop_value, $search, $replace));
+            $serialized .= serialize($this->replace_deep($prop_value, $seen_arrays, $seen_objects));
         }
         $serialized .= '}';
 
@@ -209,8 +322,16 @@ class Rmmigrate_Search_Replace_Core
         return false === $rebuilt ? $value : $rebuilt;
     }
 
+    private function is_custom_serializable(string $data): bool
+    {
+        return strlen($data) >= 4 && $data[0] === 'C' && $data[1] === ':';
+    }
+
     private function is_serialized(string $data): bool
     {
+        if ($this->is_custom_serializable($data)) {
+            return false;
+        }
         if ($data === 'N;') {
             return true;
         }
@@ -231,5 +352,10 @@ class Rmmigrate_Search_Replace_Core
     public function get_counts(): array
     {
         return $this->counts;
+    }
+
+    public function get_skipped_custom_serializable_count(): int
+    {
+        return $this->skipped_custom_serializable;
     }
 }

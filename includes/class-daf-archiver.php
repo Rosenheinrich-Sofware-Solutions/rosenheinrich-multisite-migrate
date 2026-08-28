@@ -87,7 +87,7 @@ class Rmmigrate_Daf_Archiver
         $archive = $progress['archive'] ?? array();
 
         if (empty($archive['file_list_built'])) {
-            if (!$this->build_file_list($budget_sec)) {
+            if (!$this->build_file_list(max(1, (int) floor($budget_sec)))) {
                 return false;
             }
             $archive = $this->job->get_progress()['archive'] ?? array();
@@ -101,13 +101,25 @@ class Rmmigrate_Daf_Archiver
 
         $this->ensure_valid_archive($daf_path, $file_index, $archive);
 
-        $byte_checkpoint = max(strlen(self::MAGIC), (int) ($archive['byte_offset'] ?? strlen(self::MAGIC)));
-        if (Rmmigrate_Filesystem::exists($daf_path) && Rmmigrate_Filesystem::filesize($daf_path) > $byte_checkpoint) {
-            RMMIGRATE_IO::truncate_file($daf_path, $byte_checkpoint);
+        if (!Rmmigrate_Filesystem::exists($daf_path)) {
+            $archive['entry_source_offset'] = 0;
+            $file_index = 0;
+            $archive['file_index'] = 0;
+            RMMIGRATE_IO::write_atomic($daf_path, self::MAGIC);
         }
 
-        if ($file_index === 0 && !Rmmigrate_Filesystem::exists($daf_path)) {
-            RMMIGRATE_IO::write_atomic($daf_path, self::MAGIC);
+        $byte_checkpoint = max(strlen(self::MAGIC), (int) ($archive['byte_offset'] ?? strlen(self::MAGIC)));
+        if (Rmmigrate_Filesystem::exists($daf_path)) {
+            $actual_size = (int) Rmmigrate_Filesystem::filesize($daf_path);
+            if ($actual_size < $byte_checkpoint) {
+                $clamped = max(strlen(self::MAGIC), $actual_size);
+                if ($clamped !== $byte_checkpoint) {
+                    $byte_checkpoint = $clamped;
+                    $archive['entry_source_offset'] = 0;
+                }
+            } elseif ($actual_size > $byte_checkpoint) {
+                RMMIGRATE_IO::truncate_file($daf_path, $byte_checkpoint);
+            }
         }
 
         $start = microtime(true);
@@ -119,16 +131,20 @@ class Rmmigrate_Daf_Archiver
             );
         }
         
-        $byte_checkpoint = max(strlen(self::MAGIC), (int) ($archive['byte_offset'] ?? strlen(self::MAGIC)));
         fseek($fh, $byte_checkpoint);
 
         $can_compress = function_exists('gzdeflate');
         $last_hb = microtime(true);
         $max_file_bytes = Rmmigrate_Settings::get_max_archive_file_bytes();
+        $preserve_entry_resume = false;
+        $resume_entry_source_offset = 0;
+        $resume_entry_total_bytes = 0;
 
         while ($file_index < $total && (microtime(true) - $start) < $budget_sec) {
-            Rmmigrate_Runner::touch_worker_lease($this->job->get_id());
-            $last_hb = microtime(true);
+            if ((microtime(true) - $last_hb) >= 30.0) {
+                Rmmigrate_Runner::touch_worker_lease($this->job->get_id());
+                $last_hb = microtime(true);
+            }
             $item = $queue[$file_index];
             if (!Rmmigrate_Filesystem::exists($item['path'])) {
                 $file_index++;
@@ -138,8 +154,16 @@ class Rmmigrate_Daf_Archiver
             $path_bytes = $item['archive'];
             $path_len = strlen($path_bytes);
             $uncompressed_len = Rmmigrate_Filesystem::filesize($item['path']);
-            if ($uncompressed_len < 0) {
+            if (!is_int($uncompressed_len)) {
+                Rmmigrate_Logger::log(sprintf(
+                    'Skipped unreadable file (unknown size): %s',
+                    $item['path']
+                ));
+                $archive['skipped_unreadable'] = (int) ($archive['skipped_unreadable'] ?? 0) + 1;
                 $file_index++;
+                $archive['entry_source_offset'] = 0;
+                $archive['entry_total_bytes'] = 0;
+                $archive['file_index'] = $file_index;
                 continue;
             }
 
@@ -186,10 +210,19 @@ class Rmmigrate_Daf_Archiver
 
             $data_fp = Rmmigrate_Filesystem::fopen_raw($item['path'], 'rb');
             if ($data_fp === false) {
+                Rmmigrate_Logger::log(sprintf(
+                    'Skipped unreadable file: %s',
+                    $item['path']
+                ));
                 if ($source_offset <= 0) {
                     RMMIGRATE_IO::truncate_file($daf_path, $entry_start);
                 }
-                break;
+                $archive['skipped_unreadable'] = (int) ($archive['skipped_unreadable'] ?? 0) + 1;
+                $file_index++;
+                $archive['entry_source_offset'] = 0;
+                $archive['entry_total_bytes'] = 0;
+                $archive['file_index'] = $file_index;
+                continue;
             }
 
             if ($source_offset > 0) {
@@ -197,8 +230,23 @@ class Rmmigrate_Daf_Archiver
             }
 
             $entry_ok = true;
+            $skip_source = false;
             $paused = false;
             $remaining = $uncompressed_len - max(0, $source_offset);
+            if ($remaining < 0) {
+                Rmmigrate_Logger::log(sprintf(
+                    'Archive entry resume offset exceeds source size: %s (offset %d, length %d)',
+                    $item['path'],
+                    $source_offset,
+                    $uncompressed_len
+                ));
+                Rmmigrate_Filesystem::fclose_raw($data_fp);
+                // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+                throw Rmmigrate_Job_Exception::raise(
+                    sanitize_key(Rmmigrate_Error_Codes::EXTRACT_FAILED),
+                    esc_html__('Backup archive source file does not match resume state.', 'rosenheinrich-multisite-migrate')
+                );
+            }
             while ($remaining > 0 && !feof($data_fp)) {
                 if ((microtime(true) - $last_hb) >= 30.0) {
                     Rmmigrate_Runner::touch_worker_lease($this->job->get_id());
@@ -220,14 +268,31 @@ class Rmmigrate_Daf_Archiver
                     $part = Rmmigrate_Filesystem::fread_raw($data_fp, $want - strlen($chunk));
                     if ($part === false) {
                         $entry_ok = false;
-                        break 2;
+                        $skip_source = true;
+                        break;
                     }
                     if ($part === '') {
+                        if ($remaining > 0) {
+                            $entry_ok = false;
+                            $skip_source = true;
+                        }
                         break;
                     }
                     $chunk .= $part;
                 }
+                if (!$entry_ok) {
+                    break;
+                }
                 if ($chunk === '') {
+                    if ($remaining > 0) {
+                        $entry_ok = false;
+                        $skip_source = true;
+                    }
+                    break;
+                }
+                if (strlen($chunk) < $want && feof($data_fp)) {
+                    $entry_ok = false;
+                    $skip_source = true;
                     break;
                 }
                 $block = $chunk;
@@ -240,12 +305,23 @@ class Rmmigrate_Daf_Archiver
                     }
                 }
                 $block_header = pack('C', $block_flag) . pack('N', strlen($block)) . pack('N', strlen($chunk));
-                if (Rmmigrate_Filesystem::fwrite_raw($fh, $block_header) === false
-                    || ($block !== '' && Rmmigrate_Filesystem::fwrite_raw($fh, $block) === false)) {
+                $block_start = (int) ftell($fh);
+                if (Rmmigrate_Filesystem::fwrite_raw($fh, $block_header) === false) {
+                    RMMIGRATE_IO::truncate_file($daf_path, $block_start);
+                    $entry_ok = false;
+                    break;
+                }
+                if ($block !== '' && Rmmigrate_Filesystem::fwrite_raw($fh, $block) === false) {
+                    RMMIGRATE_IO::truncate_file($daf_path, $block_start);
                     $entry_ok = false;
                     break;
                 }
                 $remaining -= strlen($chunk);
+                if ($remaining < 0) {
+                    $entry_ok = false;
+                    $skip_source = true;
+                    break;
+                }
                 // Pause after at least one block so entry_source_offset > 0 and the
                 // next slice resumes without rewriting the entry header.
                 if ($remaining > 0 && (microtime(true) - $start) >= $budget_sec) {
@@ -265,12 +341,41 @@ class Rmmigrate_Daf_Archiver
                     'entry_source_offset'  => $uncompressed_len - $remaining,
                     'entry_total_bytes'    => (int) $uncompressed_len,
                     'skipped_large'        => (int) ($archive['skipped_large'] ?? 0),
+                    'skipped_unreadable'   => (int) ($archive['skipped_unreadable'] ?? 0),
                 )));
                 return false;
             }
 
+            if ($skip_source) {
+                Rmmigrate_Logger::log(sprintf(
+                    'Skipped unreadable file (incomplete read): %s (%d of %d bytes)',
+                    $item['path'],
+                    max(0, $uncompressed_len - $remaining),
+                    $uncompressed_len
+                ));
+                if ($source_offset <= 0) {
+                    RMMIGRATE_IO::truncate_file($daf_path, $entry_start);
+                    $archive['skipped_unreadable'] = (int) ($archive['skipped_unreadable'] ?? 0) + 1;
+                    $file_index++;
+                    $archive['entry_source_offset'] = 0;
+                    $archive['entry_total_bytes'] = 0;
+                    $archive['file_index'] = $file_index;
+                    continue;
+                }
+                $preserve_entry_resume = true;
+                $resume_entry_source_offset = max(0, $uncompressed_len - $remaining);
+                $resume_entry_total_bytes = (int) $uncompressed_len;
+                break;
+            }
+
             if (!$entry_ok || $remaining > 0) {
-                RMMIGRATE_IO::truncate_file($daf_path, $entry_start);
+                if ($source_offset <= 0) {
+                    RMMIGRATE_IO::truncate_file($daf_path, $entry_start);
+                } else {
+                    $preserve_entry_resume = true;
+                    $resume_entry_source_offset = $uncompressed_len - $remaining;
+                    $resume_entry_total_bytes = (int) $uncompressed_len;
+                }
                 break;
             }
 
@@ -281,13 +386,17 @@ class Rmmigrate_Daf_Archiver
         }
         $byte_offset = (int) ftell($fh);
         Rmmigrate_Filesystem::fclose_raw($fh);
+        if ($byte_offset <= 0) {
+            $byte_offset = (int) strlen(self::MAGIC);
+        }
 
         $this->job->update_progress(array('archive' => array(
             'file_index'          => $file_index,
             'byte_offset'         => $byte_offset,
-            'entry_source_offset' => 0,
-            'entry_total_bytes'   => 0,
+            'entry_source_offset' => $preserve_entry_resume ? $resume_entry_source_offset : 0,
+            'entry_total_bytes'   => $preserve_entry_resume ? $resume_entry_total_bytes : 0,
             'skipped_large'       => (int) ($archive['skipped_large'] ?? 0),
+            'skipped_unreadable'  => (int) ($archive['skipped_unreadable'] ?? 0),
         )));
 
         if ($file_index >= $total) {
@@ -409,7 +518,11 @@ class Rmmigrate_Daf_Archiver
         if (!Rmmigrate_Filesystem::exists($path)) {
             return array();
         }
-        $decoded = json_decode(Rmmigrate_Filesystem::get_contents($path), true);
+        $raw = Rmmigrate_Filesystem::get_contents($path);
+        if ($raw === false) {
+            return array();
+        }
+        $decoded = json_decode($raw, true);
         return is_array($decoded) ? $decoded : array();
     }
 

@@ -5,7 +5,16 @@
         return rmmigrateAdminUI.i18n(key, fallback);
     }
 
+    function lastImportJobId() {
+        try {
+            return sessionStorage.getItem('mm_last_import_job_id') || '';
+        } catch (e) {
+            return '';
+        }
+    }
+
     var pollTimer = null;
+    var restorePollHandle = null;
     var progressMode = 'restore';
     var restoreFocusReturn = null;
 
@@ -48,7 +57,11 @@
         if (!$banner.length || $banner.find('.mm-banner__dismiss').length) {
             return;
         }
-        var $dismiss = $('<button type="button" class="button mm-banner__dismiss mm-dismiss-active-job">' + t('dismiss', 'Dismiss') + '</button>');
+        var dismissBtn = document.createElement('button');
+        dismissBtn.type = 'button';
+        dismissBtn.className = 'button mm-banner__dismiss mm-dismiss-active-job';
+        dismissBtn.textContent = t('dismiss', 'Dismiss');
+        var $dismiss = $(dismissBtn);
         $dismiss.on('click', function () {
             reloadWithoutJobId();
         });
@@ -173,7 +186,7 @@
             action: 'rmmigrate_status',
             nonce: rmmigrateAdmin.nonce
         }).done(function (res) {
-            if (!res.success || !res.data || !res.data.active || res.data.job_type !== 'restore') {
+            if (!res || !res.success || !res.data || !res.data.active || res.data.job_type !== 'restore') {
                 return;
             }
             hideDialog();
@@ -279,7 +292,7 @@
                     safety_job_id: safetyJobId
                 });
                 $.post(rmmigrateAdmin.ajaxUrl, next).done(function (res) {
-                    if (!res.success) {
+                    if (!res || !res.success) {
                         rmmigrateAdminUI.toast(res.data && res.data.message ? res.data.message : t('restoreFailed', 'Restore failed'), 'error');
                         return;
                     }
@@ -301,7 +314,7 @@
 
     function runRestoreRequest(postData, activityUrl) {
         $.post(rmmigrateAdmin.ajaxUrl, postData).done(function (res) {
-            if (!res.success) {
+            if (!res || !res.success) {
                 rmmigrateAdminUI.toast(res.data && res.data.message ? res.data.message : t('restoreFailed', 'Restore failed'), 'error');
                 return;
             }
@@ -338,6 +351,9 @@
                 return;
             }
             var newParts = parseHostPath(newUrl);
+            if (!newParts.host) {
+                return;
+            }
             entries.push({
                 blog_id: parseInt($el.attr('data-blog-id'), 10) || 0,
                 old_domain: $el.attr('data-old-domain') || '',
@@ -399,27 +415,48 @@
             $table.empty();
             return;
         }
-        var html = '<table class="widefat striped"><thead><tr><th>' + t('subsiteColumn', 'Subsite / Domain') + '</th><th>' + t('oldUrlColumn', 'Old URL') + '</th><th>' + t('newUrlColumn', 'New URL') + '</th></tr></thead><tbody>';
+        var $tableEl = $('<table>').addClass('widefat striped');
+        var $thead = $('<thead>').append(
+            $('<tr>').append(
+                $('<th>').text(t('subsiteColumn', 'Subsite / Domain')),
+                $('<th>').text(t('oldUrlColumn', 'Old URL')),
+                $('<th>').text(t('newUrlColumn', 'New URL'))
+            )
+        );
+        var $tbody = $('<tbody>');
         subsiteBlogs.forEach(function (blog) {
             var oldUrl = blog.site_url || '';
             var oldParts = parseHostPath(oldUrl);
             var pathTrim = (blog.path || '').replace(/^\/+|\/+$/g, '');
-            var label = pathTrim !== '' ? ('/' + pathTrim) : (oldParts.host || ('#' + blog.blog_id));
-            html += '<tr><td><strong>' + label + '</strong></td><td>' + oldUrl + '</td><td><input type="url" class="regular-text mm-blog-new-url" data-blog-id="' + blog.blog_id + '" data-old-domain="' + oldParts.host + '" data-old-path="' + (blog.path || '/') + '" placeholder="https://"></td></tr>';
+            var label = pathTrim !== '' ? ('/' + pathTrim) : (oldParts.host || ('#' + String(blog.blog_id)));
+            var $input = $('<input>', {
+                type: 'url',
+                'class': 'regular-text mm-blog-new-url',
+                placeholder: 'https://'
+            });
+            $input.attr('data-blog-id', String(blog.blog_id));
+            $input.attr('data-old-domain', oldParts.host || '');
+            $input.attr('data-old-path', blog.path || '/');
+            $tbody.append(
+                $('<tr>').append(
+                    $('<td>').append($('<strong>').text(label)),
+                    $('<td>').text(oldUrl),
+                    $('<td>').append($input)
+                )
+            );
         });
-        html += '</tbody></table>';
-        $table.html(html);
+        $table.empty().append($tableEl.append($thead, $tbody));
     }
 
     $(document).on('click', '.mm-restore-backup', function () {
-        var jobId = parseInt($(this).attr('data-job-id') || $(this).data('job-id') || sessionStorage.getItem('mm_last_import_job_id') || new URLSearchParams(window.location.search).get('job_id') || '0', 10);
+        var jobId = parseInt($(this).attr('data-job-id') || $(this).data('job-id') || lastImportJobId() || new URLSearchParams(window.location.search).get('job_id') || '0', 10);
         var presetMigration = $(this).data('preset-migration') === 1 || $(this).attr('data-preset-migration') === '1';
         $('#mm-restore-source-id').val(jobId);
         $('#mm-restore-passphrase').val('');
         $('#mm-restore-passphrase-wrap').addClass('mm-hidden');
         showDialog(presetMigration);
         loadManifest(jobId).done(function (res) {
-            if (!res.success || !res.data.manifest) {
+            if (!res || !res.success || !res.data || !res.data.manifest) {
                 return;
             }
             if (res.data.manifest_incomplete) {
@@ -438,7 +475,7 @@
             $('#mm-old-site-url').val(m.site_url || '');
             $('#mm-old-home-url').val(m.home_url || '');
             if (presetMigration) {
-                applyMigrationDefaultsFromManifest(m);
+                applyMigrationDefaultsFromManifest();
             } else {
                 $('#mm-new-site-url').val('');
                 $('#mm-new-home-url').val('');
@@ -448,7 +485,7 @@
         });
     });
 
-    function applyMigrationDefaultsFromManifest(manifest) {
+    function applyMigrationDefaultsFromManifest() {
         var base = currentSiteUrl();
         $('#mm-new-site-url').val(base);
         if ($('#mm-home-same-as-site').is(':checked')) {
@@ -496,37 +533,26 @@
         if (blogDomains.length) {
             data.blog_domains = blogDomains;
         }
-        var startAdvanced = function () {
-            $.post(rmmigrateAdmin.ajaxUrl, data).done(function (res) {
-                if (!res.success) {
-                    rmmigrateAdminUI.toast(res.data && res.data.message ? res.data.message : t('restoreFailed', 'Restore failed'), 'error');
-                    return;
-                }
-                if (res.data.awaiting_safety && res.data.safety_job_id) {
-                    hideDialog();
-                    showProgressPanel('restore');
-                    progressText().text(res.data.message || t('creatingSafetySnapshot', 'Creating safety snapshot…'));
-                    pollSafetyThenRestore(res.data.safety_job_id, data);
-                    return;
-                }
-                hideDialog();
-                redirectToJobProgress(res.data.job_id);
-            }).fail(function (xhr) {
-                toastRestoreRequestFailed(xhr);
-                tryResumeActiveRestorePoll();
-            });
-        };
-        startAdvanced();
+        runRestoreRequest(data);
     });
 
+    function stopRestorePoll() {
+        if (restorePollHandle && typeof restorePollHandle.stop === 'function') {
+            restorePollHandle.stop();
+        }
+        restorePollHandle = null;
+    }
+
     function pollRestore(jobId, activityUrl) {
+        stopRestorePoll();
         ensureActiveJobBanner(jobId, t('restoreInProgress', 'Restore in progress'));
         showRestoreCancelActions(jobId);
-        rmmigrateAdminUI.pollJob({
+        restorePollHandle = rmmigrateAdminUI.pollJob({
             jobId: jobId,
             $fill: progressFill(),
             $text: progressText(),
             onComplete: function () {
+                stopRestorePoll();
                 hideRestoreCancelActions();
                 $('#mm-active-job-banner, #mm-restore-progress').hide();
                 var successJobId = jobId;
@@ -543,6 +569,7 @@
                 }
             },
             onError: function (d) {
+                stopRestorePoll();
                 // pollJob already showed one error toast.
                 $('#mm-active-job-title').text(t('restoreFailed', 'Restore failed'));
                 $('#mm-active-job-banner, #mm-restore-progress').addClass('mm-finished-job').css('position', 'relative');

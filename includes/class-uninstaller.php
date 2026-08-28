@@ -26,8 +26,8 @@ class Rmmigrate_Uninstaller
         $saved = function_exists('get_site_option') ? get_site_option(self::PLAN_OPTION) : false;
         if (!is_array($saved)) {
             return array(
-                'delete_backups'  => true,
-                'delete_logs'     => true,
+                'delete_backups'  => false,
+                'delete_logs'     => false,
                 'delete_settings' => true,
             );
         }
@@ -70,6 +70,24 @@ class Rmmigrate_Uninstaller
 
         if (!empty($plan['delete_backups']) || !empty($plan['delete_logs'])) {
             self::delete_storage($storage_dir, $plan);
+        }
+
+        if (!empty($plan['delete_backups'])) {
+            self::drop_jobs_table();
+        }
+    }
+
+    private static function drop_jobs_table(): void
+    {
+        global $wpdb;
+
+        $snap_db_file = dirname(__DIR__) . '/includes/class-snap-db.php';
+        if (!class_exists('Rmmigrate_Snap_DB', false) && is_file($snap_db_file)) {
+            require_once $snap_db_file;
+        }
+
+        if (class_exists('Rmmigrate_Snap_DB', false)) {
+            Rmmigrate_Snap_DB::drop_table_if_exists($wpdb->base_prefix . 'rmmigrate_jobs');
         }
     }
 
@@ -186,6 +204,7 @@ class Rmmigrate_Uninstaller
             'rmmigrate_free_welcome_version',
             'rmmigrate_hosting_status',
             'rmmigrate_last_error',
+            'rmmigrate_recent_errors',
             'rmmigrate_migration_notice',
             'rmmigrate_recover_point_job_id',
             'rmmigrate_recover_point_deployed_at',
@@ -199,7 +218,30 @@ class Rmmigrate_Uninstaller
 
         foreach ($site_options as $option_name) {
             delete_site_option($option_name);
-            delete_option($option_name);
+        }
+
+        if (is_multisite() && function_exists('get_sites')) {
+            $page_size = 100;
+            $offset    = 0;
+            do {
+                $site_ids = get_sites(array(
+                    'fields' => 'ids',
+                    'number' => $page_size,
+                    'offset' => $offset,
+                ));
+                foreach ($site_ids as $site_id) {
+                    switch_to_blog((int) $site_id);
+                    foreach ($site_options as $option_name) {
+                        delete_option($option_name);
+                    }
+                    restore_current_blog();
+                }
+                $offset += $page_size;
+            } while (count($site_ids) === $page_size);
+        } else {
+            foreach ($site_options as $option_name) {
+                delete_option($option_name);
+            }
         }
 
         global $wpdb;
@@ -239,7 +281,6 @@ class Rmmigrate_Uninstaller
         }
 
         if (class_exists('Rmmigrate_Snap_DB', false)) {
-            Rmmigrate_Snap_DB::drop_table_if_exists($wpdb->base_prefix . 'rmmigrate_jobs');
             Rmmigrate_Snap_DB::drop_table_if_exists($wpdb->base_prefix . 'mm_oauth_clients');
             Rmmigrate_Snap_DB::drop_table_if_exists($wpdb->base_prefix . 'mm_oauth_tokens');
         }
@@ -262,7 +303,7 @@ class Rmmigrate_Uninstaller
     }
 
     /**
-     * @param array{delete_backups: bool, delete_logs: bool} $plan
+     * @param array{delete_backups?: bool, delete_logs?: bool, delete_settings?: bool} $plan
      */
     private static function delete_storage(string $storage_dir, array $plan): void
     {

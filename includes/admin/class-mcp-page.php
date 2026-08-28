@@ -25,32 +25,41 @@ final class Rmmigrate_Mcp_Page
             return;
         }
 
+        $required = is_multisite() && is_network_admin() ? 'manage_network' : 'manage_options';
+        if (!current_user_can($required)) {
+            return;
+        }
+
         $css = 'assets/admin/mcp/mcp-page.css';
         $js = 'assets/admin/mcp/mcp-page.js';
-        $css_ver = is_readable(RMMIGRATE_PATH . $css) ? (string) filemtime(RMMIGRATE_PATH . $css) : RMMIGRATE_VERSION;
-        $js_ver = is_readable(RMMIGRATE_PATH . $js) ? (string) filemtime(RMMIGRATE_PATH . $js) : RMMIGRATE_VERSION;
+        $css_ver = self::asset_version($css);
+        $js_ver = self::asset_version($js);
 
-        $style_dep = wp_style_is('rmmigrate-admin', 'registered') || wp_style_is('rmmigrate-admin', 'enqueued')
-            ? 'rmmigrate-admin'
-            : (wp_style_is('rmmigrate-pro-admin', 'registered') || wp_style_is('rmmigrate-pro-admin', 'enqueued')
-                ? 'rmmigrate-pro-admin'
-                : 'rmmigrate-admin');
-        $script_dep = wp_script_is('rmmigrate-admin-ux', 'registered') || wp_script_is('rmmigrate-admin-ux', 'enqueued')
-            ? 'rmmigrate-admin-ux'
-            : (wp_script_is('rmmigrate-pro-admin-ux', 'registered') || wp_script_is('rmmigrate-pro-admin-ux', 'enqueued')
-                ? 'rmmigrate-pro-admin-ux'
-                : 'rmmigrate-admin-ux');
+        $style_deps = array();
+        foreach (array('rmmigrate-admin', 'rmmigrate-pro-admin') as $handle) {
+            if (wp_style_is($handle, 'registered') || wp_style_is($handle, 'enqueued')) {
+                $style_deps = array($handle);
+                break;
+            }
+        }
+        $script_deps = array();
+        foreach (array('rmmigrate-admin-ux', 'rmmigrate-pro-admin-ux') as $handle) {
+            if (wp_script_is($handle, 'registered') || wp_script_is($handle, 'enqueued')) {
+                $script_deps = array($handle);
+                break;
+            }
+        }
 
         wp_enqueue_style(
             'rmmigrate-mcp-page',
             RMMIGRATE_URL . $css,
-            array($style_dep),
+            $style_deps,
             $css_ver
         );
         wp_enqueue_script(
             'rmmigrate-mcp-page',
             RMMIGRATE_URL . $js,
-            array($script_dep),
+            $script_deps,
             $js_ver,
             true
         );
@@ -92,6 +101,7 @@ final class Rmmigrate_Mcp_Page
                 'activateAdapter'=> __('Activate MCP Adapter', 'rosenheinrich-multisite-migrate'),
                 'adapterActive'  => __('Active', 'rosenheinrich-multisite-migrate'),
                 'generating'     => __('Generating…', 'rosenheinrich-multisite-migrate'),
+                'oauthGenerateCredentials' => __('Generate ChatGPT OAuth credentials', 'rosenheinrich-multisite-migrate'),
                 'needPassword'   => __('Generate an Application Password first.', 'rosenheinrich-multisite-migrate'),
                 'wp69'           => __('Requires WordPress 6.9+ (Abilities API).', 'rosenheinrich-multisite-migrate'),
                 'appPwDisabled'  => __('Application Passwords are turned off for this site or your user.', 'rosenheinrich-multisite-migrate'),
@@ -120,12 +130,46 @@ final class Rmmigrate_Mcp_Page
                 'testNoAbilities' => __('Endpoint reachable but no Multisite Migrate abilities found. Deactivate and reactivate the plugin.', 'rosenheinrich-multisite-migrate'),
                 'testCookieHint'  => __('(Tested via session — generate an Application Password to verify external client access.)', 'rosenheinrich-multisite-migrate'),
                 'testNetworkFail' => __('Network error — check the site URL and try again.', 'rosenheinrich-multisite-migrate'),
+                'appPwCopyHint'   => __('Copy the password below into your client config.', 'rosenheinrich-multisite-migrate'),
+                'appPwCreateHint' => __('Create an Application Password for this WordPress user, then paste it into your AI client snippet below.', 'rosenheinrich-multisite-migrate'),
+                /* translators: 1: completed step count, 2: total step count */
+                'stepsComplete'   => __('%1$d of %2$d steps complete', 'rosenheinrich-multisite-migrate'),
+                'stepOk'          => __('OK', 'rosenheinrich-multisite-migrate'),
+                'stepWp69Short'   => __('WP 6.9+', 'rosenheinrich-multisite-migrate'),
+                'stepInactive'    => __('Inactive', 'rosenheinrich-multisite-migrate'),
+                'stepInstall'     => __('Install', 'rosenheinrich-multisite-migrate'),
+                'stepDisabled'    => __('Disabled', 'rosenheinrich-multisite-migrate'),
+                'stepGenerated'   => __('Generated', 'rosenheinrich-multisite-migrate'),
+                'stepExists'      => __('Exists', 'rosenheinrich-multisite-migrate'),
+                'stepNeeded'      => __('Needed', 'rosenheinrich-multisite-migrate'),
+                'stepTest'        => __('Test', 'rosenheinrich-multisite-migrate'),
+                /* translators: %d: number of registered abilities */
+                'abilitiesRegistered' => __('%d Multisite Migrate abilities registered.', 'rosenheinrich-multisite-migrate'),
+                'oauthClientsEmpty' => __('No OAuth clients yet.', 'rosenheinrich-multisite-migrate'),
+                'oauthClientsLoadFail' => __('Could not load OAuth clients.', 'rosenheinrich-multisite-migrate'),
             ),
         );
+        $boot_json = wp_json_encode($boot, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+        if (!is_string($boot_json)) {
+            $boot_json = '{}';
+        }
         wp_add_inline_script(
             'rmmigrate-mcp-page',
-            'window.rmmigrateMcp = ' . wp_json_encode($boot) . ';',
+            'window.rmmigrateMcp = ' . $boot_json . ';',
             'before'
         );
+    }
+
+    private static function asset_version(string $relative): string
+    {
+        $path = RMMIGRATE_PATH . ltrim($relative, '/');
+        if (is_readable($path)) {
+            $mtime = filemtime($path);
+            if ($mtime !== false) {
+                return (string) $mtime;
+            }
+        }
+
+        return defined('RMMIGRATE_VERSION') ? (string) RMMIGRATE_VERSION : '1.0.0';
     }
 }

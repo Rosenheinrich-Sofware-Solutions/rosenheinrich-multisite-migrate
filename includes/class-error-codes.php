@@ -19,7 +19,7 @@ final class Rmmigrate_Error_Codes
     const ARCHIVE_VALIDATION_FAILED = 'archive_validation_failed';
     const INCREMENTAL_PRO_ONLY      = 'incremental_pro_only';
     const ARCHIVE_MISSING           = 'archive_missing';
-    const DECRYPT_PASSPHRASE         = 'decrypt_passphrase';
+    const DECRYPT_PASSPHRASE        = 'decrypt_passphrase';
     const RESTORE_GATE_BLOCKED      = 'restore_gate_blocked';
     const INVALID_RESTORE_MODE      = 'invalid_restore_mode';
     const MIGRATION_MAP_REQUIRED    = 'migration_map_required';
@@ -42,15 +42,17 @@ final class Rmmigrate_Error_Codes
     const MEMORY_LIMIT              = 'memory_limit';
     const PERMISSION_DENIED         = 'permission_denied';
     const LOCK_FAILED               = 'lock_failed';
+    const INSTALL_TOKEN             = 'install_token';
+    const DB_CONNECTION             = 'db_connection';
     const TIMEOUT                   = 'timeout';
     const VALIDATION                = 'validation';
-    const ROW_TOO_LARGE                 = 'row_too_large';
-    const NETWORK_OVERWRITE_DB_ACTION   = 'network_overwrite_db_action';
-    const CLOUD_NOT_CONNECTED           = 'cloud_not_connected';
-    const REMOTE_FILE_MISSING           = 'remote_file_missing';
-    const INSTALLER_FAILED              = 'installer_failed';
-    const STAGING_MULTISITE_ONLY        = 'staging_multisite_only';
-    const UPLOAD_FAILED                 = 'upload_failed';
+    const ROW_TOO_LARGE             = 'row_too_large';
+    const NETWORK_OVERWRITE_DB_ACTION = 'network_overwrite_db_action';
+    const CLOUD_NOT_CONNECTED       = 'cloud_not_connected';
+    const REMOTE_FILE_MISSING       = 'remote_file_missing';
+    const INSTALLER_FAILED          = 'installer_failed';
+    const STAGING_MULTISITE_ONLY    = 'staging_multisite_only';
+    const UPLOAD_FAILED             = 'upload_failed';
     const UNKNOWN                   = 'unknown';
 
     public static function from_throwable(Throwable $e): string
@@ -98,24 +100,24 @@ final class Rmmigrate_Error_Codes
             return self::JOB_TABLE_MISSING;
         }
         if (strpos($lower, 'failed to create backup job') !== false
-            || strpos($lower, 'failed to create restore job') !== false
-            || strpos($lower, 'failed to register import') !== false) {
+            || strpos($lower, 'failed to create restore job') !== false) {
             return self::JOB_CREATE_FAILED;
+        }
+        if (strpos($lower, 'failed to register import') !== false) {
+            return self::IMPORT_REGISTER_FAILED;
         }
         if (strpos($lower, 'backup build exceeded maximum time limit') !== false
             || self::is_php_execution_timeout($message)
             || strpos($lower, 'hit php max_execution_time') !== false) {
             return self::TIME_LIMIT;
         }
-        if (strpos($lower, 'insufficient disk space') !== false || strpos($lower, 'disk space') !== false) {
+        if (strpos($lower, 'disk space') !== false) {
             return self::DISK_SPACE;
         }
         if (strpos($lower, 'could not encrypt backup archive') !== false) {
             return self::ENCRYPT_FAILED;
         }
-        if (strpos($lower, 'failed to decrypt backup archive') !== false
-            || strpos($lower, 'decrypt') !== false
-            || strpos($lower, 'passphrase') !== false) {
+        if (strpos($lower, 'failed to decrypt backup archive') !== false) {
             return self::DECRYPT_PASSPHRASE;
         }
         if (strpos($lower, 'incremental restore requires') !== false
@@ -162,7 +164,7 @@ final class Rmmigrate_Error_Codes
             return self::ZIP_EXTENSION;
         }
         if (strpos($lower, 'install token') !== false) {
-            return 'install_token';
+            return self::INSTALL_TOKEN;
         }
         if (strpos($lower, 'archive not found') !== false
             || strpos($lower, 'no backup archives') !== false
@@ -188,9 +190,11 @@ final class Rmmigrate_Error_Codes
             return self::WORK_DIR_FAILED;
         }
         if (strpos($lower, 'connection failed') !== false || strpos($lower, 'mysqli') !== false) {
-            return 'db_connection';
+            return self::DB_CONNECTION;
         }
-        if (strpos($lower, 'memory') !== false || strpos($lower, 'allowed memory size') !== false) {
+        if (strpos($lower, 'allowed memory size') !== false
+            || strpos($lower, 'memory_limit') !== false
+            || strpos($lower, 'out of memory') !== false) {
             return self::MEMORY_LIMIT;
         }
         if (strpos($lower, 'worker stopped responding') !== false) {
@@ -203,7 +207,7 @@ final class Rmmigrate_Error_Codes
         if (strpos($lower, 'permission denied') !== false || strpos($lower, 'do not have permission') !== false) {
             return self::PERMISSION_DENIED;
         }
-        if (strpos($lower, 'lock') !== false && strpos($lower, 'fail') !== false) {
+        if (preg_match('/\block\b|\blocking\b/', $lower) === 1 && strpos($lower, 'fail') !== false) {
             return self::LOCK_FAILED;
         }
         if (strpos($lower, 'timeout') !== false || strpos($lower, 'timed out') !== false) {
@@ -222,7 +226,7 @@ final class Rmmigrate_Error_Codes
             return self::NETWORK_OVERWRITE_DB_ACTION;
         }
         if (strpos($lower, 'google drive not connected') !== false
-            || strpos($lower, 'not connected') !== false && strpos($lower, 'drive') !== false) {
+            || (strpos($lower, 'not connected') !== false && strpos($lower, 'drive') !== false)) {
             return self::CLOUD_NOT_CONNECTED;
         }
         if (strpos($lower, 'missing remote file') !== false) {
@@ -231,16 +235,14 @@ final class Rmmigrate_Error_Codes
         if (strpos($lower, 'installer template is missing') !== false
             || strpos($lower, 'could not build installer') !== false
             || strpos($lower, 'could not create installer package') !== false
-            || strpos($lower, 'bootstrapper template is missing') !== false) {
+            || strpos($lower, 'bootstrapper template is missing') !== false
+            || strpos($lower, 'could not copy archive for installer') !== false
+            || strpos($lower, 'could not write installer entry') !== false
+            || strpos($lower, 'installer deploy') !== false) {
             return self::INSTALLER_FAILED;
         }
         if (strpos($lower, 'staging sites are supported on single-site') !== false) {
             return self::STAGING_MULTISITE_ONLY;
-        }
-        if (strpos($lower, 'could not copy archive for installer') !== false
-            || strpos($lower, 'could not write installer entry') !== false
-            || strpos($lower, 'installer deploy') !== false) {
-            return self::INSTALLER_FAILED;
         }
         if (strpos($lower, 'cloud upload failed') !== false || strpos($lower, 'remote upload failed') !== false) {
             return self::UPLOAD_FAILED;
@@ -248,6 +250,9 @@ final class Rmmigrate_Error_Codes
         if (strpos($lower, 'sql import') !== false || strpos($lower, 'database import') !== false
             || strpos($lower, 'database restore failed') !== false) {
             return self::SQL_IMPORT_FAILED;
+        }
+        if (strpos($lower, 'decrypt') !== false || strpos($lower, 'passphrase') !== false) {
+            return self::DECRYPT_PASSPHRASE;
         }
 
         return self::UNKNOWN;

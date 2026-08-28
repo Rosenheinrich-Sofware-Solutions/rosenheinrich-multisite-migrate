@@ -22,11 +22,14 @@ final class Rmmigrate_Filesystem_Stream
     /** @var bool */
     private $truncate_pending = false;
 
+    /** @var resource|null */
+    private $read_handle = null;
+
     public function __construct(string $path, string $mode)
     {
         $this->path   = $path;
         $this->mode   = $mode;
-        $this->truncate_pending = (strpos($mode, 'w') !== false && strpos($mode, '+') === false);
+        $this->truncate_pending = (strpos($mode, 'w') !== false);
     }
 
     /**
@@ -34,13 +37,16 @@ final class Rmmigrate_Filesystem_Stream
      */
     public function read(int $length)
     {
+        if ($length <= 0) {
+            return false;
+        }
         if (strpos($this->mode, 'r') === false && strpos($this->mode, '+') === false) {
             return false;
         }
-        if (!self::path_exists($this->path)) {
+        if (!$this->ensure_read_handle()) {
             return false;
         }
-        $data = file_get_contents($this->path, false, null, $this->position, $length);
+        $data = Rmmigrate_Filesystem::fread_raw($this->read_handle, $length);
         if ($data === false) {
             return false;
         }
@@ -53,6 +59,8 @@ final class Rmmigrate_Filesystem_Stream
      */
     public function write(string $data)
     {
+        $this->close_read_handle();
+
         $len = strlen($data);
         if ($len === 0) {
             return 0;
@@ -63,20 +71,21 @@ final class Rmmigrate_Filesystem_Stream
         }
 
         if ($this->truncate_pending && $this->position === 0) {
-            // No LOCK_EX: workers are single-writer per path; exclusive locks hang under AV/NFS and can blow max_execution_time.
-            if (file_put_contents($this->path, $data) === false) {
+            $written = Rmmigrate_Filesystem::write_exclusive_with_retry($this->path, $data);
+            if ($written === false) {
                 return false;
             }
             $this->truncate_pending = false;
-            $this->position         = $len;
-            return $len;
+            $this->position         = $written;
+            return $written;
         }
 
         if (strpos($this->mode, 'a') !== false) {
             if (file_put_contents($this->path, $data, FILE_APPEND) === false) {
                 return false;
             }
-            $this->position += $len;
+            clearstatcache(true, $this->path);
+            $this->position = (int) filesize($this->path);
             return $len;
         }
 
@@ -94,31 +103,54 @@ final class Rmmigrate_Filesystem_Stream
         $written = fwrite($fh, $data);
         // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Plugin: centralized filesystem gateway.
         fclose($fh);
-        if ($written === false) {
+        if ($written === false || $written === 0) {
             return false;
         }
-        $this->position += $len;
-        return $len;
+        $this->position += $written;
+        return $written;
     }
 
     public function close(): bool
     {
+        $this->close_read_handle();
         return true;
     }
 
     public function seek(int $offset, int $whence = SEEK_SET): int
     {
-        $size = self::path_exists($this->path) ? (int) filesize($this->path) : 0;
+        $exists = self::path_exists($this->path);
+        clearstatcache(true, $this->path);
+        $size = $exists ? (int) filesize($this->path) : 0;
+
+        if (!$exists && ($whence !== SEEK_SET || $offset !== 0)) {
+            return -1;
+        }
+
         if ($whence === SEEK_CUR) {
-            $this->position += $offset;
+            $target = $this->position + $offset;
         } elseif ($whence === SEEK_END) {
-            $this->position = $size + $offset;
+            $target = $size + $offset;
         } else {
-            $this->position = $offset;
+            $target = $offset;
         }
-        if ($this->position < 0) {
-            $this->position = 0;
+
+        if ($target < 0) {
+            return -1;
         }
+
+        $read_only = strpos($this->mode, 'w') === false
+            && strpos($this->mode, 'a') === false
+            && strpos($this->mode, '+') === false;
+        if ($read_only && $target > $size) {
+            return -1;
+        }
+
+        $this->position = $target;
+
+        if (is_resource($this->read_handle) && fseek($this->read_handle, $this->position) !== 0) {
+            return -1;
+        }
+
         return 0;
     }
 
@@ -135,29 +167,20 @@ final class Rmmigrate_Filesystem_Stream
         if (!self::path_exists($this->path)) {
             return true;
         }
+        clearstatcache(true, $this->path);
         return $this->position >= (int) filesize($this->path);
     }
 
     public function truncate(int $size): bool
     {
-        // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen -- Plugin: centralized filesystem gateway.
-        $fh = @fopen($this->path, 'c+b');
-        if ($fh === false) {
+        $this->close_read_handle();
+        if (!Rmmigrate_Filesystem::truncate_path_with_lock($this->path, $size)) {
             return false;
         }
-        if (flock($fh, LOCK_EX)) {
-            $result = ftruncate($fh, $size);
-            flock($fh, LOCK_UN);
-            // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Plugin: centralized filesystem gateway.
-            fclose($fh);
-            if ($result && $this->position > $size) {
-                $this->position = $size;
-            }
-            return $result;
+        if ($this->position > $size) {
+            $this->position = $size;
         }
-        // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Plugin: centralized filesystem gateway.
-        fclose($fh);
-        return false;
+        return true;
     }
 
     /**
@@ -172,6 +195,34 @@ final class Rmmigrate_Filesystem_Stream
     {
         return file_exists($path) && is_file($path);
     }
+
+    private function close_read_handle(): void
+    {
+        if (is_resource($this->read_handle)) {
+            Rmmigrate_Filesystem::fclose_raw($this->read_handle);
+        }
+        $this->read_handle = null;
+    }
+
+    private function ensure_read_handle(): bool
+    {
+        if (is_resource($this->read_handle)) {
+            return true;
+        }
+        if (!self::path_exists($this->path)) {
+            return false;
+        }
+        $handle = Rmmigrate_Filesystem::fopen_raw($this->path, 'rb');
+        if ($handle === false) {
+            return false;
+        }
+        $this->read_handle = $handle;
+        if ($this->position > 0 && fseek($this->read_handle, $this->position) !== 0) {
+            $this->close_read_handle();
+            return false;
+        }
+        return true;
+    }
 }
 
 /**
@@ -181,6 +232,9 @@ class Rmmigrate_Filesystem
 {
     /** @var bool */
     private static $initialized = false;
+
+    /** @var string */
+    private static $last_stream_to_stdout_abort = '';
 
     /** @var bool */
     private static $available = false;
@@ -244,7 +298,10 @@ class Rmmigrate_Filesystem
     {
         $fs = self::fs();
         if ($fs !== null) {
-            return (int) $fs->size($path);
+            $size = (int) $fs->size($path);
+            if ($size > 0) {
+                return $size;
+            }
         }
         if (!file_exists($path)) {
             return 0;
@@ -292,7 +349,9 @@ class Rmmigrate_Filesystem
             return true;
         }
         if (function_exists('wp_delete_file')) {
-            return (bool) wp_delete_file($path);
+            wp_delete_file($path);
+
+            return !file_exists($path);
         }
         return false;
     }
@@ -330,6 +389,62 @@ class Rmmigrate_Filesystem
     /**
      * @return int|false Bytes written.
      */
+    public static function write_exclusive_with_retry(string $path, string $data, int $max_attempts = 5)
+    {
+        if (!self::ensure_parent_dir($path)) {
+            return false;
+        }
+        for ($attempt = 0; $attempt < $max_attempts; $attempt++) {
+            // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen -- Plugin: centralized filesystem gateway.
+            $fh = @fopen($path, 'c+b');
+            if ($fh === false) {
+                return false;
+            }
+            if (flock($fh, LOCK_EX | LOCK_NB)) {
+                ftruncate($fh, 0);
+                rewind($fh);
+                // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fwrite -- Plugin: centralized filesystem gateway.
+                $written = fwrite($fh, $data);
+                flock($fh, LOCK_UN);
+                // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Plugin: centralized filesystem gateway.
+                fclose($fh);
+                return $written === false ? false : (int) $written;
+            }
+            // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Plugin: centralized filesystem gateway.
+            fclose($fh);
+            usleep(100000 * ($attempt + 1));
+        }
+        return false;
+    }
+
+    public static function truncate_path_with_lock(string $path, int $size, int $max_attempts = 5): bool
+    {
+        if (!is_file($path)) {
+            return false;
+        }
+        for ($attempt = 0; $attempt < $max_attempts; $attempt++) {
+            // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen -- Plugin: centralized filesystem gateway.
+            $fh = @fopen($path, 'c+b');
+            if ($fh === false) {
+                return false;
+            }
+            if (flock($fh, LOCK_EX | LOCK_NB)) {
+                $result = ftruncate($fh, $size);
+                flock($fh, LOCK_UN);
+                // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Plugin: centralized filesystem gateway.
+                fclose($fh);
+                return (bool) $result;
+            }
+            // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Plugin: centralized filesystem gateway.
+            fclose($fh);
+            usleep(100000 * ($attempt + 1));
+        }
+        return false;
+    }
+
+    /**
+     * @return int|false Bytes written.
+     */
     public static function put_contents(string $path, string $data, int $flags = 0)
     {
         if (!self::ensure_parent_dir($path)) {
@@ -345,6 +460,9 @@ class Rmmigrate_Filesystem
 
         $fs = self::fs();
         if ($fs !== null) {
+            if ($flags & LOCK_EX) {
+                return file_put_contents($path, $data, $flags);
+            }
             $ok = $fs->put_contents($path, $data, FS_CHMOD_FILE);
             return $ok ? strlen($data) : false;
         }
@@ -365,7 +483,7 @@ class Rmmigrate_Filesystem
         }
 
         if ($length === null) {
-            return file_get_contents($path);
+            return file_get_contents($path, false, null, $offset);
         }
         return file_get_contents($path, false, null, $offset, $length);
     }
@@ -394,15 +512,35 @@ class Rmmigrate_Filesystem
     public static function copy(string $source, string $destination): bool
     {
         try {
+            if (!self::ensure_parent_dir($destination)) {
+                return false;
+            }
+
+            // Native copy streams on disk — required for multi-GB DAF archives.
+            // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_copy -- Plugin: streaming copy for large archives.
+            if (@copy($source, $destination)) {
+                return true;
+            }
+
             $fs = self::fs();
             if ($fs !== null && $fs->copy($source, $destination, true, FS_CHMOD_FILE)) {
                 return true;
             }
+
             // Small-file fallback: WP_Filesystem::copy can fail on root dotfiles
             // (.htaccess) under some hosts / AV while get/put still works. Cap size
             // so multi-GB archives never load into memory here.
             $size = @filesize($source);
-            if ($size === false || $size < 0 || $size > 2 * 1024 * 1024) {
+            if ($size === false || $size < 0) {
+                Rmmigrate_Logger::log(sprintf('Copy failed: cannot read source size (%s).', $source));
+                return false;
+            }
+            if ($size > 2 * 1024 * 1024) {
+                Rmmigrate_Logger::log(sprintf(
+                    'Copy failed for large file (%1$s, %2$s): native and WP_Filesystem copy both failed.',
+                    $source,
+                    size_format($size)
+                ));
                 return false;
             }
             $contents = self::get_contents($source);
@@ -443,7 +581,8 @@ class Rmmigrate_Filesystem
         if ($fs !== null) {
             return (bool) $fs->is_writable($path);
         }
-        return false;
+        // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_is_writable -- Plugin: centralized filesystem gateway.
+        return is_writable($path);
     }
 
     public static function is_dir(string $path): bool
@@ -465,14 +604,25 @@ class Rmmigrate_Filesystem
     }
 
     /**
+     * Reason stream_to_stdout() returned false: read_failed, client_disconnect, or empty.
+     */
+    public static function last_stream_to_stdout_abort(): string
+    {
+        return self::$last_stream_to_stdout_abort;
+    }
+
+    /**
      * Stream a local file to stdout without readfile().
      */
     public static function stream_to_stdout(string $path): bool
     {
+        self::$last_stream_to_stdout_abort = '';
         $size = self::filesize($path);
         if ($size <= 0) {
             $contents = self::get_contents($path);
             if ($contents === false) {
+                self::$last_stream_to_stdout_abort = 'read_failed';
+
                 return false;
             }
             // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Binary archive stream to stdout.
@@ -503,6 +653,8 @@ class Rmmigrate_Filesystem
         // archives and made multi-GB downloads extremely slow.
         $handle = self::fopen_raw($path, 'rb');
         if ($handle === false) {
+            self::$last_stream_to_stdout_abort = 'read_failed';
+
             return false;
         }
 
@@ -511,6 +663,7 @@ class Rmmigrate_Filesystem
         while (true) {
             $slice = self::fread_raw($handle, $chunk);
             if ($slice === false) {
+                self::$last_stream_to_stdout_abort = 'read_failed';
                 $ok = false;
                 break;
             }
@@ -523,10 +676,17 @@ class Rmmigrate_Filesystem
             // whole file in memory before sending.
             if (function_exists('ob_get_level')) {
                 while (ob_get_level() > 0) {
-                    ob_end_flush();
+                    if (ob_end_flush() === false) {
+                        break;
+                    }
                 }
             }
             flush();
+            if (function_exists('connection_aborted') && connection_aborted() !== 0) {
+                self::$last_stream_to_stdout_abort = 'client_disconnect';
+                $ok = false;
+                break;
+            }
         }
         self::fclose_raw($handle);
 
@@ -601,6 +761,12 @@ class Rmmigrate_Filesystem
                 continue;
             }
             $path = $dir . '/' . $item;
+            if (is_link($path)) {
+                if (!self::delete($path)) {
+                    return false;
+                }
+                continue;
+            }
             if (is_dir($path)) {
                 if (!self::delete_directory($path)) {
                     return false;
@@ -611,10 +777,6 @@ class Rmmigrate_Filesystem
                 }
             }
         }
-        if ($fs !== null) {
-            return (bool) $fs->delete($dir, false, 'd');
-        }
-
         // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_rmdir -- Plugin: centralized filesystem gateway.
         return @rmdir($dir);
     }

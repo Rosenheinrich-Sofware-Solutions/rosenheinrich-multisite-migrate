@@ -5,6 +5,8 @@ if (!defined('ABSPATH')) {
 
 class Rmmigrate_Admin_Save
 {
+    private const SETTINGS_IMPORT_MAX_BYTES = 1048576;
+
     public static function register(): void
     {
         add_action('network_admin_edit_rmmigrate_settings', array(__CLASS__, 'save_settings'));
@@ -81,16 +83,16 @@ class Rmmigrate_Admin_Save
         }
 
         if ($tab === 'import') {
-            self::persist($merged, $current, 'multisite-migrate-migrate', array('tab' => 'import'));
+            self::persist($merged, 'multisite-migrate-migrate', array('tab' => 'import'));
             return;
         }
 
-        self::persist($merged, $current, 'multisite-migrate-advanced', array('tab' => $tab));
+        self::persist($merged, 'multisite-migrate-advanced', array('tab' => $tab));
     }
 
     public static function clear_activity_log(): void
     {
-        if (!self::can_save()) {
+        if (!self::can_save_network_only()) {
             wp_die(esc_html__('Permission denied.', 'rosenheinrich-multisite-migrate'));
         }
         check_admin_referer('rmmigrate_clear_activity_log');
@@ -128,6 +130,10 @@ class Rmmigrate_Admin_Save
         $name = Rmmigrate_Request_Input::file_original_name('settings_import');
         if (strtolower(pathinfo($name, PATHINFO_EXTENSION)) !== 'json') {
             wp_die(esc_html__('Invalid settings file extension. Only .json files are allowed.', 'rosenheinrich-multisite-migrate'));
+        }
+        $size = Rmmigrate_Request_Input::file_size('settings_import');
+        if ($size <= 0 || $size > self::SETTINGS_IMPORT_MAX_BYTES) {
+            wp_die(esc_html__('Invalid settings file.', 'rosenheinrich-multisite-migrate'));
         }
         $raw = Rmmigrate_Filesystem::get_contents($tmp);
         $decoded = json_decode((string) $raw, true);
@@ -199,7 +205,7 @@ class Rmmigrate_Admin_Save
                 'multisite-migrate-schedule',
                 array(
                     'error' => '1',
-                    'message' => rawurlencode($scope_check->get_error_message()),
+                    'message' => $scope_check->get_error_message(),
                 ),
                 self::redirect_as_network()
             );
@@ -236,10 +242,9 @@ class Rmmigrate_Admin_Save
 
     /**
      * @param array<string,mixed> $merged
-     * @param array<string,mixed> $current
      * @param array<string,string> $extra_args
      */
-    private static function persist(array $merged, array $current, string $page, array $extra_args = array()): void
+    private static function persist(array $merged, string $page, array $extra_args = array()): void
     {
         Rmmigrate_Settings::save($merged);
         $args = array_merge(array('updated' => '1'), $extra_args);

@@ -628,7 +628,7 @@
 	font-size: var(--mm-text-sm);
 	font-weight: var(--mm-font-semibold);
 	color: var(--mm-navy);
-	word-break: break-word;
+	overflow-wrap: anywhere;
 }
 
 .mm-mcp-app-pw__badge {

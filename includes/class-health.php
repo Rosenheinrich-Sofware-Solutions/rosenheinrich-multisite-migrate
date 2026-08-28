@@ -131,7 +131,13 @@ class Rmmigrate_Health
             'php_timeout' => self::make_check(
                 $timeout_status,
                 __('PHP max execution time', 'rosenheinrich-multisite-migrate'),
-                (string) $max_exec
+                $max_exec > 0
+                    ? sprintf(
+                        /* translators: %s: number of seconds */
+                        __('%s seconds', 'rosenheinrich-multisite-migrate'),
+                        number_format_i18n($max_exec)
+                    )
+                    : __('Unlimited', 'rosenheinrich-multisite-migrate')
             ),
             'memory_limit' => self::make_check(
                 $memory_status,
@@ -236,8 +242,6 @@ class Rmmigrate_Health
                 return __('Leave the page open (browser kickoff) or ensure WP-Cron can run background jobs.', 'rosenheinrich-multisite-migrate');
             case 'wp_options_auto_increment':
                 return __('Repair wp_options AUTO_INCREMENT before restore — incomplete DB exports can break restores.', 'rosenheinrich-multisite-migrate');
-            case 'scheduler':
-                return __('Open Schedules for one local backup, or upgrade to Plus for cloud and multiple schedules.', 'rosenheinrich-multisite-migrate');
             default:
                 return __('Open Health for details, then retry the backup.', 'rosenheinrich-multisite-migrate');
         }
@@ -305,7 +309,7 @@ class Rmmigrate_Health
 
         return sprintf(
             /* translators: 1: passed check count, 2: total check count. */
-            __('All %2$d checks passed', 'rosenheinrich-multisite-migrate'),
+            __('All %1$d of %2$d checks passed', 'rosenheinrich-multisite-migrate'),
             $ok,
             $total
         );
@@ -382,9 +386,12 @@ class Rmmigrate_Health
         if (!is_array($row)) {
             // Fallback for hosts that block information_schema. %i requires WP 6.2+ (plugin Requires at least).
             $create = null;
-            if (method_exists($wpdb, 'get_var') && method_exists($wpdb, 'prepare')) {
+            if (method_exists($wpdb, 'get_row') && method_exists($wpdb, 'prepare')) {
                 // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.DirectDatabaseQuery.SchemaChange -- SHOW CREATE is read-only; identifier via prepare %i from $wpdb->options.
-                $create = $wpdb->get_var($wpdb->prepare('SHOW CREATE TABLE %i', $table));
+                $create_row = $wpdb->get_row($wpdb->prepare('SHOW CREATE TABLE %i', $table), ARRAY_N);
+                if (is_array($create_row) && isset($create_row[1])) {
+                    $create = (string) $create_row[1];
+                }
             }
             if (is_string($create) && stripos($create, 'AUTO_INCREMENT') !== false) {
                 return self::make_check(self::STATUS_OK, $label, __('Present on option_id', 'rosenheinrich-multisite-migrate'));

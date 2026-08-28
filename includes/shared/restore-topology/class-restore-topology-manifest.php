@@ -130,4 +130,40 @@ class Rmmigrate_Restore_Topology_Manifest
 
         return self::source_blog_prefix($manifest);
     }
+
+    /**
+     * Resolve network-to-subsite target blog ID from restore context.
+     *
+     * @param array<string,mixed> $context
+     * @param array<string,mixed> $destination
+     */
+    public static function resolve_target_blog_id(array $context, array $destination = array()): int
+    {
+        if ($destination === array() && is_array($context['destination'] ?? null)) {
+            $destination = $context['destination'];
+        }
+
+        return (int) (
+            self::first_positive_blog_id(
+                $context['target_blog_id'] ?? null,
+                $context['destination_blog_id'] ?? null,
+                $destination['destination_blog_id'] ?? null
+            )
+        );
+    }
+
+    /**
+     * @param mixed ...$candidates
+     */
+    private static function first_positive_blog_id(...$candidates): int
+    {
+        foreach ($candidates as $candidate) {
+            $id = (int) $candidate;
+            if ($id > 0) {
+                return $id;
+            }
+        }
+
+        return 0;
+    }
 }

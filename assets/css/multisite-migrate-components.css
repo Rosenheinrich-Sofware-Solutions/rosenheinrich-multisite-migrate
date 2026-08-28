@@ -1517,6 +1517,11 @@
     background: var(--mm-error);
 }
 
+.mm-toast.is-warning {
+    background: var(--mm-warning, #f59e0b);
+    color: var(--mm-navy);
+}
+
 @keyframes mm-toast-in {
     from {
         opacity: 0;
@@ -1605,9 +1610,9 @@
 
 /* Free: no Remote column — widths must sum ~100% or leftover dumps into Date. */
 .mm-premium-table.mm-data-table th.column-date {
-    width: 17%;
+    width: 18%;
     white-space: normal;
-    word-break: break-word;
+    overflow-wrap: anywhere;
 }
 
 .mm-premium-table.mm-data-table th.column-type {
@@ -1619,20 +1624,20 @@
 }
 
 .mm-premium-table.mm-data-table th.column-scope {
-    width: 15%;
+    width: 14%;
 }
 
 .mm-premium-table.mm-data-table th.column-status {
-    width: 12%;
+    width: 11%;
 }
 
 .mm-premium-table.mm-data-table th.column-size {
-    width: 10%;
+    width: 9%;
     white-space: nowrap;
 }
 
 .mm-premium-table.mm-data-table th.column-local {
-    width: 18%;
+    width: 16%;
     text-align: center;
 }
 
@@ -1648,7 +1653,7 @@
 }
 
 .mm-premium-table.mm-data-table th.column-actions {
-    width: 15%;
+    width: 12%;
     text-align: right;
 }
 
@@ -1796,7 +1801,7 @@
     height: 0;
     border-left: 4px solid transparent;
     border-right: 4px solid transparent;
-    border-top: 4px solid currentColor;
+    border-top: 4px solid currentcolor;
     opacity: 0.85;
 }
 
@@ -2158,51 +2163,6 @@
     box-shadow: 0 0 0 2px color-mix(in srgb, var(--mm-teal) 35%, transparent);
 }
 
-
-
-.mm-toast-wrap {
-    position: fixed;
-    bottom: 24px;
-    right: 24px;
-    z-index: 100001;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    max-width: 360px;
-}
-
-@media (max-width: 782px) {
-    .mm-toast-wrap {
-        left: 16px;
-        right: 16px;
-        bottom: 16px;
-        max-width: none;
-    }
-}
-
-.mm-toast {
-    padding: 12px 16px;
-    border-radius: var(--mm-radius-sm);
-    box-shadow: var(--mm-shadow-lg);
-    color: var(--mm-surface);
-    font-size: 14px;
-    animation: mm-toast-in 0.2s ease;
-}
-
-.mm-toast.is-success {
-    background: var(--mm-navy);
-    border-left: 4px solid var(--mm-teal);
-}
-
-.mm-toast.is-error {
-    background: var(--mm-error);
-}
-
-.mm-toast.is-warning {
-    background: var(--mm-warning, #f59e0b);
-    color: var(--mm-navy);
-}
-
 .mm-confirm-overlay {
     position: fixed;
     inset: 0;
@@ -2376,7 +2336,7 @@
     padding: 8px 10px;
     border-left: 3px solid var(--mm-danger, #b32d2e);
     background: rgba(179, 45, 46, 0.06);
-    word-break: break-word;
+    overflow-wrap: anywhere;
 }
 
 .mm-feedback-attached-error:empty,
@@ -2519,17 +2479,6 @@ body.mm-feedback-open {
     line-height: 1.45;
 }
 
-@keyframes mm-toast-in {
-    from {
-        opacity: 0;
-        transform: translateY(8px);
-    }
-    to {
-        opacity: 1;
-        transform: translateY(0);
-    }
-}
-
 .mm-activity-pagination,
 .mm-log-files-pagination {
     margin-top: 12px;
@@ -2578,10 +2527,6 @@ body.mm-feedback-open {
         animation: none !important;
     }
 }
-
-
-
-
 
 /* Tools & logs — premium action cards */
 .multisite-migrate-wrap .mm-tools-panel__head {
@@ -2704,7 +2649,7 @@ body.mm-feedback-open {
     border-radius: 6px;
     font-size: 13px;
     line-height: 1.4;
-    word-break: break-word;
+    overflow-wrap: anywhere;
 }
 
 .multisite-migrate-wrap .mm-tool-card__status[hidden] {

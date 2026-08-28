@@ -29,24 +29,98 @@ class Rmmigrate_Restore_Topology_Standalone
 
     public static function strip_multisite_wp_config(string $contents): string
     {
+        $eol = "\n";
+        if (preg_match('/\r\n/', $contents)) {
+            $eol = "\r\n";
+        } elseif (preg_match('/\r(?!\n)/', $contents)) {
+            $eol = "\r";
+        }
+
         $lines = preg_split('/\R/', $contents);
         if (!is_array($lines)) {
             return $contents;
         }
 
         $filtered = array();
+        $skipping_define = false;
+        $paren_balance = 0;
+        $skip_base_assignment = false;
         foreach ($lines as $line) {
             $trimmed = ltrim($line);
-            if (preg_match('/^\$base\s*=/', $trimmed)) {
+            if (!$skipping_define && self::line_is_multisite_define($trimmed)) {
+                $skipping_define = true;
+                $paren_balance = self::paren_balance_delta($trimmed);
+                $skip_base_assignment = true;
+                if ($paren_balance <= 0) {
+                    $skipping_define = false;
+                    $paren_balance = 0;
+                }
                 continue;
             }
-            if (self::line_is_multisite_define($trimmed)) {
+            if ($skipping_define) {
+                $paren_balance += self::paren_balance_delta($trimmed);
+                if ($paren_balance <= 0) {
+                    $skipping_define = false;
+                    $paren_balance = 0;
+                }
                 continue;
+            }
+            if ($skip_base_assignment && preg_match('/^\$base\s*=/', $trimmed)) {
+                continue;
+            }
+            if ($skip_base_assignment && $trimmed !== '' && !preg_match('/^\s*(\/\/|\/\*|\*)/', $trimmed)) {
+                $skip_base_assignment = false;
             }
             $filtered[] = $line;
         }
 
-        return implode("\n", $filtered);
+        return implode($eol, $filtered);
+    }
+
+    private static function paren_balance_delta(string $line): int
+    {
+        $delta = 0;
+        $in_single = false;
+        $in_double = false;
+        $len = strlen($line);
+        for ($i = 0; $i < $len; $i++) {
+            $ch = $line[$i];
+            if ($in_single) {
+                if ($ch === '\\' && ($i + 1) < $len) {
+                    $i++;
+                    continue;
+                }
+                if ($ch === "'") {
+                    $in_single = false;
+                }
+                continue;
+            }
+            if ($in_double) {
+                if ($ch === '\\' && ($i + 1) < $len) {
+                    $i++;
+                    continue;
+                }
+                if ($ch === '"') {
+                    $in_double = false;
+                }
+                continue;
+            }
+            if ($ch === "'") {
+                $in_single = true;
+                continue;
+            }
+            if ($ch === '"') {
+                $in_double = true;
+                continue;
+            }
+            if ($ch === '(') {
+                $delta++;
+            } elseif ($ch === ')') {
+                $delta--;
+            }
+        }
+
+        return $delta;
     }
 
     private static function line_is_multisite_define(string $line): bool
@@ -68,18 +142,6 @@ class Rmmigrate_Restore_Topology_Standalone
         }
 
         return $subsite_prefix;
-    }
-
-    /**
-     * Topology code is shared with the standalone installer, which provides a
-     * debug logger. Inside the plugin runtime that class is absent, so this
-     * guard keeps logging a no-op instead of fataling on a class-not-found.
-     */
-    private static function debug_log(string $level, string $message): void
-    {
-        if (class_exists('Rmmigrate_Installer_Debug_Log')) {
-            Rmmigrate_Installer_Debug_Log::log($level, $message);
-        }
     }
 
     /**
@@ -118,35 +180,23 @@ class Rmmigrate_Restore_Topology_Standalone
             foreach (array('users', 'usermeta') as $g_table) {
                 $old_g = $base_prefix . $g_table;
                 $new_g = $prefix . $g_table;
-                self::debug_log('debug', "Checking global table rename from $old_g to $new_g");
                 if (self::table_exists($pdo, $old_g)) {
-                    self::debug_log('debug', "$old_g exists. Renaming to $new_g");
                     $pdo->exec('DROP TABLE IF EXISTS `' . str_replace('`', '``', $new_g) . '`');
                     $pdo->exec('RENAME TABLE `' . str_replace('`', '``', $old_g) . '` TO `' . str_replace('`', '``', $new_g) . '`');
-                } else {
-                    self::debug_log('debug', "$old_g DOES NOT EXIST!");
-                    // Also check if $new_g already exists just in case
-                    if (self::table_exists($pdo, $new_g)) {
-                        self::debug_log('debug', "$new_g ALREADY EXISTS!");
-                    } else {
-                        // Let's list all tables that match *users
-                        $stmt = $pdo->query("SHOW TABLES LIKE '%users'");
-                        $tables = $stmt->fetchAll(PDO::FETCH_COLUMN);
-                        self::debug_log('debug', "Available *users tables: " . implode(', ', $tables));
-                    }
                 }
             }
         }
 
+        $prefix_remap_applied = false;
         if (Rmmigrate_Restore_Topology_Prefix_Remap::should_remap($manifest, $context)) {
-            $remap = Rmmigrate_Restore_Topology_Prefix_Remap::remap_tables(
-                $pdo,
-                $prefix,
-                (string) ($context['prefix_remap_target'] ?? 'wp_')
-            );
+            $resolved_prefix = Rmmigrate_Restore_Topology_Prefix_Remap::resolve_remap_target($manifest, $context);
+            $remap = Rmmigrate_Restore_Topology_Prefix_Remap::remap_tables($pdo, $prefix, $resolved_prefix);
             $report = array_merge($report, $remap);
-            $prefix = (string) ($context['prefix_remap_target'] ?? 'wp_');
+            $prefix = $resolved_prefix;
+            $prefix_remap_applied = true;
         }
+
+        $base_prefix = self::base_table_prefix($prefix);
 
         foreach (self::network_table_names($base_prefix) as $table) {
             if (self::table_exists($pdo, $table)) {
@@ -161,8 +211,10 @@ class Rmmigrate_Restore_Topology_Standalone
             $report['conflicting_tables_dropped'] += self::drop_prefixed_tables($pdo, $dest_prefix);
         }
 
-        $report['usermeta_rows_purged'] = self::purge_foreign_usermeta($pdo, $prefix, $base_prefix);
-        $report['option_names_remapped'] = self::update_options_table($pdo, $prefix, $base_prefix);
+        if (!$prefix_remap_applied) {
+            $report['usermeta_rows_purged'] = self::purge_foreign_usermeta($pdo, $prefix, $base_prefix);
+            $report['option_names_remapped'] = self::update_options_table($pdo, $prefix, $base_prefix);
+        }
         $report['urls_updated'] = self::update_site_urls($pdo, $prefix, self::migration_map($context));
 
         return $report;
@@ -205,33 +257,109 @@ class Rmmigrate_Restore_Topology_Standalone
             return $report;
         }
 
-        // Host-level REPLACE remaps the primary blog (pointalize.com -> new host)
-        // and every subdomain subsite (sub.pointalize.com -> sub.new host) in one
-        // pass without needing per-blog entries in the migration map.
+        // Remap exact host or *.old_host subdomains only — never substring hosts like notoldhost.com.
         $blogs = $base_prefix . 'blogs';
         if (self::table_exists($pdo, $blogs)) {
-            $stmt = $pdo->prepare("UPDATE `{$blogs}` SET domain = REPLACE(domain, ?, ?)");
-            $stmt->execute(array($old_host, $new_host));
-            $report['network_blogs_updated'] = $stmt->rowCount();
+            $report['network_blogs_updated'] = self::update_network_domain_column($pdo, $blogs, $old_host, $new_host);
         }
 
         $site = $base_prefix . 'site';
         if (self::table_exists($pdo, $site)) {
-            $stmt = $pdo->prepare("UPDATE `{$site}` SET domain = REPLACE(domain, ?, ?)");
-            $stmt->execute(array($old_host, $new_host));
-            $report['network_site_updated'] = $stmt->rowCount();
+            $report['network_site_updated'] = self::update_network_domain_column($pdo, $site, $old_host, $new_host);
         }
 
         $sitemeta = $base_prefix . 'sitemeta';
         if (self::table_exists($pdo, $sitemeta)) {
-            $stmt = $pdo->prepare(
-                "UPDATE `{$sitemeta}` SET meta_value = REPLACE(meta_value, ?, ?) WHERE meta_key = 'siteurl'"
-            );
-            $stmt->execute(array($old_host, $new_host));
-            $report['network_meta_updated'] = $stmt->rowCount();
+            $report['network_meta_updated'] = self::update_network_siteurl_meta($pdo, $sitemeta, $old_host, $new_host);
         }
 
         return $report;
+    }
+
+    private static function host_matches_migration(string $host, string $old_host): bool
+    {
+        if ($host === '' || $old_host === '') {
+            return false;
+        }
+        if (strcasecmp($host, $old_host) === 0) {
+            return true;
+        }
+        $suffix = '.' . $old_host;
+        if (strlen($host) <= strlen($suffix)) {
+            return false;
+        }
+
+        return strcasecmp(substr($host, -strlen($suffix)), $suffix) === 0;
+    }
+
+    private static function remap_host(string $host, string $old_host, string $new_host): string
+    {
+        if (strcasecmp($host, $old_host) === 0) {
+            return $new_host;
+        }
+
+        return substr($host, 0, -strlen($old_host) - 1) . '.' . $new_host;
+    }
+
+    private static function replace_url_host(string $url, string $old_host, string $new_host): string
+    {
+        $host = self::url_host($url);
+        if ($host === '' || !self::host_matches_migration($host, $old_host)) {
+            return $url;
+        }
+
+        $replacement = self::remap_host($host, $old_host, $new_host);
+
+        return (string) preg_replace('/' . preg_quote($host, '/') . '/i', $replacement, $url, 1);
+    }
+
+    private static function update_network_domain_column(PDO $pdo, string $table, string $old_host, string $new_host): int
+    {
+        $old_host_like = self::escape_like_literal($old_host);
+        $table_q = self::quote_sql_identifier($table);
+        $stmt = $pdo->prepare(
+            "UPDATE {$table_q} SET domain = CASE
+                WHEN domain = ? THEN ?
+                WHEN domain LIKE CONCAT('%.', ?) THEN CONCAT(SUBSTRING(domain, 1, CHAR_LENGTH(domain) - CHAR_LENGTH(?) - 1), '.', ?)
+                ELSE domain
+            END
+            WHERE domain = ? OR domain LIKE CONCAT('%.', ?)"
+        );
+        $stmt->execute(array(
+            $old_host,
+            $new_host,
+            $old_host_like,
+            $old_host,
+            $new_host,
+            $old_host,
+            $old_host_like,
+        ));
+
+        return $stmt->rowCount();
+    }
+
+    private static function update_network_siteurl_meta(PDO $pdo, string $table, string $old_host, string $new_host): int
+    {
+        $table_q = self::quote_sql_identifier($table);
+        $select = $pdo->prepare("SELECT meta_id, meta_value FROM {$table_q} WHERE meta_key = 'siteurl'");
+        $select->execute();
+        $updated = 0;
+        $update = $pdo->prepare("UPDATE {$table_q} SET meta_value = ? WHERE meta_id = ?");
+        while ($row = $select->fetch(PDO::FETCH_ASSOC)) {
+            $meta_id = (int) ($row['meta_id'] ?? 0);
+            $value = (string) ($row['meta_value'] ?? '');
+            if ($meta_id <= 0 || $value === '') {
+                continue;
+            }
+            $new_value = self::replace_url_host($value, $old_host, $new_host);
+            if ($new_value === $value) {
+                continue;
+            }
+            $update->execute(array($new_value, $meta_id));
+            $updated += $update->rowCount();
+        }
+
+        return $updated;
     }
 
     private static function url_host(string $url): string
@@ -261,10 +389,11 @@ class Rmmigrate_Restore_Topology_Standalone
             return 0;
         }
 
+        $table_q = self::quote_sql_identifier($table);
         $stmt = $pdo->prepare(
-            "UPDATE `{$table}` SET option_name = REPLACE(option_name, ?, ?) WHERE option_name LIKE ?"
+            "UPDATE {$table_q} SET option_name = CONCAT(?, SUBSTRING(option_name, CHAR_LENGTH(?) + 1)) WHERE option_name LIKE ? ESCAPE '\\\\'"
         );
-        $stmt->execute(array($prefix, $base_prefix, $prefix . '%'));
+        $stmt->execute(array($base_prefix, $prefix, self::escape_like_literal($prefix) . '%'));
 
         return $stmt->rowCount();
     }
@@ -287,9 +416,19 @@ class Rmmigrate_Restore_Topology_Standalone
     private static function table_exists(PDO $pdo, string $table): bool
     {
         $stmt = $pdo->prepare('SHOW TABLES LIKE ?');
-        $stmt->execute(array($table));
+        $stmt->execute(array(self::escape_like_literal($table)));
 
         return (bool) $stmt->fetchColumn();
+    }
+
+    private static function escape_like_literal(string $value): string
+    {
+        return str_replace(array('\\', '%', '_'), array('\\\\', '\\%', '\\_'), $value);
+    }
+
+    private static function quote_sql_identifier(string $identifier): string
+    {
+        return '`' . str_replace('`', '``', $identifier) . '`';
     }
 
     private static function drop_prefixed_tables(PDO $pdo, string $prefix): int
@@ -374,18 +513,28 @@ class Rmmigrate_Restore_Topology_Standalone
             return 0;
         }
 
+        $base_len = strlen($base_prefix);
+        $prefix_len = strlen($prefix);
+        $base_like = self::escape_sql_like($base_prefix) . '%';
+        $table_q = self::quote_sql_identifier($table);
+
         $stmt = $pdo->prepare(
-            "DELETE FROM `{$table}` WHERE `meta_key` LIKE ? AND `meta_key` NOT LIKE ?"
+            "DELETE FROM {$table_q} WHERE SUBSTRING(`meta_key`, 1, {$base_len}) = ? AND SUBSTRING(`meta_key`, 1, {$prefix_len}) <> ? AND `meta_key` LIKE ? ESCAPE '\\\\'"
         );
-        $stmt->execute(array($base_prefix . '%', $prefix . '%'));
+        $stmt->execute(array($base_prefix, $prefix, $base_like));
         $purged = $stmt->rowCount();
 
         $update = $pdo->prepare(
-            "UPDATE `{$table}` SET `meta_key` = REPLACE(`meta_key`, ?, ?) WHERE `meta_key` LIKE ?"
+            "UPDATE {$table_q} SET `meta_key` = CONCAT(?, SUBSTRING(`meta_key`, ?)) WHERE SUBSTRING(`meta_key`, 1, {$prefix_len}) = ?"
         );
-        $update->execute(array($prefix, $base_prefix, $prefix . '%'));
+        $update->execute(array($base_prefix, $prefix_len + 1, $prefix));
 
         return $purged;
+    }
+
+    private static function escape_sql_like(string $value): string
+    {
+        return str_replace(array('\\', '%', '_'), array('\\\\', '\\%', '\\_'), $value);
     }
 
     /**
@@ -397,9 +546,6 @@ class Rmmigrate_Restore_Topology_Standalone
         $map = is_array($context['migration_map'] ?? null) ? $context['migration_map'] : array();
         if (!empty($map['site_url']['new'])) {
             return array('new_url' => (string) $map['site_url']['new']);
-        }
-        if (!empty($map['new_url'])) {
-            return $map;
         }
 
         return $map;
@@ -431,7 +577,8 @@ class Rmmigrate_Restore_Topology_Standalone
             return false;
         }
 
-        $stmt = $pdo->prepare("UPDATE `{$options}` SET option_value = ? WHERE option_name IN ('siteurl', 'home')");
+        $options_q = self::quote_sql_identifier($options);
+        $stmt = $pdo->prepare("UPDATE {$options_q} SET option_value = ? WHERE option_name IN ('siteurl', 'home')");
         $stmt->execute(array(function_exists('untrailingslashit') ? untrailingslashit($new_url) : rtrim($new_url, '/')));
 
         return $stmt->rowCount() > 0;

@@ -90,7 +90,7 @@ if (!defined('ABSPATH')) {
                             <input type="password" class="regular-text" id="mm-restore-passphrase" autocomplete="off">
                             <span class="description"><?php esc_html_e('Required for encrypted .venc backups.', 'rosenheinrich-multisite-migrate'); ?></span>
                         </p>
-                        <?php if (is_multisite() && $rmmigrate_is_network) : ?>
+                        <?php if (is_multisite() && !empty($rmmigrate_is_network)) : ?>
                             <div id="mm-blog-migration-table"></div>
                         <?php endif; ?>
                     </div>
@@ -106,14 +106,22 @@ if (!defined('ABSPATH')) {
                     </p>
                     <div id="mm-topology-options" class="mm-hidden">
                         <p><strong><?php esc_html_e('Multisite import topology', 'rosenheinrich-multisite-migrate'); ?></strong></p>
+                        <?php
+                        $rmmigrate_network_blog_limit_notice = is_multisite()
+                            ? Rmmigrate_Restore_Topology_Ui::network_blog_choices_limit_notice()
+                            : '';
+                        if ($rmmigrate_network_blog_limit_notice !== '') :
+                            ?>
+                            <p class="description mm-topology-network-limit-notice"><?php echo esc_html($rmmigrate_network_blog_limit_notice); ?></p>
+                        <?php endif; ?>
                         <div id="mm-topology-subsite-on-network" class="mm-hidden">
                             <p>
                                 <label>
-                                    <input type="radio" name="mm_topology_import" value="auto" checked>
+                                    <input type="radio" name="mm_topology_import" value="auto" checked disabled>
                                     <?php esc_html_e('Default import', 'rosenheinrich-multisite-migrate'); ?>
                                 </label><br>
                                 <label>
-                                    <input type="radio" name="mm_topology_import" value="subsite_on_network">
+                                    <input type="radio" name="mm_topology_import" value="subsite_on_network" disabled>
                                     <?php esc_html_e('Import as subsite on this network', 'rosenheinrich-multisite-migrate'); ?>
                                 </label>
                             </p>
@@ -129,11 +137,11 @@ if (!defined('ABSPATH')) {
                         <div id="mm-topology-network-to-subsite" class="mm-hidden">
                             <p>
                                 <label>
-                                    <input type="radio" name="mm_topology_import" value="auto" checked>
+                                    <input type="radio" name="mm_topology_import" value="auto" checked disabled>
                                     <?php esc_html_e('Default import', 'rosenheinrich-multisite-migrate'); ?>
                                 </label><br>
                                 <label>
-                                    <input type="radio" name="mm_topology_import" value="network_to_subsite">
+                                    <input type="radio" name="mm_topology_import" value="network_to_subsite" disabled>
                                     <?php esc_html_e('Import into this subsite slot', 'rosenheinrich-multisite-migrate'); ?>
                                 </label>
                             </p>

@@ -23,27 +23,16 @@
 
 
     function redirectToDone(jobId) {
+        $(window).off('beforeunload.mmImport');
+        var doneUrl = importDoneUrl();
         if (jobId) {
             persistImportJobId(jobId);
-            window.location.href = importDoneUrl() + (importDoneUrl().indexOf('?') >= 0 ? '&' : '?') + 'job_id=' + jobId;
+            window.location.href = doneUrl + (doneUrl.indexOf('?') >= 0 ? '&' : '?') + 'job_id=' + jobId;
             return;
         }
-        window.location.href = importDoneUrl();
+        window.location.href = doneUrl;
     }
 
-
-
-    function buildEmptyStateHtml(title, message, icon) {
-        icon = icon || 'dashicons-cloud';
-        var html = '<div class="mm-empty-state mm-empty-state--activity">';
-        html += '<span class="mm-empty-state__icon dashicons ' + icon + '" aria-hidden="true"></span>';
-        html += '<h3>' + title + '</h3>';
-        if (message) {
-            html += '<p>' + message + '</p>';
-        }
-        html += '</div>';
-        return html;
-    }
 
 
 
@@ -114,12 +103,12 @@
                     }
                 }
                 $sticky = $(
-                    '<div id="mm-import-sticky-progress" class="mm-progress-wrap mm-import-sticky-banner" style="background:var(--mm-surface,#fff);border:1px solid var(--mm-border,#dcdcde);border-radius:var(--mm-radius-lg,8px);padding:14px 18px;margin-bottom:16px;box-shadow:var(--mm-shadow-sm,0 1px 2px rgba(0,0,0,0.05));">' +
-                    '<div id="mm-import-sticky-status" class="mm-import-progress-status" style="font-weight:600;margin-bottom:8px;font-size:14px;color:var(--mm-navy,#1d2327);"></div>' +
-                    '<div class="mm-progress-bar" style="height:12px;background:var(--mm-surface-alt,#f0f0f1);border-radius:6px;overflow:hidden;">' +
-                    '<div class="mm-progress-fill" style="height:100%;background:var(--mm-teal,#008a20);width:0%;transition:width 0.35s cubic-bezier(0.4, 0, 0.2, 1);"></div>' +
+                    '<div id="mm-import-sticky-progress" class="mm-progress-wrap mm-import-sticky-banner">' +
+                    '<div id="mm-import-sticky-status" class="mm-import-progress-status"></div>' +
+                    '<div class="mm-progress-bar">' +
+                    '<div class="mm-progress-fill"></div>' +
                     '</div>' +
-                    '<div class="mm-import-progress-text" style="font-size:12px;color:var(--mm-text-muted,#646970);margin-top:6px;font-weight:500;"></div>' +
+                    '<div class="mm-import-progress-text"></div>' +
                     '</div>'
                 ).prependTo($belowHeader);
             }
@@ -159,6 +148,13 @@
 
         function uploadChunk() {
             var start = chunkIndex * chunkSize;
+            if (start >= file.size) {
+                stopVerifyInterval();
+                restoreUploadUI();
+                status.text(t('importFailed', 'Import failed'));
+                rmmigrateAdminUI.toast(t('importFailed', 'Import failed'), 'error');
+                return;
+            }
             var end = Math.min(start + chunkSize, file.size);
             var blob = file.slice(start, end);
             var isFinalChunk = (chunkIndex + 1 >= totalChunks) || (end >= file.size);
@@ -250,7 +246,7 @@
                 chunkRetries = 0;
                 chunkIndex++;
 
-                if (res.data && res.data.complete) {
+                if (res && res.success && res.data && res.data.complete && res.data.job_id) {
                     stopVerifyInterval();
                     setImportProgress(
                         100,
@@ -342,19 +338,41 @@
                     return xhr;
                 }
             }).done(function (res) {
-                if (res.success) {
+                if (res && res.success && res.data && res.data.job_id) {
                     stopVerifyInterval();
                     setImportProgress(100, t('importComplete', 'Archive verified & registered successfully. Completing import…'), '100%');
-                    redirectToDone(res.data && res.data.job_id);
-                } else {
+                    redirectToDone(res.data.job_id);
+                } else if (res && res.data && res.data.downsize && chunkSize > 65536) {
+                    stopVerifyInterval();
                     chunkSize = Math.max(65536, Math.floor(chunkSize / 2));
                     totalChunks = Math.ceil(file.size / chunkSize);
+                    maxImportPercent = 0;
+                    chunkIndex = 0;
                     uploadChunk();
+                } else {
+                    restoreUploadUI();
+                    var errMsg = (res && res.data && res.data.message) ? res.data.message : t('importFailed', 'Import failed');
+                    status.text(errMsg);
+                    rmmigrateAdminUI.toast(errMsg, 'error');
                 }
-            }).fail(function () {
-                chunkSize = Math.max(65536, Math.floor(chunkSize / 2));
-                totalChunks = Math.ceil(file.size / chunkSize);
-                uploadChunk();
+            }).fail(function (xhr) {
+                stopVerifyInterval();
+                var retryable = xhr && (xhr.status === 413 || xhr.status === 500 || xhr.status === 502 || xhr.status === 504 || xhr.status === 0);
+                if (retryable && chunkSize > 65536) {
+                    chunkSize = Math.max(65536, Math.floor(chunkSize / 2));
+                    totalChunks = Math.ceil(file.size / chunkSize);
+                    maxImportPercent = 0;
+                    chunkIndex = 0;
+                    uploadChunk();
+                    return;
+                }
+
+                restoreUploadUI();
+                var failMsg = rmmigrateAdminUI.ajaxErrorMessage
+                    ? rmmigrateAdminUI.ajaxErrorMessage(xhr, t('importFailed', 'Import failed'))
+                    : t('importFailed', 'Import failed');
+                status.text(failMsg);
+                rmmigrateAdminUI.toast(failMsg, 'error');
             });
             return;
         }
@@ -369,6 +387,7 @@
         if (this.files[0]) {
 
             uploadLocalFile(this.files[0]);
+            this.value = '';
 
         }
 
@@ -472,11 +491,12 @@
     })();
 
     var IMPORT_JOB_KEY = 'mm_last_import_job_id';
-    var lastImportJobId = parseInt(sessionStorage.getItem(IMPORT_JOB_KEY) || new URLSearchParams(window.location.search).get('job_id') || '0', 10);
-
     function persistImportJobId(id) {
-        lastImportJobId = id;
-        sessionStorage.setItem(IMPORT_JOB_KEY, String(id));
+        try {
+            sessionStorage.setItem(IMPORT_JOB_KEY, String(id));
+        } catch (e) {
+            // Storage unavailable or quota exceeded; redirect should still proceed.
+        }
     }
 
     $('#mm-toggle-import-settings').on('click', function () {

@@ -15,6 +15,9 @@ class Rmmigrate_Multisite_Scope
     const SCOPE_NETWORK_INCLUDED = 'network_included';
     const SCOPE_SUBSITE          = 'subsite';
 
+    /** @var string[]|null */
+    private $exclude_paths_cache = null;
+
     /** @var string */
     private $scope;
 
@@ -68,12 +71,88 @@ class Rmmigrate_Multisite_Scope
             return array((int) get_current_blog_id());
         }
 
-        $ids = get_sites(array('number' => 500, 'fields' => 'ids'));
-        if (!is_array($ids)) {
+        $ids = array();
+        $offset = 0;
+        $number = 500;
+        do {
+            $batch = get_sites(array(
+                'number' => $number,
+                'offset' => $offset,
+                'fields' => 'ids',
+            ));
+            if (!is_array($batch) || $batch === array()) {
+                break;
+            }
+            foreach ($batch as $id) {
+                $ids[] = (int) $id;
+            }
+            $offset += $number;
+        } while (count($batch) === $number);
+
+        return $ids;
+    }
+
+    public static function subsite_picker_limit(): int
+    {
+        return 500;
+    }
+
+    /**
+     * @return array<int,array{blog_id:int,label:string}>
+     */
+    public static function search_network_sites(string $search, int $limit = 25, int $offset = 0): array
+    {
+        if (!is_multisite() || !function_exists('get_sites')) {
             return array();
         }
 
-        return array_values(array_map('intval', $ids));
+        $search = trim($search);
+        $limit = max(1, min(50, $limit));
+        $offset = max(0, $offset);
+        $args = array(
+            'number'  => $limit,
+            'offset'  => $offset,
+            'orderby' => 'id',
+            'order'   => 'ASC',
+        );
+        if ($search !== '') {
+            $args['search'] = $search;
+        }
+
+        $sites = get_sites($args);
+        $results = array();
+        foreach ($sites as $site) {
+            if (!is_object($site) || !isset($site->blog_id)) {
+                continue;
+            }
+            $blog_id = (int) $site->blog_id;
+            $results[] = array(
+                'blog_id' => $blog_id,
+                'label'   => self::format_blog_label($blog_id),
+            );
+        }
+
+        return $results;
+    }
+
+    /**
+     * @param int[] $blog_ids
+     * @return array<int,array{blog_id:int,label:string}>
+     */
+    public static function network_site_labels(array $blog_ids): array
+    {
+        $results = array();
+        foreach (array_values(array_unique(array_map('intval', $blog_ids))) as $blog_id) {
+            if ($blog_id <= 0) {
+                continue;
+            }
+            $results[] = array(
+                'blog_id' => $blog_id,
+                'label'   => self::format_blog_label($blog_id),
+            );
+        }
+
+        return $results;
     }
 
     /**
@@ -150,7 +229,7 @@ class Rmmigrate_Multisite_Scope
      * @param int[] $excluded_blog_ids
      * @param int[] $included_blog_ids
      * @param bool  $trusted_network When true, honor network scope without a logged-in super admin (scheduled cron).
-     * @return array{scope:string,excluded_blogs:int[]}|WP_Error
+     * @return array{scope:string,excluded_blogs:int[],downgraded:bool}|WP_Error
      */
     public static function resolve_backup_scope(string $scope, array $excluded_blog_ids = array(), array $included_blog_ids = array(), bool $trusted_network = false)
     {
@@ -158,6 +237,7 @@ class Rmmigrate_Multisite_Scope
             return array(
                 'scope'          => self::SCOPE_SUBSITE,
                 'excluded_blogs' => array(),
+                'downgraded'     => true,
             );
         }
 
@@ -179,12 +259,14 @@ class Rmmigrate_Multisite_Scope
                 return array(
                     'scope'           => self::SCOPE_NETWORK,
                     'excluded_blogs'  => array(),
+                    'downgraded'      => false,
                 );
             }
 
             return array(
                 'scope'          => self::SCOPE_NETWORK_INCLUDED,
                 'excluded_blogs' => array_values(array_diff($all, $included_blog_ids)),
+                'downgraded'     => false,
             );
         }
 
@@ -204,6 +286,7 @@ class Rmmigrate_Multisite_Scope
             return array(
                 'scope'          => self::SCOPE_NETWORK_FILTERED,
                 'excluded_blogs' => $excluded_blog_ids,
+                'downgraded'     => false,
             );
         }
 
@@ -214,6 +297,7 @@ class Rmmigrate_Multisite_Scope
         return array(
             'scope'          => $scope,
             'excluded_blogs' => array(),
+            'downgraded'     => false,
         );
     }
 
@@ -224,44 +308,52 @@ class Rmmigrate_Multisite_Scope
     {
         global $wpdb;
 
-        $cache_key = 'mm_all_tables';
-        $all = wp_cache_get($cache_key, 'rmmigrate');
+        $cache_key = 'mm_all_tables_' . md5((defined('DB_NAME') ? DB_NAME : '') . '|' . $wpdb->base_prefix);
+        $cache_ttl = Rmmigrate_Job::get_active() !== null ? 0 : 3600;
+        $all = $cache_ttl > 0 ? wp_cache_get($cache_key, 'rmmigrate') : false;
         if ($all === false) {
             // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery -- Plugin: custom plugin tables; values use prepare().
             $all = $wpdb->get_col('SHOW TABLES');
-            wp_cache_set($cache_key, $all, 'rmmigrate', 3600);
+            if ($cache_ttl > 0) {
+                wp_cache_set($cache_key, $all, 'rmmigrate', $cache_ttl);
+            }
         }
         if (!is_array($all)) {
             return array();
         }
 
+        $settings = Rmmigrate_Settings::get();
+        $exclude_patterns = $this->resolve_table_exclude_patterns($settings);
+
         if ($this->scope === self::SCOPE_NETWORK) {
             $tables = $all;
-            if (!empty(Rmmigrate_Settings::get()['exclude_deleted_subsite_tables'])) {
+            if (!empty($settings['exclude_deleted_subsite_tables'])) {
                 $tables = array_values(array_diff($tables, self::get_orphan_subsite_tables($all)));
             }
-            return self::apply_table_excludes($tables, $this->resolve_table_exclude_patterns());
+            return self::apply_table_excludes($tables, $exclude_patterns);
         }
 
         if ($this->scope === self::SCOPE_NETWORK_FILTERED) {
             $exclude = $this->get_tables_to_filter();
-            return self::apply_table_excludes(array_values(array_diff($all, $exclude)), $this->resolve_table_exclude_patterns());
+            return self::apply_table_excludes(array_values(array_diff($all, $exclude)), $exclude_patterns);
         }
 
         if ($this->scope === self::SCOPE_NETWORK_INCLUDED) {
-            return self::apply_table_excludes($this->get_included_subsite_tables($all), $this->resolve_table_exclude_patterns());
+            return self::apply_table_excludes($this->get_included_subsite_tables($all), $exclude_patterns);
         }
 
-        return self::apply_table_excludes($this->get_subsite_tables($all), $this->resolve_table_exclude_patterns());
+        return self::apply_table_excludes($this->get_subsite_tables($all), $exclude_patterns);
     }
 
     /**
+     * @param array<string,mixed>|null $settings
      * @return string[]
      */
-    private function resolve_table_exclude_patterns(): array
+    private function resolve_table_exclude_patterns(?array $settings = null): array
     {
+        $settings = $settings ?? Rmmigrate_Settings::get();
         $patterns = array_merge($this->excluded_table_patterns, self::plugin_runtime_table_patterns());
-        if (!empty(Rmmigrate_Settings::get()['exclude_log_tables'])) {
+        if (!empty($settings['exclude_log_tables'])) {
             $patterns = array_merge($patterns, self::log_table_patterns());
         }
         return array_values(array_unique($patterns));
@@ -446,12 +538,20 @@ class Rmmigrate_Multisite_Scope
             $sub_tables = wp_cache_get($cache_key, 'rmmigrate');
             if ($sub_tables === false) {
                 // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery -- Plugin: custom plugin tables; values use prepare().
-                $sub_tables = $wpdb->get_col(
+                $all_tables = $wpdb->get_col(
                     $wpdb->prepare(
-                        'SHOW TABLES WHERE `Tables_in_' . esc_sql(DB_NAME) . '` REGEXP %s',
-                        $regex
+                        'SHOW TABLES FROM %i',
+                        DB_NAME
                     )
                 );
+                $sub_tables = array();
+                if (is_array($all_tables)) {
+                    foreach ($all_tables as $table) {
+                        if (preg_match('/' . $regex . '/', (string) $table) === 1) {
+                            $sub_tables[] = $table;
+                        }
+                    }
+                }
                 wp_cache_set($cache_key, $sub_tables, 'rmmigrate', 3600);
             }
             if (is_array($sub_tables)) {
@@ -565,6 +665,10 @@ class Rmmigrate_Multisite_Scope
      */
     public function get_exclude_paths(): array
     {
+        if ($this->exclude_paths_cache !== null) {
+            return $this->exclude_paths_cache;
+        }
+
         $wp_content = wp_normalize_path(WP_CONTENT_DIR);
         $excludes = array(
             // Leftover installer safety snapshots under web root (not size-gated).
@@ -582,7 +686,14 @@ class Rmmigrate_Multisite_Scope
         }
 
         $settings = Rmmigrate_Settings::get();
-        foreach ($settings['exclude_paths'] as $path) {
+        $exclude_paths = $settings['exclude_paths'] ?? array();
+        if (!is_array($exclude_paths)) {
+            $exclude_paths = array();
+        }
+        foreach ($exclude_paths as $path) {
+            if (!is_string($path)) {
+                continue;
+            }
             $path = trim($path);
             if ($path !== '') {
                 if ($path[0] !== '/') {
@@ -598,7 +709,7 @@ class Rmmigrate_Multisite_Scope
             }
         }
 
-        return array_values(array_unique($excludes));
+        return $this->exclude_paths_cache = array_values(array_unique($excludes));
     }
 
     /**
@@ -617,13 +728,16 @@ class Rmmigrate_Multisite_Scope
             if ($site_id === 1) {
                 $uploads_dir = Rmmigrate_Engine_Config::uploads_basedir_for_blog($site_id);
                 if (Rmmigrate_Filesystem::is_dir($uploads_dir)) {
-                    foreach (scandir($uploads_dir) as $node) {
-                        if ($node === '.' || $node === '..' || $node === '.htaccess') {
-                            continue;
-                        }
-                        $fullpath = $uploads_dir . '/' . $node;
-                        if (Rmmigrate_Filesystem::is_dir($fullpath) && $node !== 'sites') {
-                            $path_arr[] = $fullpath;
+                    $nodes = scandir($uploads_dir);
+                    if ($nodes !== false) {
+                        foreach ($nodes as $node) {
+                            if ($node === '.' || $node === '..' || $node === '.htaccess') {
+                                continue;
+                            }
+                            $fullpath = $uploads_dir . '/' . $node;
+                            if (Rmmigrate_Filesystem::is_dir($fullpath) && $node !== 'sites') {
+                                $path_arr[] = $fullpath;
+                            }
                         }
                     }
                 }
@@ -695,7 +809,7 @@ class Rmmigrate_Multisite_Scope
     public static function host_slug(?string $url = null): string
     {
         $host = wp_parse_url($url ?? network_home_url(), PHP_URL_HOST);
-        $slug = preg_replace('/[^a-z0-9]+/i', '-', (string) $host);
+        $slug = (string) preg_replace('/[^a-z0-9]+/i', '-', (string) $host);
 
         return trim(strtolower($slug), '-') ?: 'site';
     }
@@ -708,7 +822,7 @@ class Rmmigrate_Multisite_Scope
 
         $network_host = strtolower((string) wp_parse_url(network_home_url(), PHP_URL_HOST));
         $details = get_blog_details($blog_id, false);
-        if ($details !== null) {
+        if (is_object($details)) {
             $site_domain = strtolower((string) ($details->domain ?? ''));
             if ($site_domain !== '' && $network_host !== '' && $site_domain !== $network_host) {
                 return self::host_slug('https://' . $site_domain . '/');
@@ -759,7 +873,7 @@ class Rmmigrate_Multisite_Scope
         }
 
         $details = get_blog_details($blog_id, false);
-        if ($details === null) {
+        if (!is_object($details)) {
             return false;
         }
 
@@ -835,7 +949,7 @@ class Rmmigrate_Multisite_Scope
         }
 
         $slug = str_replace('-', '_', self::archive_name_slug($job));
-        $hash = substr(md5(uniqid('', true)), 0, 6);
+        $hash = substr(bin2hex(random_bytes(3)), 0, 6);
         return gmdate('Ymd_His') . '_' . $hash . '_' . $slug . '_archive.' . ltrim($ext, '.');
     }
 }

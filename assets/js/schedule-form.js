@@ -32,15 +32,17 @@
     function bindRow($row) {
         toggleRowFields($row);
         toggleScopePanel($row);
-        $row.find('.mm-schedule-interval').on('change', function () {
-            toggleRowFields($row);
-        });
-        $row.find('.mm-schedule-scope').on('change', function () {
-            toggleScopePanel($row);
-        });
     }
 
     $(function () {
+        $('#mm-schedules-body')
+            .on('change', '.mm-schedule-interval', function () {
+                toggleRowFields($(this).closest('.mm-schedule-row'));
+            })
+            .on('change', '.mm-schedule-scope', function () {
+                toggleScopePanel($(this).closest('.mm-schedule-row'));
+            });
+
         $('#mm-schedules-body .mm-schedule-row').each(function () {
             bindRow($(this));
         });

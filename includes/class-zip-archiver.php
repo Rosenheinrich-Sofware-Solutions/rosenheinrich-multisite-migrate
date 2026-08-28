@@ -7,6 +7,7 @@ if (!defined('ABSPATH')) {
 class Rmmigrate_Zip_Archiver
 {
     private const QUEUE_FILE = 'zip-queue.json';
+    private const MAX_ADD_FILES_PER_SLICE = 1000;
 
     /** @var Rmmigrate_Job */
     private $job;
@@ -95,8 +96,23 @@ class Rmmigrate_Zip_Archiver
 
         $work_dir = $this->job->get_work_dir();
         $zip_path = $archive['zip_path'] ?? '';
+        if ($zip_path === '') {
+            $zip_name = Rmmigrate_Multisite_Scope::build_archive_file_name($this->job, 'zip');
+            $zip_path = trailingslashit($work_dir) . $zip_name;
+            $this->job->update_progress(array('archive' => array('zip_path' => $zip_path)));
+        }
         $file_index = (int) ($archive['file_index'] ?? 0);
+        $queue_path = trailingslashit($work_dir) . self::QUEUE_FILE;
+        $queue_missing = !Rmmigrate_Filesystem::exists($queue_path);
         $queue = $this->load_queue($work_dir);
+        if ($queue_missing && $file_index > 0) {
+            $file_index = 0;
+            if ($zip_path !== '' && Rmmigrate_Filesystem::exists($zip_path)) {
+                Rmmigrate_Filesystem::delete($zip_path);
+            }
+            $this->job->update_progress(array('archive' => array('file_index' => 0)));
+            Rmmigrate_Logger::log('ZIP queue missing — archive reset, restarting from file 0.');
+        }
         $total = count($queue);
 
         if ($total === 0) {
@@ -107,16 +123,22 @@ class Rmmigrate_Zip_Archiver
         }
 
         $resume = false;
-        if (Rmmigrate_Filesystem::exists($zip_path) && $file_index > 0) {
-            $probe = new ZipArchive();
-            if ($probe->open($zip_path) === true) {
-                $probe->close();
-                $resume = true;
-            } else {
-                Rmmigrate_Filesystem::delete($zip_path);
+        if ($file_index > 0) {
+            if (!Rmmigrate_Filesystem::exists($zip_path)) {
                 $file_index = 0;
                 $this->job->update_progress(array('archive' => array('file_index' => 0)));
-                Rmmigrate_Logger::log('ZIP resume rejected — archive unreadable, restarting from file 0.');
+                Rmmigrate_Logger::log('ZIP resume rejected — archive missing, restarting from file 0.');
+            } else {
+                $probe = new ZipArchive();
+                if ($probe->open($zip_path) === true) {
+                    $probe->close();
+                    $resume = true;
+                } else {
+                    Rmmigrate_Filesystem::delete($zip_path);
+                    $file_index = 0;
+                    $this->job->update_progress(array('archive' => array('file_index' => 0)));
+                    Rmmigrate_Logger::log('ZIP resume rejected — archive unreadable, restarting from file 0.');
+                }
             }
         }
 
@@ -132,7 +154,14 @@ class Rmmigrate_Zip_Archiver
         $start = microtime(true);
         $max_file_bytes = Rmmigrate_Settings::get_max_archive_file_bytes();
         $skipped_large = (int) ($archive['skipped_large'] ?? 0);
-        while ($file_index < $total && (microtime(true) - $start) < $budget_sec) {
+        $close_budget_sec = 5.0;
+        $add_budget_sec = max(0.0, (float) $budget_sec - $close_budget_sec);
+        $processed = 0;
+        $added = 0;
+        while ($file_index < $total
+            && ((microtime(true) - $start) < $add_budget_sec || $processed === 0)
+            && $added < self::MAX_ADD_FILES_PER_SLICE
+        ) {
             Rmmigrate_Runner::touch_worker_lease($this->job->get_id());
             $item = $queue[$file_index];
             if (Rmmigrate_Filesystem::exists($item['path'])) {
@@ -150,10 +179,15 @@ class Rmmigrate_Zip_Archiver
                     ));
                     $skipped_large++;
                 } else {
-                    $zip->addFile($item['path'], $item['archive']);
+                    if (!$zip->addFile($item['path'], $item['archive'])) {
+                        Rmmigrate_Logger::log(sprintf('Failed to queue archive file: %s', $item['path']));
+                    } else {
+                        $added++;
+                    }
                 }
             }
             $file_index++;
+            $processed++;
         }
 
         if ($zip->close() !== true) {
@@ -227,11 +261,35 @@ class Rmmigrate_Zip_Archiver
         $path = trailingslashit($work_dir) . self::QUEUE_FILE;
         if (!Rmmigrate_Filesystem::exists($path)) {
             $files = Rmmigrate_File_List::load($work_dir);
-            return $this->build_queue($work_dir, $files);
+            $queue = $this->build_queue($work_dir, $files);
+            RMMIGRATE_IO::write_json_atomic($path, $queue);
+            return $queue;
         }
         $raw = Rmmigrate_Filesystem::get_contents($path);
-        $decoded = $raw !== false ? json_decode($raw, true) : null;
-        return is_array($decoded) ? $decoded : array();
+        if ($raw === false) {
+            return array();
+        }
+        $decoded = json_decode($raw, true);
+        if (!is_array($decoded)) {
+            return array();
+        }
+        $queue = array();
+        foreach ($decoded as $entry) {
+            if (!is_array($entry)) {
+                continue;
+            }
+            $entry_path = isset($entry['path']) ? (string) $entry['path'] : '';
+            $entry_archive = isset($entry['archive']) ? (string) $entry['archive'] : '';
+            if ($entry_path === '' || $entry_archive === '') {
+                continue;
+            }
+            $queue[] = array(
+                'path'    => $entry_path,
+                'archive' => $entry_archive,
+            );
+        }
+
+        return $queue;
     }
 
 }

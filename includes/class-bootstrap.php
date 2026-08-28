@@ -50,10 +50,7 @@ class Rmmigrate_Bootstrap
     private static function edition_slug_for_boot_file(string $boot_file): string
     {
         $path = str_replace('\\', '/', $boot_file);
-        if (strpos($path, '/plugins/rosenheinrich-multisite-migrate/') !== false) {
-            return 'rosenheinrich-multisite-migrate/multisite-migrate.php';
-        }
-        if (strpos($path, '/free/') !== false) {
+        if (strpos($path, '/plugins/rosenheinrich-multisite-migrate/') !== false || strpos($path, '/free/') !== false) {
             return 'rosenheinrich-multisite-migrate/multisite-migrate.php';
         }
 
@@ -92,6 +89,40 @@ class Rmmigrate_Bootstrap
         }
 
         return false;
+    }
+
+    /** Custom WP-Cron interval used by rmmigrate_tick. */
+    const CRON_SCHEDULE_KEY = 'rmmigrate_5min';
+
+    /**
+     * Register the 5-minute schedule early so WP-Cron never encounters an unknown schedule.
+     */
+    public static function register_cron_schedules_filter(): void
+    {
+        static $registered = false;
+        if ($registered) {
+            return;
+        }
+        $registered = true;
+        add_filter('cron_schedules', array(__CLASS__, 'add_cron_schedules'));
+    }
+
+    /**
+     * @param array<string,array{interval:int,display:string}> $schedules
+     * @return array<string,array{interval:int,display:string}>
+     */
+    public static function add_cron_schedules(array $schedules): array
+    {
+        // Do not translate here — cron_schedules can run before init (WP 6.7 JIT notice).
+        $schedules['rmmigrate_5min'] = array(
+            'interval' => 5 * MINUTE_IN_SECONDS,
+            'display'  => 'Every 5 Minutes',
+        );
+        $schedules['rmmigrate_pro_5min'] = array(
+            'interval' => 5 * MINUTE_IN_SECONDS,
+            'display'  => 'Every 5 Minutes',
+        );
+        return $schedules;
     }
 }
 

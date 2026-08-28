@@ -214,16 +214,8 @@ class Rmmigrate_Admin_Router
             'multisite-migrate-activity'  => array('title' => $titles['multisite-migrate-activity'], 'partial' => 'activity-log-page.php', 'scripts' => array('activity-log')),
             'multisite-migrate-health'    => array('title' => $titles['multisite-migrate-health'], 'partial' => 'health.php', 'scripts' => array('admin-tools')),
             'multisite-migrate-mcp'       => array('title' => $titles['multisite-migrate-mcp'], 'partial' => 'mcp-page.php'),
-            'multisite-migrate-subsite'   => array('title' => $titles['multisite-migrate-subsite'], 'partial' => 'subsite-backups.php', 'scripts' => array('restore')),
             'multisite-migrate-setup'     => array('title' => $titles['multisite-migrate-setup'], 'partial' => 'wizards/setup/index.php', 'scripts' => array('setup')),
         );
-
-        foreach (self::legacy_redirects() as $legacy => $target) {
-            if (!isset($pages[$legacy])) {
-                $pages[$legacy] = $pages[$target['page']] ?? $pages['multisite-migrate-archives'];
-                $pages[$legacy]['title'] = $pages[$target['page']]['title'] ?? __('Multisite Migrate', 'rosenheinrich-multisite-migrate');
-            }
-        }
 
         return $pages;
     }
@@ -244,8 +236,9 @@ class Rmmigrate_Admin_Router
 
     public static function render(string $rmmigrate_page_slug, bool $rmmigrate_is_network): void
     {
-        if ($rmmigrate_page_slug === 'multisite-migrate-subsite') {
-            $rmmigrate_page_slug = 'multisite-migrate-archives';
+        $redirects = self::legacy_redirects();
+        if (isset($redirects[$rmmigrate_page_slug])) {
+            $rmmigrate_page_slug = $redirects[$rmmigrate_page_slug]['page'];
         }
 
         if (self::is_subsite_scoped_context() && !Rmmigrate_Access::subsite_page_visible($rmmigrate_page_slug)) {
@@ -282,13 +275,10 @@ class Rmmigrate_Admin_Router
 
         $rmmigrate_header_action = '';
 
-        if (in_array($rmmigrate_page_slug, array('multisite-migrate-archives', 'multisite-migrate-migrate', 'multisite-migrate-subsite'), true)) {
+        if (in_array($rmmigrate_page_slug, array('multisite-migrate-archives', 'multisite-migrate-migrate'), true)) {
             $rmmigrate_filter = Rmmigrate_Request_Input::get_text('filter', 'all');
             if ($rmmigrate_page_slug === 'multisite-migrate-archives' && Rmmigrate_Request_Input::get_key('tab', 'all') === 'failed') {
                 $rmmigrate_filter = 'failed';
-            }
-            if ($rmmigrate_page_slug === 'multisite-migrate-subsite') {
-                $rmmigrate_filter = Rmmigrate_Request_Input::get_text('filter', 'all');
             }
             $rmmigrate_args = array('limit' => $rmmigrate_is_network ? 100 : 50);
             if (self::is_subsite_scoped_context()) {
@@ -365,6 +355,11 @@ class Rmmigrate_Admin_Router
      */
     public static function all_page_slugs(): array
     {
-        return array_fill_keys(array_keys(self::pages()), true);
+        $slugs = array_fill_keys(array_keys(self::pages()), true);
+        foreach (array_keys(self::legacy_redirects()) as $legacy_slug) {
+            $slugs[$legacy_slug] = true;
+        }
+
+        return $slugs;
     }
 }

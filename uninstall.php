@@ -3,6 +3,12 @@ if (!defined('WP_UNINSTALL_PLUGIN')) {
     exit;
 }
 
-require_once dirname(__FILE__) . '/includes/class-uninstaller.php';
+$rmmigrate_uninstaller_file = __DIR__ . '/includes/class-uninstaller.php';
+if (!is_file($rmmigrate_uninstaller_file)) {
+    return;
+}
+require_once $rmmigrate_uninstaller_file;
 
-Rmmigrate_Uninstaller::run();
+if (class_exists('Rmmigrate_Uninstaller', false)) {
+    Rmmigrate_Uninstaller::run();
+}

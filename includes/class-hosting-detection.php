@@ -27,18 +27,33 @@ class Rmmigrate_Hosting_Detection
             return;
         }
         $token = Rmmigrate_Request_Input::get_text('mm_token');
-        if (!hash_equals(self::loopback_ping_token(), $token)) {
+        if (!self::loopback_ping_token_valid($token)) {
             status_header(403);
             exit;
         }
+        nocache_headers();
         header('Content-Type: text/plain; charset=UTF-8');
         echo 'ok';
         exit;
     }
 
-    public static function loopback_ping_token(): string
+    public static function loopback_ping_token(?string $window = null): string
     {
-        return substr(hash_hmac('sha256', 'mm_loopback_ping', wp_salt('auth')), 0, 16);
+        $window = $window ?? gmdate('Y-m-d-H');
+
+        return substr(hash_hmac('sha256', 'mm_loopback_ping|' . $window, wp_salt('auth')), 0, 16);
+    }
+
+    public static function loopback_ping_token_valid(string $token): bool
+    {
+        if ($token === '') {
+            return false;
+        }
+        if (hash_equals(self::loopback_ping_token(), $token)) {
+            return true;
+        }
+
+        return hash_equals(self::loopback_ping_token(gmdate('Y-m-d-H', time() - HOUR_IN_SECONDS)), $token);
     }
 
     /**
@@ -101,7 +116,7 @@ class Rmmigrate_Hosting_Detection
 
         $out = array(
             'ok'    => false,
-            'url'   => $url,
+            'url'   => remove_query_arg('mm_token', $url),
             'code'  => 0,
             'error' => '',
             'body'  => '',
@@ -115,7 +130,7 @@ class Rmmigrate_Hosting_Detection
         $out['code'] = (int) wp_remote_retrieve_response_code($response);
         $body = (string) wp_remote_retrieve_body($response);
         $out['body'] = substr(trim($body), 0, 120);
-        $out['ok'] = $out['code'] === 200 && strpos($body, 'ok') !== false;
+        $out['ok'] = $out['code'] === 200 && trim($body) === 'ok';
         return $out;
     }
 
@@ -197,7 +212,7 @@ class Rmmigrate_Hosting_Detection
         if ($max_exec > 0 && $max_exec < 120) {
             return 'daf';
         }
-        return $mode === 'daf' ? 'daf' : 'zip';
+        return 'zip';
     }
 
     public static function effective_archive_mode(): string
@@ -235,6 +250,9 @@ class Rmmigrate_Hosting_Detection
         if ($max_exec === 0) {
             return 15;
         }
+        if ($max_exec > 0 && $max_exec <= 8) {
+            return max(1, $max_exec - 1);
+        }
         if ($max_exec < 15) {
             return max(5, $max_exec - 3);
         }
@@ -267,18 +285,14 @@ class Rmmigrate_Hosting_Detection
         return self::detect_lock_mode();
     }
 
+    /**
+     * Whether backups dir should use NFS-oriented locking. Not auto-detected —
+     * hosts opt in via the rmmigrate_nfs_backups_dir filter (default false).
+     */
     public static function is_nfs_backups_dir(): bool
     {
         $dir = Rmmigrate_Plugin::backups_dir();
-        if (function_exists('posix_getpwuid') && function_exists('fileowner')) {
-            $stat = @stat($dir);
-            if (is_array($stat) && isset($stat['dev'])) {
-                $parent = @stat(dirname($dir));
-                if (is_array($parent) && isset($parent['dev']) && $stat['dev'] !== $parent['dev']) {
-                    return false;
-                }
-            }
-        }
+
         return (bool) apply_filters('rmmigrate_nfs_backups_dir', false, $dir);
     }
 
@@ -397,35 +411,8 @@ class Rmmigrate_Hosting_Detection
      */
     private static function clear_hook_events(string $hook, array $args): void
     {
-        if (function_exists('_get_cron_array') && function_exists('_set_cron_array')) {
-            $key = md5(serialize($args));
-            for ($attempt = 0; $attempt < 2; $attempt++) {
-                $crons = _get_cron_array();
-                if (!is_array($crons) || $crons === array()) {
-                    return;
-                }
-                $changed = false;
-                foreach ($crons as $timestamp => $hooks) {
-                    if (!is_array($hooks) || !isset($hooks[$hook][$key])) {
-                        continue;
-                    }
-                    unset($crons[$timestamp][$hook][$key]);
-                    if (empty($crons[$timestamp][$hook])) {
-                        unset($crons[$timestamp][$hook]);
-                    }
-                    if (empty($crons[$timestamp])) {
-                        unset($crons[$timestamp]);
-                    }
-                    $changed = true;
-                }
-                if (!$changed) {
-                    return;
-                }
-                $result = _set_cron_array($crons, true);
-                if (!is_wp_error($result) && $result !== false) {
-                    return;
-                }
-            }
+        if (function_exists('wp_clear_scheduled_hook')) {
+            wp_clear_scheduled_hook($hook, $args);
             return;
         }
 

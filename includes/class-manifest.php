@@ -47,79 +47,81 @@ class Rmmigrate_Manifest
         ), true);
         $primary_blog_id = self::primary_blog_id($job);
         $switched_blog = false;
-        if ($primary_blog_id > 0 && is_multisite()) {
-            switch_to_blog($primary_blog_id);
-            $switched_blog = true;
-        }
+        try {
+            if ($primary_blog_id > 0 && is_multisite()) {
+                switch_to_blog($primary_blog_id);
+                $switched_blog = true;
+            }
 
-        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Plugin: custom plugin tables; values use prepare().
-        $db_collation = $wpdb->get_var("SELECT @@collation_database") ?: '';
-        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Plugin: custom plugin tables; values use prepare().
-        $db_sql_mode = $wpdb->get_var("SELECT @@sql_mode") ?: '';
+            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Plugin: custom plugin tables; values use prepare().
+            $db_collation = $wpdb->get_var("SELECT @@collation_database") ?: '';
+            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Plugin: custom plugin tables; values use prepare().
+            $db_sql_mode = $wpdb->get_var("SELECT @@sql_mode") ?: '';
 
-        $site_url = $is_network && is_multisite()
-            ? network_site_url()
-            : ($primary_blog_id > 0 ? get_site_url($primary_blog_id) : site_url());
-        $home_url = $is_network && is_multisite()
-            ? network_home_url()
-            : ($primary_blog_id > 0 ? get_home_url($primary_blog_id) : home_url());
-        $db_prefix = $primary_blog_id > 0 ? $wpdb->get_blog_prefix($primary_blog_id) : $wpdb->prefix;
-        $manifest_blog_id = self::manifest_blog_id($job, $primary_blog_id);
+            $site_url = $is_network && is_multisite()
+                ? network_site_url()
+                : ($primary_blog_id > 0 ? get_site_url($primary_blog_id) : site_url());
+            $home_url = $is_network && is_multisite()
+                ? network_home_url()
+                : ($primary_blog_id > 0 ? get_home_url($primary_blog_id) : home_url());
+            $db_prefix = $primary_blog_id > 0 ? $wpdb->get_blog_prefix($primary_blog_id) : $wpdb->prefix;
+            $manifest_blog_id = self::manifest_blog_id($job, $primary_blog_id);
 
-        $manifest = array(
-            'plugin'         => 'multisite-migrate',
-            'plugin_version' => RMMIGRATE_VERSION,
-            'created_at'     => gmdate('c'),
-            'include_wp_core'    => (bool) $include_wp_core,
-            'has_wp_core_files'  => false,
-            'backup_intent'      => $backup_intent,
-            'scope'          => $job_scope,
-            'blog_id'        => $manifest_blog_id,
-            'site_url'       => $site_url,
-            'home_url'       => $home_url,
-            'network_site_url' => is_multisite() ? network_site_url() : '',
-            'source_blog_label' => $primary_blog_id > 0
-                ? Rmmigrate_Multisite_Scope::format_blog_label($primary_blog_id)
-                : '',
-            'restore_multisite' => self::restore_multisite($job),
-            'wp_version'     => get_bloginfo('version'),
-            'php_version'    => PHP_VERSION,
-            'is_multisite'   => is_multisite(),
-            'db_prefix'      => $db_prefix,
-            'source_base_prefix' => self::derive_base_prefix($db_prefix),
-            'source_blog_prefix' => $db_prefix,
-            'db_collation'   => $db_collation,
-            'db_sql_mode'    => $db_sql_mode,
-            'table_count'    => count($scope->get_tables()),
-            'tables'         => $scope->get_tables(),
-            'file_count'        => $file_count,
-            'uncompressed_size' => $total_bytes,
-            'excluded_blogs' => $job->get_excluded_blogs(),
-            'included_blogs' => $job->get_included_blogs(),
-            'archive_file'   => $zip_name,
-            'root_files'     => self::root_files_list(),
-            'rmmigrate_edition_tier' => apply_filters('rmmigrate_manifest_tier', 'free'),
-            'sql_import_transactions'        => Rmmigrate_Engine_Config::sql_import_transactions(),
-            'post_import_search_replace'     => Rmmigrate_Engine_Config::post_import_search_replace(),
-            'sql_import_chunk_bytes'         => Rmmigrate_Engine_Config::sql_import_chunk_bytes(),
-            'safety_snapshot_enabled'        => !empty($settings['safety_snapshot_enabled']),
-            'excluded_tables'                => $job->get_excluded_table_patterns(),
-            'exclude_log_tables'             => !empty(Rmmigrate_Settings::get()['exclude_log_tables']) || !empty($job->get_progress()['exclude_log_tables']),
-            'exclude_revisions'              => !empty($job->get_progress()['exclude_revisions']),
-        );
+            $manifest = array(
+                'plugin'         => 'multisite-migrate',
+                'plugin_version' => RMMIGRATE_VERSION,
+                'created_at'     => gmdate('c'),
+                'include_wp_core'    => (bool) $include_wp_core,
+                'has_wp_core_files'  => false,
+                'backup_intent'      => $backup_intent,
+                'scope'          => $job_scope,
+                'blog_id'        => $manifest_blog_id,
+                'site_url'       => $site_url,
+                'home_url'       => $home_url,
+                'network_site_url' => is_multisite() ? network_site_url() : '',
+                'source_blog_label' => $primary_blog_id > 0
+                    ? Rmmigrate_Multisite_Scope::format_blog_label($primary_blog_id)
+                    : '',
+                'restore_multisite' => self::restore_multisite($job),
+                'wp_version'     => get_bloginfo('version'),
+                'php_version'    => PHP_VERSION,
+                'is_multisite'   => is_multisite(),
+                'db_prefix'      => $db_prefix,
+                'source_base_prefix' => self::derive_base_prefix($db_prefix),
+                'source_blog_prefix' => $db_prefix,
+                'db_collation'   => $db_collation,
+                'db_sql_mode'    => $db_sql_mode,
+                'table_count'    => count($scope->get_tables()),
+                'tables'         => $scope->get_tables(),
+                'file_count'        => $file_count,
+                'uncompressed_size' => $total_bytes,
+                'excluded_blogs' => $job->get_excluded_blogs(),
+                'included_blogs' => $job->get_included_blogs(),
+                'archive_file'   => $zip_name,
+                'root_files'     => self::root_files_list(),
+                'rmmigrate_edition_tier' => apply_filters('rmmigrate_manifest_tier', 'free'),
+                'sql_import_transactions'        => Rmmigrate_Engine_Config::sql_import_transactions(),
+                'post_import_search_replace'     => Rmmigrate_Engine_Config::post_import_search_replace(),
+                'sql_import_chunk_bytes'         => Rmmigrate_Engine_Config::sql_import_chunk_bytes(),
+                'safety_snapshot_enabled'        => !empty($settings['safety_snapshot_enabled']),
+                'excluded_tables'                => $job->get_excluded_table_patterns(),
+                'exclude_log_tables'             => !empty($settings['exclude_log_tables']) || !empty($progress['exclude_log_tables']),
+                'exclude_revisions'              => !empty($progress['exclude_revisions']),
+            );
 
-        if (is_multisite()) {
-            $manifest['subdomain_install'] = (bool) (defined('SUBDOMAIN_INSTALL') && SUBDOMAIN_INSTALL);
-            $manifest['domain_current_site'] = defined('DOMAIN_CURRENT_SITE') ? DOMAIN_CURRENT_SITE : '';
-            $manifest['path_current_site'] = defined('PATH_CURRENT_SITE') ? PATH_CURRENT_SITE : '/';
-            $manifest['blogs'] = self::blog_entries($job);
-        }
+            if (is_multisite()) {
+                $manifest['subdomain_install'] = (bool) (defined('SUBDOMAIN_INSTALL') && SUBDOMAIN_INSTALL);
+                $manifest['domain_current_site'] = defined('DOMAIN_CURRENT_SITE') ? DOMAIN_CURRENT_SITE : '';
+                $manifest['path_current_site'] = defined('PATH_CURRENT_SITE') ? PATH_CURRENT_SITE : '/';
+                $manifest['blogs'] = self::blog_entries($job);
+            }
 
-        $manifest['plugins'] = self::plugin_entries();
-        $manifest['admin_users'] = self::admin_user_entries();
-
-        if ($switched_blog) {
-            restore_current_blog();
+            $manifest['plugins'] = self::plugin_entries();
+            $manifest['admin_users'] = self::admin_user_entries();
+        } finally {
+            if ($switched_blog) {
+                restore_current_blog();
+            }
         }
 
         return $manifest;
@@ -261,7 +263,7 @@ class Rmmigrate_Manifest
     }
 
     /**
-     * @return array<int,array{id:int,login:string,email:string,display_name:string}>
+     * @return array<int,array{id:int}>
      */
     public static function admin_user_entries(): array
     {
@@ -280,10 +282,7 @@ class Rmmigrate_Manifest
                 continue;
             }
             $entries[] = array(
-                'id'           => (int) $user->ID,
-                'login'        => (string) ($user->user_login ?? ''),
-                'email'        => (string) ($user->user_email ?? ''),
-                'display_name' => (string) ($user->display_name ?? ''),
+                'id' => (int) $user->ID,
             );
         }
 
@@ -321,14 +320,17 @@ class Rmmigrate_Manifest
                 continue;
             }
             switch_to_blog($blog_id);
-            $details = get_blog_details($blog_id);
-            $blogs[] = array(
-                'blog_id'  => $blog_id,
-                'site_url' => site_url(),
-                'home_url' => home_url(),
-                'path'     => is_object($details) ? (string) ($details->path ?? '/') : '/',
-            );
-            restore_current_blog();
+            try {
+                $details = get_blog_details($blog_id);
+                $blogs[] = array(
+                    'blog_id'  => $blog_id,
+                    'site_url' => site_url(),
+                    'home_url' => home_url(),
+                    'path'     => is_object($details) ? (string) ($details->path ?? '/') : '/',
+                );
+            } finally {
+                restore_current_blog();
+            }
         }
         return $blogs;
     }
@@ -359,7 +361,7 @@ class Rmmigrate_Manifest
 
     public static function installer_entry_basename(string $install_token): string
     {
-        $slug = preg_replace('/[^a-z0-9]/i', '', substr($install_token, 0, 12));
+        $slug = (string) preg_replace('/[^a-z0-9]/i', '', substr($install_token, 0, 12));
         if ($slug === '') {
             $slug = bin2hex(random_bytes(6));
         }
@@ -369,7 +371,7 @@ class Rmmigrate_Manifest
     public static function sign(array $manifest, string $archive_name): array
     {
         $unsigned_json = self::unsigned_json($manifest);
-        $install_token = hash_hmac('sha256', $archive_name . '|' . $unsigned_json, wp_salt('auth'));
+        $install_token = self::install_token($archive_name, $manifest);
         $signing_key = hash_hmac('sha256', self::SIGN_CONTEXT, $install_token);
         $manifest['manifest_signature'] = hash_hmac('sha256', $unsigned_json, $signing_key);
         return $manifest;
@@ -386,7 +388,7 @@ class Rmmigrate_Manifest
         }
 
         $unsigned_json = self::unsigned_json($manifest);
-        $expected_token = hash_hmac('sha256', $archive_name . '|' . $unsigned_json, wp_salt('auth'));
+        $expected_token = self::install_token($archive_name, $manifest);
         if (!hash_equals($expected_token, $install_token)) {
             return false;
         }
@@ -436,6 +438,16 @@ class Rmmigrate_Manifest
             if ($zip->open($archive_path) !== true) {
                 return null;
             }
+            $stat = $zip->statName('manifest.json');
+            if ($stat === false) {
+                $zip->close();
+                return null;
+            }
+            $uncomp_len = (int) ($stat['size'] ?? 0);
+            if ($uncomp_len <= 0 || $uncomp_len > 8 * 1024 * 1024) {
+                $zip->close();
+                return null;
+            }
             $json = $zip->getFromName('manifest.json');
             $zip->close();
             if ($json === false) {
@@ -469,7 +481,7 @@ class Rmmigrate_Manifest
                     break;
                 }
                 $entry = $fh->read($path_len);
-                if ($entry === false) {
+                if ($entry === false || strlen($entry) < $path_len) {
                     break;
                 }
                 $want = ($entry === 'manifest.json');
@@ -480,6 +492,13 @@ class Rmmigrate_Manifest
                 }
                 $unpacked = unpack('Cflag/Juncomp', $size_header);
                 $uncomp_len = (int) $unpacked['uncomp'];
+                if ($uncomp_len <= 0) {
+                    break;
+                }
+                if ($want && $uncomp_len > 8 * 1024 * 1024) {
+                    $fh->close();
+                    return null;
+                }
                 $bytes_done = 0;
                 $assembled = '';
                 while ($bytes_done < $uncomp_len) {
@@ -491,6 +510,12 @@ class Rmmigrate_Manifest
                     $block_flag = (int) $bu['flag'];
                     $block_comp = (int) $bu['comp'];
                     $block_uncomp = (int) $bu['uncomp'];
+                    if ($block_uncomp <= 0) {
+                        break 2;
+                    }
+                    if ($block_uncomp > 8 * 1024 * 1024 || ($bytes_done + $block_uncomp) > $uncomp_len) {
+                        break 2;
+                    }
                     if ($want) {
                         $blob = $block_comp > 0 ? $fh->read($block_comp) : '';
                         if ($blob === false) {
@@ -501,6 +526,9 @@ class Rmmigrate_Manifest
                             break 2;
                         }
                         $assembled .= $out;
+                        if (strlen($assembled) > 8 * 1024 * 1024) {
+                            break 2;
+                        }
                     } else {
                         $fh->seek($block_comp, SEEK_CUR);
                     }

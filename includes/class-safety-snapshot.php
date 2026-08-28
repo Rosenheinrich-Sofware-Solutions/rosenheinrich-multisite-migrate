@@ -40,7 +40,7 @@ class Rmmigrate_Safety_Snapshot
         Rmmigrate_Logger::log_activity(
             'backup',
             sprintf(
-                /* translators: %d: safety backup job ID */
+                /* translators: %1$d: safety backup job ID */
                 __('Safety snapshot #%1$d queued before restore.', 'rosenheinrich-multisite-migrate'),
                 $job->get_id()
             ),
@@ -63,6 +63,20 @@ class Rmmigrate_Safety_Snapshot
             return true;
         }
         $job = Rmmigrate_Job::get($job_id);
-        return $job !== null && $job->get_status() === Rmmigrate_Job::STATUS_COMPLETE;
+        if ($job === null) {
+            return true;
+        }
+        $status = $job->get_status();
+
+        return in_array(
+            $status,
+            array(
+                Rmmigrate_Job::STATUS_COMPLETE,
+                Rmmigrate_Job::STATUS_ERROR,
+                Rmmigrate_Job::STATUS_CANCELLED,
+                Rmmigrate_Job::STATUS_DELETING,
+            ),
+            true
+        );
     }
 }

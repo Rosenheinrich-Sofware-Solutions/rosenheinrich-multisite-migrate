@@ -15,7 +15,7 @@ class Rmmigrate_Diagnostic_Export
     public static function collect_entries(): array
     {
         $settings = Rmmigrate_Settings::get();
-        unset($settings['archive_passphrase']);
+        $settings = RMMIGRATE_IO::redact_context($settings);
 
         /**
          * Diagnostic snapshot of the active edition/tier. A separate paid edition
@@ -113,7 +113,7 @@ class Rmmigrate_Diagnostic_Export
         }
 
         foreach (self::collect_entries() as $name => $contents) {
-            if ($contents === '') {
+            if (!is_string($contents) || $contents === '') {
                 continue;
             }
             $zip->addFromString($name, $contents);
@@ -153,7 +153,7 @@ class Rmmigrate_Diagnostic_Export
     {
         $lines = array(
             'Multisite Migrate diagnostic export',
-            'Generated (UTC): ' . gmdate('Y-m-d g:i:s a'),
+            'Generated (UTC): ' . gmdate('Y-m-d H:i:s'),
             'Plugin version: ' . (defined('RMMIGRATE_VERSION') ? RMMIGRATE_VERSION : 'unknown'),
             'Site URL: ' . network_home_url(),
             '',

@@ -11,6 +11,7 @@ class Rmmigrate_Plugin_Uninstall
         add_action('admin_enqueue_scripts', array(__CLASS__, 'enqueue_plugins_screen'));
         add_action('wp_ajax_rmmigrate_deactivate', array(__CLASS__, 'ajax_deactivate'));
         add_action('wp_ajax_rmmigrate_uninstall', array(__CLASS__, 'ajax_uninstall'));
+        add_action('rmmigrate_deferred_cleanup', array(__CLASS__, 'run_deferred_cleanup'));
     }
 
     public static function enqueue_plugins_screen(string $hook): void
@@ -66,7 +67,7 @@ class Rmmigrate_Plugin_Uninstall
                     'surveyDetails'           => __('Anything else? (optional)', 'rosenheinrich-multisite-migrate'),
                     'surveyDetailsPlaceholder' => __('A short note helps us improve.', 'rosenheinrich-multisite-migrate'),
                     'surveyContactLabel'      => __('Email for follow-up (optional)', 'rosenheinrich-multisite-migrate'),
-                    'surveyContactHint'       => __('We may contact you if we need more details about a problem.', 'rosenheinrich-multisite-migrate'),
+                    'surveyContactHint'       => __('We may contact you if we need more details about a problem. If you recently had backup, import, or restore errors, a short summary of those errors may be sent with your feedback to help us diagnose issues.', 'rosenheinrich-multisite-migrate'),
                     'deleteTitle'             => __('Delete Multisite Migrate', 'rosenheinrich-multisite-migrate'),
                     'deleteIntro'             => __('Choose which local data to delete before removing the plugin.', 'rosenheinrich-multisite-migrate'),
                     'keepAllData'             => __('Keep all Multisite Migrate data', 'rosenheinrich-multisite-migrate'),
@@ -159,7 +160,13 @@ class Rmmigrate_Plugin_Uninstall
         require_once RMMIGRATE_PATH . 'includes/class-uninstaller.php';
 
         $plan = self::cleanup_plan_from_request();
-        self::schedule_deferred_cleanup($plan);
+        if (!self::user_can_delete_plugin()) {
+            $plan = array(
+                'delete_backups'  => false,
+                'delete_logs'     => false,
+                'delete_settings' => false,
+            );
+        }
 
         if (!function_exists('deactivate_plugins')) {
             require_once ABSPATH . 'wp-admin/includes/plugin.php';
@@ -169,6 +176,12 @@ class Rmmigrate_Plugin_Uninstall
         $network = self::should_deactivate_network_wide($plugin);
 
         deactivate_plugins($plugin, true, $network);
+
+        if (is_plugin_active($plugin) || ($network && is_plugin_active_for_network($plugin))) {
+            wp_send_json_error(array('message' => __('Could not deactivate the plugin.', 'rosenheinrich-multisite-migrate')), 500);
+        }
+
+        self::schedule_deferred_cleanup($plan);
 
         wp_send_json_success(array('redirect' => self::plugins_redirect_url('deactivate=true', $network)));
     }
@@ -195,6 +208,10 @@ class Rmmigrate_Plugin_Uninstall
         $plugin  = self::resolve_plugin_basename();
         $network = self::should_deactivate_network_wide($plugin);
 
+        if ($network && !current_user_can('manage_network_plugins')) {
+            wp_send_json_error(array('message' => __('You do not have permission to delete network plugins.', 'rosenheinrich-multisite-migrate')), 403);
+        }
+
         if (is_plugin_active($plugin) || ($network && is_plugin_active_for_network($plugin))) {
             deactivate_plugins($plugin, true, $network);
         }
@@ -203,7 +220,7 @@ class Rmmigrate_Plugin_Uninstall
         if (is_wp_error($deleted)) {
             wp_send_json_error(array('message' => $deleted->get_error_message()), 500);
         }
-        if ($deleted === false) {
+        if ($deleted !== true) {
             wp_send_json_error(array('message' => __('Could not delete the plugin files.', 'rosenheinrich-multisite-migrate')), 500);
         }
 
@@ -221,19 +238,36 @@ class Rmmigrate_Plugin_Uninstall
             return;
         }
 
-        register_shutdown_function(
-            static function () use ($plan): void {
+        if (!class_exists('Rmmigrate_Uninstaller', false)) {
+            require_once RMMIGRATE_PATH . 'includes/class-uninstaller.php';
+        }
+        Rmmigrate_Uninstaller::save_plan($plan);
+
+        if (function_exists('fastcgi_finish_request')) {
+            register_shutdown_function(static function (): void {
                 if (function_exists('fastcgi_finish_request')) {
                     fastcgi_finish_request();
                 }
+                self::run_deferred_cleanup();
+            });
+            return;
+        }
 
-                if (!class_exists('Rmmigrate_Uninstaller', false)) {
-                    require_once RMMIGRATE_PATH . 'includes/class-uninstaller.php';
-                }
+        self::run_deferred_cleanup();
+    }
 
-                Rmmigrate_Uninstaller::apply_cleanup($plan);
-            }
-        );
+    public static function run_deferred_cleanup(): void
+    {
+        if (!class_exists('Rmmigrate_Uninstaller', false)) {
+            require_once RMMIGRATE_PATH . 'includes/class-uninstaller.php';
+        }
+
+        $plan = Rmmigrate_Uninstaller::get_plan();
+        if (!self::cleanup_plan_has_deletions($plan)) {
+            return;
+        }
+
+        Rmmigrate_Uninstaller::apply_cleanup($plan);
     }
 
     /**
@@ -287,7 +321,12 @@ class Rmmigrate_Plugin_Uninstall
 
     private static function user_can_deactivate_plugin(): bool
     {
-        if (is_multisite() && is_network_admin()) {
+        if (!is_multisite()) {
+            return current_user_can('activate_plugins');
+        }
+
+        $plugin = self::resolve_plugin_basename();
+        if (self::should_deactivate_network_wide($plugin)) {
             return current_user_can('manage_network_plugins');
         }
 
@@ -343,14 +382,11 @@ class Rmmigrate_Plugin_Uninstall
             return false;
         }
 
-        if (Rmmigrate_Request_Input::post_bool('network_scope')) {
-            return true;
-        }
-
         if (!function_exists('is_plugin_active_for_network')) {
             require_once ABSPATH . 'wp-admin/includes/plugin.php';
         }
 
+        // Posted network_scope is UI hint only; deactivation follows activation state.
         return is_plugin_active_for_network($plugin);
     }
 }

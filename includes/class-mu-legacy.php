@@ -35,13 +35,16 @@ class Rmmigrate_Mu_Legacy
         if ((int) $blog_id === 1) {
             $uploads_dir = Rmmigrate_Engine_Config::uploads_basedir_for_blog($blog_id);
             if (Rmmigrate_Filesystem::is_dir($uploads_dir)) {
-                foreach (scandir($uploads_dir) as $node) {
-                    if ($node === '.' || $node === '..' || $node === 'sites') {
-                        continue;
-                    }
-                    $full = $uploads_dir . '/' . $node;
-                    if (Rmmigrate_Filesystem::is_dir($full) || Rmmigrate_Filesystem::is_file($full)) {
-                        $paths[] = $full;
+                $nodes = scandir($uploads_dir);
+                if ($nodes !== false) {
+                    foreach ($nodes as $node) {
+                        if ($node === '.' || $node === '..' || $node === 'sites') {
+                            continue;
+                        }
+                        $full = $uploads_dir . '/' . $node;
+                        if (Rmmigrate_Filesystem::is_dir($full) || Rmmigrate_Filesystem::is_file($full)) {
+                            $paths[] = $full;
+                        }
                     }
                 }
             }
@@ -50,8 +53,13 @@ class Rmmigrate_Mu_Legacy
 
         switch ($gen) {
             case 1:
-                if (defined('UPLOADS')) {
+                if ((int) $blog_id === get_current_blog_id() && defined('UPLOADS')) {
                     $paths[] = ABSPATH . UPLOADS;
+                } else {
+                    $uploads_dir = Rmmigrate_Engine_Config::uploads_basedir_for_blog($blog_id);
+                    if (Rmmigrate_Filesystem::is_dir($uploads_dir)) {
+                        $paths[] = $uploads_dir;
+                    }
                 }
                 break;
             case 2:

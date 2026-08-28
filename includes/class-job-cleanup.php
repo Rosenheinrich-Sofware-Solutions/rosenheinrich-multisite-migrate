@@ -7,6 +7,7 @@ if (!defined('ABSPATH')) {
 class Rmmigrate_Job_Cleanup
 {
     const PURGE_HOOK = 'rmmigrate_purge_deletes';
+    const PURGE_MAX_ATTEMPTS = 5;
 
     /** @var bool Request-local guard so archives page does not re-scan mid-request. */
     private static $reconcile_done = false;
@@ -16,10 +17,15 @@ class Rmmigrate_Job_Cleanup
         add_action(self::PURGE_HOOK, array(__CLASS__, 'purge_pending_deletes'));
     }
 
-    public static function schedule_purge(): void
+    public static function schedule_purge(int $delay_sec = 1): void
     {
-        if (!wp_next_scheduled(self::PURGE_HOOK)) {
-            wp_schedule_single_event(time() + 1, self::PURGE_HOOK);
+        $when = time() + max(1, $delay_sec);
+        $existing = wp_next_scheduled(self::PURGE_HOOK);
+        if (!$existing) {
+            wp_schedule_single_event($when, self::PURGE_HOOK);
+        } elseif ($existing < $when) {
+            wp_unschedule_event($existing, self::PURGE_HOOK);
+            wp_schedule_single_event($when, self::PURGE_HOOK);
         }
         if (function_exists('spawn_cron')) {
             spawn_cron(time());
@@ -30,7 +36,7 @@ class Rmmigrate_Job_Cleanup
      * Align DB with disk for completed backups whose local archive is gone.
      * Runs at most once per request (archives page open).
      *
-     * @return int Number of jobs updated (soft-deleted or local_path cleared).
+     * @return int Number of jobs whose local_path was cleared.
      */
     public static function reconcile_missing_local_archives(): int
     {
@@ -49,12 +55,8 @@ class Rmmigrate_Job_Cleanup
         }
 
         $changed = 0;
-        $schedule_purge = false;
 
         foreach ($jobs as $job) {
-            if (!($job instanceof Rmmigrate_Job)) {
-                continue;
-            }
             if ($job->get_status() !== Rmmigrate_Job::STATUS_COMPLETE) {
                 continue;
             }
@@ -72,39 +74,27 @@ class Rmmigrate_Job_Cleanup
             $has_remote = !empty($job->data['remote_file_id']);
             $job_id = $job->get_id();
 
+            $job->save_fields(array('local_path' => ''));
             if ($has_remote) {
-                $job->save_fields(array('local_path' => ''));
-                Rmmigrate_Logger::log_activity(
-                    'backup',
-                    sprintf(
-                        /* translators: %d: job ID */
-                        __('Local archive for backup #%1$d is missing; kept remote copy in the list.', 'rosenheinrich-multisite-migrate'),
-                        $job_id
-                    ),
-                    'info',
-                    array('job_id' => $job_id)
+                $activity = sprintf(
+                    /* translators: %d: job ID */
+                    __('Local archive for backup #%1$d is missing; kept remote copy in the list.', 'rosenheinrich-multisite-migrate'),
+                    $job_id
                 );
-                $changed++;
-                continue;
+            } else {
+                $activity = sprintf(
+                    /* translators: %d: job ID */
+                    __('Local archive for backup #%1$d is missing; kept job history without local file.', 'rosenheinrich-multisite-migrate'),
+                    $job_id
+                );
             }
-
-            $job->set_status(Rmmigrate_Job::STATUS_DELETING);
             Rmmigrate_Logger::log_activity(
                 'backup',
-                sprintf(
-                    /* translators: %d: job ID */
-                    __('Local archive for backup #%1$d is missing; removed from the list.', 'rosenheinrich-multisite-migrate'),
-                    $job_id
-                ),
+                $activity,
                 'info',
                 array('job_id' => $job_id)
             );
-            $schedule_purge = true;
             $changed++;
-        }
-
-        if ($schedule_purge) {
-            self::schedule_purge();
         }
 
         return $changed;
@@ -153,22 +143,69 @@ class Rmmigrate_Job_Cleanup
             try {
                 self::purge($job);
             } catch (Throwable $e) {
-                Rmmigrate_Logger::log_activity(
-                    'backup',
+                $attempts = (int) ($job->data['purge_delete_attempts'] ?? 0) + 1;
+                $err = sanitize_text_field($e->getMessage());
+                self::handle_purge_delete_failure(
+                    $job,
+                    $job_id,
+                    $attempts,
+                    sprintf(
+                        /* translators: 1: job ID, 2: max attempts, 3: error message */
+                        __('Background delete failed for backup #%1$d after %2$d attempts: %3$s', 'rosenheinrich-multisite-migrate'),
+                        $job_id,
+                        self::PURGE_MAX_ATTEMPTS,
+                        $err
+                    ),
                     sprintf(
                         /* translators: 1: job ID, 2: error message */
                         __('Background delete failed for backup #%1$d: %2$s', 'rosenheinrich-multisite-migrate'),
                         $job_id,
-                        sanitize_text_field($e->getMessage())
+                        $err
                     ),
-                    'warning',
-                    array('job_id' => $job_id)
+                    sprintf(
+                        /* translators: 1: job ID, 2: attempt number, 3: maximum attempts, 4: error message */
+                        __('Background delete failed for backup #%1$d (attempt %2$d/%3$d): %4$s', 'rosenheinrich-multisite-migrate'),
+                        $job_id,
+                        $attempts,
+                        self::PURGE_MAX_ATTEMPTS,
+                        $err
+                    )
                 );
                 continue;
             }
 
             // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Plugin: custom plugin tables; values use prepare().
-            $wpdb->delete(Rmmigrate_Job::table_name(), array('id' => $job_id), array('%d'));
+            $deleted = $wpdb->delete(Rmmigrate_Job::table_name(), array('id' => $job_id), array('%d'));
+            if ($deleted !== 1) {
+                $attempts = (int) ($job->data['purge_delete_attempts'] ?? 0) + 1;
+                self::handle_purge_delete_failure(
+                    $job,
+                    $job_id,
+                    $attempts,
+                    sprintf(
+                        /* translators: 1: job ID, 2: max attempts, 3: rows deleted */
+                        __('Background delete row removal failed for backup #%1$d after %2$d attempts (deleted %3$d rows).', 'rosenheinrich-multisite-migrate'),
+                        $job_id,
+                        self::PURGE_MAX_ATTEMPTS,
+                        (int) $deleted
+                    ),
+                    sprintf(
+                        /* translators: 1: job ID, 2: rows deleted */
+                        __('Background delete row removal failed for backup #%1$d (deleted %2$d rows).', 'rosenheinrich-multisite-migrate'),
+                        $job_id,
+                        (int) $deleted
+                    ),
+                    sprintf(
+                        /* translators: 1: job ID, 2: rows deleted, 3: attempt number */
+                        __('Background delete row removal failed for backup #%1$d (deleted %2$d rows, attempt %3$d).', 'rosenheinrich-multisite-migrate'),
+                        $job_id,
+                        (int) $deleted,
+                        $attempts
+                    )
+                );
+                continue;
+            }
+            $job->save_fields(array('purge_delete_attempts' => 0));
             Rmmigrate_Logger::log_activity(
                 'backup',
                 sprintf(
@@ -192,10 +229,8 @@ class Rmmigrate_Job_Cleanup
 
     /**
      * Remove local artifacts and cross-references for a job. Does not delete the DB row.
-     *
-     * @param array<string,mixed> $options
      */
-    public static function purge(Rmmigrate_Job $job, array $options = array()): void
+    public static function purge(Rmmigrate_Job $job): void
     {
         $job_id = $job->get_id();
         if ($job_id <= 0) {
@@ -314,5 +349,36 @@ class Rmmigrate_Job_Cleanup
                 break;
             }
         }
+    }
+
+    private static function handle_purge_delete_failure(
+        Rmmigrate_Job $job,
+        int $job_id,
+        int $attempts,
+        string $max_status_message,
+        string $max_log_message,
+        string $retry_log_message
+    ): void {
+        if ($attempts >= self::PURGE_MAX_ATTEMPTS) {
+            $job->save_fields(array('purge_delete_attempts' => 0));
+            $job->update_progress(array('purge_failed' => true));
+            $job->set_status(Rmmigrate_Job::STATUS_ERROR, $max_status_message);
+            Rmmigrate_Logger::log_activity(
+                'backup',
+                $max_log_message,
+                'error',
+                array('job_id' => $job_id)
+            );
+            return;
+        }
+
+        $job->save_fields(array('purge_delete_attempts' => $attempts));
+        Rmmigrate_Logger::log_activity(
+            'backup',
+            $retry_log_message,
+            'warning',
+            array('job_id' => $job_id)
+        );
+        self::schedule_purge(min(300, 5 * $attempts));
     }
 }

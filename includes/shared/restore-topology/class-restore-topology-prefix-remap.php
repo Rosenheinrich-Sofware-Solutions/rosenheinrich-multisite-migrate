@@ -25,7 +25,7 @@ class Rmmigrate_Restore_Topology_Prefix_Remap
      * @param array<string,mixed> $state
      * @param array<string,mixed> $destination
      */
-    public static function default_policy(array $manifest, array $state, array $destination): string
+    public static function default_policy(array $manifest, array $state): string
     {
         $explicit = (string) ($state['prefix_policy'] ?? $manifest['prefix_policy'] ?? '');
         if ($explicit !== '') {
@@ -75,9 +75,10 @@ class Rmmigrate_Restore_Topology_Prefix_Remap
     }
 
     /**
+     * @param string[] $preserve_tables
      * @return array<string,int>
      */
-    public static function remap_tables(PDO $pdo, string $from_prefix, string $to_prefix): array
+    public static function remap_tables(PDO $pdo, string $from_prefix, string $to_prefix, array $preserve_tables = array()): array
     {
         $report = array(
             'tables_renamed'        => 0,
@@ -88,14 +89,23 @@ class Rmmigrate_Restore_Topology_Prefix_Remap
             return $report;
         }
 
-        $like = str_replace(array('_', '%'), array('\\_', '\\%'), $from_prefix) . '%';
+        $like = str_replace(array('\\', '_', '%'), array('\\\\', '\\_', '\\%'), $from_prefix) . '%';
         $stmt = $pdo->prepare('SHOW TABLES LIKE ?');
         $stmt->execute(array($like));
         $tables = $stmt->fetchAll(PDO::FETCH_NUM);
 
+        $preserve = array_fill_keys($preserve_tables, true);
+
+        $to_extends_from = $to_prefix !== ''
+            && strncmp($to_prefix, $from_prefix, strlen($from_prefix)) === 0;
+
         foreach ($tables as $row) {
             $old_table = (string) ($row[0] ?? '');
-            if ($old_table === '' || !str_starts_with($old_table, $from_prefix)) {
+            if ($old_table === ''
+                || strncmp($old_table, $from_prefix, strlen($from_prefix)) !== 0
+                || ($to_extends_from && strncmp($old_table, $to_prefix, strlen($to_prefix)) === 0)
+                || isset($preserve[$old_table])
+                || self::is_plugin_runtime_table($old_table)) {
                 continue;
             }
             $suffix = substr($old_table, strlen($from_prefix));
@@ -128,10 +138,13 @@ class Rmmigrate_Restore_Topology_Prefix_Remap
             return 0;
         }
 
+        $quoted_table = self::quote_table_name($table);
+        $from_start = strlen($from) + 1;
+        $like = str_replace(array('\\', '_', '%'), array('\\\\', '\\_', '\\%'), $from) . '%';
         $stmt = $pdo->prepare(
-            "UPDATE `{$table}` SET option_name = REPLACE(option_name, ?, ?) WHERE option_name LIKE ?"
+            "UPDATE {$quoted_table} SET option_name = CONCAT(?, SUBSTRING(option_name, ?)) WHERE option_name LIKE ? AND SUBSTRING(option_name, ?) NOT REGEXP '^[0-9]+_'"
         );
-        $stmt->execute(array($from, $to, $from . '%'));
+        $stmt->execute(array($to, $from_start, $like, $from_start));
 
         return $stmt->rowCount();
     }
@@ -142,19 +155,30 @@ class Rmmigrate_Restore_Topology_Prefix_Remap
             return 0;
         }
 
+        $quoted_table = self::quote_table_name($table);
+        $from_start = strlen($from) + 1;
+        $like = str_replace(array('\\', '_', '%'), array('\\\\', '\\_', '\\%'), $from) . '%';
         $stmt = $pdo->prepare(
-            "UPDATE `{$table}` SET meta_key = REPLACE(meta_key, ?, ?) WHERE meta_key LIKE ?"
+            "UPDATE {$quoted_table} SET meta_key = CONCAT(?, SUBSTRING(meta_key, ?)) WHERE meta_key LIKE ? AND SUBSTRING(meta_key, ?) NOT REGEXP '^[0-9]+_'"
         );
-        $stmt->execute(array($from, $to, $from . '%'));
+        $stmt->execute(array($to, $from_start, $like, $from_start));
 
         return $stmt->rowCount();
+    }
+
+    private static function quote_table_name(string $table): string
+    {
+        return '`' . str_replace('`', '``', $table) . '`';
     }
 
     private static function table_exists(PDO $pdo, string $table): bool
     {
         try {
             $quoted = str_replace('`', '``', $table);
-            $pdo->query('SELECT 1 FROM `' . $quoted . '` LIMIT 1');
+            $result = $pdo->query('SELECT 1 FROM `' . $quoted . '` LIMIT 1');
+            if ($result === false) {
+                return false;
+            }
 
             return true;
         } catch (Throwable $e) {

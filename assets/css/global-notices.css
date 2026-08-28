@@ -13,15 +13,12 @@
     clear: both;
 }
 
-.mm-banner.mm-global-multisite-notice .mm-global-multisite-notice__inner {
-    padding-right: 2.25rem;
-}
-
 .mm-global-multisite-notice__inner {
     display: flex;
     gap: var(--mm-space-4);
     align-items: flex-start;
     position: relative;
+    padding-right: 2.25rem;
 }
 
 .mm-global-multisite-notice__dismiss {
@@ -55,6 +52,11 @@
 .mm-global-multisite-notice__dismiss:hover,
 .mm-global-multisite-notice__dismiss:focus {
     color: var(--mm-navy);
+}
+
+.mm-global-multisite-notice__dismiss:focus-visible {
+    outline: 2px solid var(--mm-navy);
+    outline-offset: 2px;
 }
 
 .mm-global-multisite-notice__actions {

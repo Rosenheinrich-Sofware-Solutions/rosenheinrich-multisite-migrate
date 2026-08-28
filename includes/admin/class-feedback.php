@@ -79,12 +79,10 @@ final class Rmmigrate_Feedback
             return $links;
         }
 
-        array_splice($links, 1, 0, array(
-            array(
-                'label' => __('Give feedback', 'rosenheinrich-multisite-migrate'),
-                'url'   => '#',
-            ),
-        ));
+        $links[] = array(
+            'label' => __('Give feedback', 'rosenheinrich-multisite-migrate'),
+            'url'   => '#',
+        );
 
         return $links;
     }
@@ -157,7 +155,7 @@ final class Rmmigrate_Feedback
             'reviewUrl'       => $review_url,
             'reviewNudgeFeedbackAction' => 'rmmigrate_review_nudge_feedback',
             'consentNote'     => __(
-                'Sends to Rosenheinrich feedback server. No site URL, no backup files. Last error text may be included when reporting a problem.',
+                'Sends to Rosenheinrich feedback server. Diagnostic fields (error message, error code, job type, plugin version, WordPress version, PHP version, multisite flag, and an anonymized site hash) may also be transmitted. No site URL, no backup files.',
                 'rosenheinrich-multisite-migrate'
             ),
             'i18n'            => array(
@@ -220,19 +218,15 @@ final class Rmmigrate_Feedback
             $context = 'help';
         }
 
-        $message = sanitize_textarea_field(Rmmigrate_Request_Input::post_textarea('message'));
-        if (function_exists('mb_substr')) {
-            $message = (string) mb_substr($message, 0, self::MESSAGE_MAX);
-        } else {
-            $message = substr($message, 0, self::MESSAGE_MAX);
-        }
+        $message = self::truncate_text(
+            sanitize_textarea_field(Rmmigrate_Request_Input::post_textarea('message')),
+            self::MESSAGE_MAX
+        );
 
-        $error_message = sanitize_textarea_field(Rmmigrate_Request_Input::post_textarea('error_message'));
-        if (function_exists('mb_substr')) {
-            $error_message = (string) mb_substr($error_message, 0, self::ERROR_MESSAGE_MAX);
-        } else {
-            $error_message = substr($error_message, 0, self::ERROR_MESSAGE_MAX);
-        }
+        $error_message = self::truncate_text(
+            sanitize_textarea_field(Rmmigrate_Request_Input::post_textarea('error_message')),
+            self::ERROR_MESSAGE_MAX
+        );
 
         if ($context !== 'deactivate' && ($sentiment === 'neutral' || $sentiment === 'negative' || $type === 'bug') && $message === '') {
             wp_send_json_error(array(
@@ -256,8 +250,13 @@ final class Rmmigrate_Feedback
             'product_build'  => 'free',
         );
 
-        $response = wp_remote_post(self::submit_url(), array(
-            'timeout' => 12,
+        $submit_url = self::submit_url();
+        if (!self::is_valid_submit_url($submit_url)) {
+            wp_send_json_success(array('ok' => false, 'skipped' => 'url'));
+        }
+
+        $response = wp_remote_post($submit_url, array(
+            'timeout' => 5,
             'headers' => array('Content-Type' => 'application/json'),
             'body'    => wp_json_encode($payload),
         ));
@@ -285,13 +284,13 @@ final class Rmmigrate_Feedback
      */
     public static function ajax_deactivate_feedback(): void
     {
-        if (!self::user_can_deactivate_feedback()) {
-            wp_send_json_success(array('ok' => false, 'skipped' => 'permission'));
-        }
-
         $nonce = Rmmigrate_Request_Input::post_text('nonce');
         if (!wp_verify_nonce($nonce, 'rmmigrate_deactivate_feedback')) {
             wp_send_json_success(array('ok' => false, 'skipped' => 'nonce'));
+        }
+
+        if (!self::user_can_deactivate_feedback()) {
+            wp_send_json_success(array('ok' => false, 'skipped' => 'permission'));
         }
 
         $reason = sanitize_key(Rmmigrate_Request_Input::post_text('reason'));
@@ -299,12 +298,10 @@ final class Rmmigrate_Feedback
             wp_send_json_success(array('ok' => false, 'skipped' => 'reason'));
         }
 
-        $message = sanitize_textarea_field(Rmmigrate_Request_Input::post_textarea('message'));
-        if (function_exists('mb_substr')) {
-            $message = (string) mb_substr($message, 0, self::MESSAGE_MAX);
-        } else {
-            $message = substr($message, 0, self::MESSAGE_MAX);
-        }
+        $message = self::truncate_text(
+            sanitize_textarea_field(Rmmigrate_Request_Input::post_textarea('message')),
+            self::MESSAGE_MAX
+        );
 
         if ($reason === 'other' && $message === '') {
             wp_send_json_success(array('ok' => false, 'skipped' => 'other_empty'));
@@ -332,11 +329,25 @@ final class Rmmigrate_Feedback
             'site_hash'      => self::site_hash(),
             'product_build'  => 'free',
         );
+        $recent = Rmmigrate_Error_Recorder::get_recent();
+        if ($recent !== array()) {
+            $latest = $recent[0];
+            $payload['job_type'] = sanitize_key((string) ($latest['job_type'] ?? ''));
+            $latest_code = sanitize_key((string) ($latest['code'] ?? ''));
+            if ($latest_code !== '') {
+                $payload['recorded_error_code'] = $latest_code;
+            }
+        }
         if ($contact_email !== '') {
             $payload['contact_email'] = $contact_email;
         }
 
-        $response = wp_remote_post(self::submit_url(), array(
+        $submit_url = self::submit_url();
+        if (!self::is_valid_submit_url($submit_url)) {
+            wp_send_json_success(array('ok' => false, 'skipped' => 'url'));
+        }
+
+        $response = wp_remote_post($submit_url, array(
             'timeout' => 3,
             'headers' => array('Content-Type' => 'application/json'),
             'body'    => wp_json_encode($payload),
@@ -384,6 +395,18 @@ final class Rmmigrate_Feedback
             'rmmigrate_feedback_submit_url',
             $base . '/wp-json/multisite-migrate-portal/v1/feedback/submit'
         );
+    }
+
+    private static function is_valid_submit_url(string $url): bool
+    {
+        if ($url === '') {
+            return false;
+        }
+        $parts = wp_parse_url($url);
+
+        return is_array($parts)
+            && isset($parts['scheme'], $parts['host'])
+            && strtolower((string) $parts['scheme']) === 'https';
     }
 
     public static function site_hash(): string
@@ -439,13 +462,13 @@ final class Rmmigrate_Feedback
 
     private static function verify_ajax(): void
     {
-        if (!self::user_can_see()) {
-            wp_send_json_error(array('message' => __('Permission denied.', 'rosenheinrich-multisite-migrate')), 403);
-        }
-
         $nonce = Rmmigrate_Request_Input::post_text('nonce');
         if (!wp_verify_nonce($nonce, 'rmmigrate_admin')) {
             wp_send_json_error(array('message' => __('Invalid nonce.', 'rosenheinrich-multisite-migrate')), 403);
+        }
+
+        if (!self::user_can_see()) {
+            wp_send_json_error(array('message' => __('Permission denied.', 'rosenheinrich-multisite-migrate')), 403);
         }
     }
 
@@ -465,5 +488,14 @@ final class Rmmigrate_Feedback
         }
 
         return current_user_can('activate_plugins');
+    }
+
+    private static function truncate_text(string $text, int $max): string
+    {
+        if (function_exists('mb_substr')) {
+            return (string) mb_substr($text, 0, $max);
+        }
+
+        return substr($text, 0, $max);
     }
 }

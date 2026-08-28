@@ -48,7 +48,7 @@ class Rmmigrate_Service_Exception extends RuntimeException
      */
     public static function not_found(string $message, array $context = array()): self
     {
-        return new self(esc_html($message), $context, self::CODE_NOT_FOUND);
+        return new self($message, $context, self::CODE_NOT_FOUND);
     }
 
     /**
@@ -56,7 +56,7 @@ class Rmmigrate_Service_Exception extends RuntimeException
      */
     public static function forbidden(string $message, array $context = array()): self
     {
-        return new self(esc_html($message), $context, self::CODE_FORBIDDEN);
+        return new self($message, $context, self::CODE_FORBIDDEN);
     }
 
     public function get_code_key(): string

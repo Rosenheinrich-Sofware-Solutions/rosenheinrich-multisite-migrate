@@ -48,16 +48,20 @@ class Rmmigrate_Engine_Maintenance
                 Rmmigrate_Job::STATUS_COMPLETE
             )
         );
+        if (is_string($wpdb->last_error) && trim($wpdb->last_error) !== '') {
+            return array(
+                'removed' => 0,
+                'bytes'   => 0,
+                'message' => __('Storage cleanup skipped: could not read active jobs.', 'rosenheinrich-multisite-migrate'),
+            );
+        }
         foreach ((array) $rows as $id) {
             $active_ids[(int) $id] = true;
         }
 
         $jobs_dir = $root . 'jobs';
         if (Rmmigrate_Filesystem::is_dir($jobs_dir)) {
-            foreach (scandir($jobs_dir) ?: array() as $entry) {
-                if ($entry === '.' || $entry === '..') {
-                    continue;
-                }
+            foreach (Rmmigrate_Filesystem::list_dir($jobs_dir) as $entry) {
                 $job_id = (int) $entry;
                 if ($job_id <= 0 || isset($active_ids[$job_id])) {
                     continue;
@@ -65,6 +69,13 @@ class Rmmigrate_Engine_Maintenance
                 $path = $jobs_dir . '/' . $entry;
                 if (!Rmmigrate_Filesystem::is_dir($path)) {
                     continue;
+                }
+                $job = Rmmigrate_Job::get($job_id);
+                if ($job !== null) {
+                    $status = $job->get_status();
+                    if ($status >= Rmmigrate_Job::STATUS_PENDING && $status < Rmmigrate_Job::STATUS_COMPLETE) {
+                        continue;
+                    }
                 }
                 $size = self::directory_size($path);
                 if (Rmmigrate_Filesystem::delete_directory($path)) {
@@ -76,10 +87,7 @@ class Rmmigrate_Engine_Maintenance
 
         $imports_dir = $root . 'imports';
         if (Rmmigrate_Filesystem::is_dir($imports_dir)) {
-            foreach (scandir($imports_dir) ?: array() as $entry) {
-                if ($entry === '.' || $entry === '..') {
-                    continue;
-                }
+            foreach (Rmmigrate_Filesystem::list_dir($imports_dir) as $entry) {
                 $path = $imports_dir . '/' . $entry;
                 if (!Rmmigrate_Filesystem::is_file($path)) {
                     continue;
@@ -87,6 +95,10 @@ class Rmmigrate_Engine_Maintenance
                 // Keep only incomplete/temp-looking names; leave registered archives alone.
                 $lower = strtolower($entry);
                 if (strpos($lower, '.part') === false && strpos($lower, '.tmp') === false && strpos($lower, '.upload') === false) {
+                    continue;
+                }
+                $mtime = filemtime($path);
+                if ($mtime === false || (int) $mtime >= (time() - HOUR_IN_SECONDS)) {
                     continue;
                 }
                 $size = (int) Rmmigrate_Filesystem::filesize($path);
@@ -113,20 +125,11 @@ class Rmmigrate_Engine_Maintenance
 
     private static function directory_size(string $dir): int
     {
-        $total = 0;
         if (!Rmmigrate_Filesystem::is_dir($dir)) {
             return 0;
         }
-        $iterator = new RecursiveIteratorIterator(
-            new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS)
-        );
-        foreach ($iterator as $file) {
-            if ($file->isFile()) {
-                $total += (int) $file->getSize();
-            }
-        }
 
-        return $total;
+        return (int) (Rmmigrate_Filesystem::directory_size_bounded($dir, 0.0)['size'] ?? 0);
     }
 
     private static function prune_activity_log(int $cutoff): void
@@ -137,14 +140,37 @@ class Rmmigrate_Engine_Maintenance
             return;
         }
 
+        $max_bytes = Rmmigrate_Engine_Config::log_max_bytes() * 4;
         foreach ($paths as $path) {
-            if (!Rmmigrate_Filesystem::is_readable($path)) {
-                continue;
-            }
+            self::prune_activity_log_file($path, $cutoff, $max_bytes);
+        }
+    }
 
+    private static function prune_activity_log_file(string $path, int $cutoff, int $max_bytes): void
+    {
+        if (!Rmmigrate_Filesystem::is_readable($path)) {
+            return;
+        }
+
+        $file_size = (int) Rmmigrate_Filesystem::filesize($path);
+        if ($file_size <= 0 || $file_size > $max_bytes) {
+            return;
+        }
+
+        $lock_path = $path . '.lock';
+        $lock = Rmmigrate_Filesystem::open_lock($lock_path, 'c+');
+        if ($lock === false) {
+            return;
+        }
+        if (!Rmmigrate_Filesystem::try_exclusive_lock($lock)) {
+            Rmmigrate_Filesystem::fclose_raw($lock);
+            return;
+        }
+
+        try {
             $raw = Rmmigrate_Filesystem::get_contents($path);
             if ($raw === false || $raw === '') {
-                continue;
+                return;
             }
             $lines = explode("\n", $raw);
 
@@ -155,10 +181,11 @@ class Rmmigrate_Engine_Maintenance
                 }
                 $decoded = json_decode($line, true);
                 if (!is_array($decoded)) {
+                    $kept[] = $line;
                     continue;
                 }
                 $ts = strtotime((string) ($decoded['time'] ?? ''));
-                if ($ts !== false && $ts >= $cutoff) {
+                if ($ts === false || $ts >= $cutoff) {
                     $kept[] = $line;
                 }
             }
@@ -166,14 +193,17 @@ class Rmmigrate_Engine_Maintenance
             if (count($kept) === count(array_filter($lines, static function ($line) {
                 return $line !== '';
             }))) {
-                continue;
+                return;
             }
 
             if ($kept === array()) {
                 Rmmigrate_Filesystem::delete($path);
             } else {
-                Rmmigrate_Filesystem::put_contents($path, implode("\n", $kept) . "\n");
+                Rmmigrate_Filesystem::write_exclusive_with_retry($path, implode("\n", $kept) . "\n");
             }
+        } finally {
+            Rmmigrate_Filesystem::release_lock($lock);
+            Rmmigrate_Filesystem::fclose_raw($lock);
         }
     }
 

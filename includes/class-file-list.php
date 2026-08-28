@@ -16,14 +16,18 @@ class Rmmigrate_File_List
         $settings = Rmmigrate_Settings::get();
 
         if (self::should_include_wp_core($job, $settings)) {
-            $files = array_merge($files, self::build_wp_core_files());
+            foreach (self::build_wp_core_files() as $file) {
+                $files[] = $file;
+            }
         }
 
         foreach ($scope->get_content_paths() as $base_path) {
-            $files = array_merge($files, self::scan_content_path($scope, $base_path, $content_root));
+            foreach (self::scan_content_path($scope, $base_path, $content_root) as $file) {
+                $files[] = $file;
+            }
         }
 
-        return self::finalize_list($files, $scope, $job);
+        return self::finalize_list($files, $job);
     }
 
     /**
@@ -70,7 +74,9 @@ class Rmmigrate_File_List
             // Core is a bounded set and we are only building a file LIST (no copy),
             // so finishing it in one slice is cheap and correct.
             $result = self::scan_wp_core_slice('', PHP_INT_MAX, microtime(true), $job);
-            $files = array_merge($files, $result['files']);
+            foreach ($result['files'] as $file) {
+                $files[] = $file;
+            }
             $scan['wp_core_cursor'] = '';
             $scan['wp_core_done'] = true;
             self::save($work_dir, $files);
@@ -103,7 +109,9 @@ class Rmmigrate_File_List
                 $start,
                 $job
             );
-            $files = array_merge($files, $result['files']);
+            foreach ($result['files'] as $file) {
+                $files[] = $file;
+            }
             $scan['cursor'] = $result['cursor'];
 
             if ($result['done']) {
@@ -126,7 +134,7 @@ class Rmmigrate_File_List
 
         $scan['path_index'] = $path_index;
         $scan['done'] = true;
-        $files = self::finalize_list($files, $scope, $job);
+        $files = self::finalize_list($files, $job);
         self::save($work_dir, $files);
         $job->update_progress(array('file_scan' => $scan));
 
@@ -137,7 +145,7 @@ class Rmmigrate_File_List
      * @param array<int,array{path:string,size:int,archive:string}> $files
      * @return array<int,array{path:string,size:int,archive:string}>
      */
-    private static function finalize_list(array $files, Rmmigrate_Multisite_Scope $scope, ?Rmmigrate_Job $job): array
+    private static function finalize_list(array $files, ?Rmmigrate_Job $job): array
     {
         if ($job !== null) {
             $files = self::filter_by_profile($files, $job);
@@ -232,7 +240,8 @@ class Rmmigrate_File_List
 
         $iterator = new RecursiveIteratorIterator(
             new RecursiveDirectoryIterator($base_path, RecursiveDirectoryIterator::SKIP_DOTS),
-            RecursiveIteratorIterator::SELF_FIRST
+            RecursiveIteratorIterator::SELF_FIRST,
+            RecursiveIteratorIterator::CATCH_GET_CHILD
         );
         foreach ($iterator as $file) {
             /** @var SplFileInfo $file */
@@ -246,6 +255,20 @@ class Rmmigrate_File_List
         }
 
         return $files;
+    }
+
+    /**
+     * Strip a known root prefix without str_replace so repeated root text in paths is preserved.
+     */
+    private static function relative_path_from_root(string $path, string $root): string
+    {
+        $path = wp_normalize_path($path);
+        $root = wp_normalize_path($root);
+        if ($root !== '' && strpos($path, $root) === 0) {
+            return ltrim(substr($path, strlen($root)), '/');
+        }
+
+        return ltrim($path, '/');
     }
 
     /**
@@ -329,7 +352,7 @@ class Rmmigrate_File_List
                 continue;
             }
 
-            $relative = ltrim(str_replace($abspath, '', $path), '/');
+            $relative = self::relative_path_from_root($path, $abspath);
             $files[] = array(
                 'path'    => $path,
                 'size'    => (int) Rmmigrate_Filesystem::filesize($path),
@@ -339,6 +362,35 @@ class Rmmigrate_File_List
         }
 
         return array('files' => $files, 'cursor' => '', 'done' => true);
+    }
+
+    /**
+     * @return array{traversal:int,path:string}
+     */
+    private static function parse_tree_cursor(string $cursor): array
+    {
+        if ($cursor === '') {
+            return array('traversal' => 0, 'path' => '');
+        }
+        if (strpos($cursor, '|') !== false) {
+            $parts = explode('|', $cursor, 2);
+            return array(
+                'traversal' => (int) $parts[0],
+                'path'      => wp_normalize_path($parts[1]),
+            );
+        }
+
+        return array('traversal' => (int) $cursor, 'path' => '');
+    }
+
+    private static function format_tree_cursor(int $traversal, string $path): string
+    {
+        $path = wp_normalize_path($path);
+        if ($path === '') {
+            return (string) $traversal;
+        }
+
+        return $traversal . '|' . $path;
     }
 
     /**
@@ -360,42 +412,63 @@ class Rmmigrate_File_List
         }
 
         if (Rmmigrate_Filesystem::is_file($base_path)) {
-            if (!$scope->is_path_excluded($base_path) && ($cursor === '' || $base_path > $cursor)) {
+            $resume_at = (int) $cursor;
+            if (!$scope->is_path_excluded($base_path) && $resume_at < 1) {
                 $files[] = self::entry($base_path, $content_root);
             }
             return array('files' => $files, 'cursor' => '', 'done' => true);
         }
 
+        // Cursor resume stores traversal count plus the last processed path so
+        // slices can re-anchor in the sorted iterator when order is stable.
         $iterator = new RecursiveIteratorIterator(
-            new RecursiveDirectoryIterator($base_path, RecursiveDirectoryIterator::SKIP_DOTS),
-            RecursiveIteratorIterator::SELF_FIRST
+            new Rmmigrate_Sorted_Directory_Iterator($base_path, RecursiveDirectoryIterator::SKIP_DOTS),
+            RecursiveIteratorIterator::SELF_FIRST,
+            RecursiveIteratorIterator::CATCH_GET_CHILD
         );
-        $last_cursor = $cursor;
-        $skipping = $cursor !== '';
+        $parsed = self::parse_tree_cursor($cursor);
+        $resume_at = $parsed['traversal'];
+        $resume_path = $parsed['path'];
+        $traversal = 0;
+        $anchored = ($resume_path === '' && $resume_at <= 0);
+        $last_processed_path = '';
         $last_hb = $start;
 
         foreach ($iterator as $file) {
             /** @var SplFileInfo $file */
             self::maybe_scan_heartbeat($job, $last_hb);
             $path = wp_normalize_path($file->getPathname());
-            if ($skipping) {
-                if ($path <= $cursor) {
+
+            if (!$anchored) {
+                if ($resume_path !== '' && $path === $resume_path) {
+                    $anchored = true;
+                    $traversal++;
                     continue;
                 }
-                $skipping = false;
+                if ($traversal < $resume_at) {
+                    $traversal++;
+                    continue;
+                }
+                $anchored = true;
             }
 
             if ((microtime(true) - $start) >= $budget_sec) {
-                return array('files' => $files, 'cursor' => $last_cursor, 'done' => false);
+                return array(
+                    'files'  => $files,
+                    'cursor' => self::format_tree_cursor($traversal, $last_processed_path),
+                    'done'   => false,
+                );
             }
 
             if ($scope->is_path_excluded($path)) {
+                $traversal++;
                 continue;
             }
             if ($file->isFile()) {
                 $files[] = self::entry($path, $content_root);
-                $last_cursor = $path;
             }
+            $last_processed_path = $path;
+            $traversal++;
         }
 
         return array('files' => $files, 'cursor' => '', 'done' => true);
@@ -415,7 +488,7 @@ class Rmmigrate_File_List
      */
     private static function entry(string $absolute, string $content_root): array
     {
-        $relative = ltrim(str_replace($content_root, '', wp_normalize_path($absolute)), '/');
+        $relative = self::relative_path_from_root(wp_normalize_path($absolute), wp_normalize_path($content_root));
         return array(
             'path'    => $absolute,
             'size'    => (int) Rmmigrate_Filesystem::filesize($absolute),
@@ -470,7 +543,8 @@ class Rmmigrate_File_List
         return array_values(array_filter($files, static function ($file) use ($roots, $keep_core) {
             $path = wp_normalize_path($file['path']);
             foreach ($roots as $root) {
-                if (strpos($path, $root) === 0) {
+                $root = untrailingslashit(wp_normalize_path($root));
+                if ($path === $root || strpos($path, $root . '/') === 0) {
                     return true;
                 }
             }
@@ -503,7 +577,26 @@ class Rmmigrate_File_List
         }
         $raw = Rmmigrate_Filesystem::get_contents($path);
         $decoded = $raw !== false ? json_decode($raw, true) : null;
-        return is_array($decoded) ? $decoded : array();
+        if (!is_array($decoded)) {
+            return array();
+        }
+
+        $files = array();
+        foreach ($decoded as $entry) {
+            if (!is_array($entry)) {
+                continue;
+            }
+            if (!isset($entry['path'], $entry['size'], $entry['archive'])) {
+                continue;
+            }
+            $files[] = array(
+                'path'    => (string) $entry['path'],
+                'size'    => (int) $entry['size'],
+                'archive' => (string) $entry['archive'],
+            );
+        }
+
+        return $files;
     }
 
     /**
@@ -526,5 +619,77 @@ class Rmmigrate_File_List
             }
         }
         return !empty($settings['include_wp_core']);
+    }
+}
+
+/**
+ * Directory iterator with stable child ordering for resumable path cursors.
+ */
+final class Rmmigrate_Sorted_Directory_Iterator implements RecursiveIterator
+{
+    /** @var list<string> */
+    private array $children = array();
+
+    private int $position = 0;
+
+    private int $flags;
+
+    public function __construct(string $path, int $flags = FilesystemIterator::KEY_AS_PATHNAME | FilesystemIterator::CURRENT_AS_PATHNAME)
+    {
+        $supported = FilesystemIterator::SKIP_DOTS
+            | FilesystemIterator::CURRENT_AS_PATHNAME
+            | FilesystemIterator::KEY_AS_PATHNAME;
+        $this->flags = $flags;
+        $iterator_flags = ($flags & $supported) | FilesystemIterator::SKIP_DOTS | FilesystemIterator::CURRENT_AS_PATHNAME;
+        $paths = array();
+        foreach (new FilesystemIterator($path, $iterator_flags) as $sorted_path) {
+            $paths[] = wp_normalize_path((string) $sorted_path);
+        }
+        sort($paths, SORT_STRING);
+        $this->children = $paths;
+        $this->position = 0;
+    }
+
+    public function rewind(): void
+    {
+        $this->position = 0;
+    }
+
+    public function valid(): bool
+    {
+        return isset($this->children[$this->position]);
+    }
+
+    #[\ReturnTypeWillChange]
+    public function current()
+    {
+        return new SplFileInfo($this->children[$this->position]);
+    }
+
+    #[\ReturnTypeWillChange]
+    public function key()
+    {
+        return $this->children[$this->position];
+    }
+
+    public function next(): void
+    {
+        ++$this->position;
+    }
+
+    public function hasChildren(): bool
+    {
+        if (!$this->valid()) {
+            return false;
+        }
+        $path = $this->children[$this->position];
+        $allow_links = ($this->flags & FilesystemIterator::FOLLOW_SYMLINKS) !== 0;
+
+        return is_dir($path) && (!is_link($path) || $allow_links);
+    }
+
+    public function getChildren(): self
+    {
+        return new self($this->children[$this->position], $this->flags);
     }
 }

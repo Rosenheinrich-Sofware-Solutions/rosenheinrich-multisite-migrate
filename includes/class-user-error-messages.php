@@ -9,9 +9,49 @@ class Rmmigrate_User_Error_Messages
     /**
      * @return array{message:string,action:string}
      */
-    public static function map(string $raw): array
+    public static function map(string $raw, string $code = ''): array
     {
         $text = wp_strip_all_tags($raw);
+        $code = sanitize_key($code);
+        if ($code !== '') {
+            if ($code === Rmmigrate_Error_Codes::MEMORY_LIMIT) {
+                return array(
+                    'message' => __('PHP ran out of memory during the database export.', 'rosenheinrich-multisite-migrate'),
+                    'action'  => __('Use Settings → Database → mysqldump, raise memory_limit, or exclude large tables.', 'rosenheinrich-multisite-migrate'),
+                );
+            }
+            if ($code === Rmmigrate_Error_Codes::TIME_LIMIT) {
+                return array(
+                    'message' => __('PHP time limit hit mid-slice.', 'rosenheinrich-multisite-migrate'),
+                    'action'  => __('Raise max_execution_time or open Health, then retry.', 'rosenheinrich-multisite-migrate'),
+                );
+            }
+            if ($code === Rmmigrate_Error_Codes::WORKER_STOPPED || $code === Rmmigrate_Error_Codes::STALE_WORKER) {
+                return array(
+                    'message' => __('Worker stopped unexpectedly.', 'rosenheinrich-multisite-migrate'),
+                    'action'  => __('Open Activity for details, then retry.', 'rosenheinrich-multisite-migrate'),
+                );
+            }
+            if ($code === Rmmigrate_Error_Codes::EXTRACT_FAILED) {
+                return array(
+                    'message' => __('Archive extraction failed.', 'rosenheinrich-multisite-migrate'),
+                    'action'  => __('Check disk space and write permissions, then retry.', 'rosenheinrich-multisite-migrate'),
+                );
+            }
+            if ($code === Rmmigrate_Error_Codes::FILE_RESTORE_FAILED) {
+                return array(
+                    'message' => __('A file could not be restored.', 'rosenheinrich-multisite-migrate'),
+                    'action'  => __('Open the activity log for the file name, check write permissions, then retry.', 'rosenheinrich-multisite-migrate'),
+                );
+            }
+            if ($code === Rmmigrate_Error_Codes::PERMISSION_DENIED) {
+                return array(
+                    'message' => __('Permission denied while writing files.', 'rosenheinrich-multisite-migrate'),
+                    'action'  => __('Check file permissions, then retry.', 'rosenheinrich-multisite-migrate'),
+                );
+            }
+        }
+
         $lower = strtolower($text);
 
         if (strpos($lower, 'insufficient disk space') !== false) {
@@ -57,7 +97,7 @@ class Rmmigrate_User_Error_Messages
                 'action'  => __('Verify database host, username, password, and that the database exists with your hosting provider.', 'rosenheinrich-multisite-migrate'),
             );
         }
-        if (strpos($lower, 'memory') !== false || strpos($lower, 'allowed memory size') !== false) {
+        if (strpos($lower, 'allowed memory size') !== false || strpos($lower, 'out of memory') !== false) {
             return array(
                 'message' => __('PHP ran out of memory during the database export.', 'rosenheinrich-multisite-migrate'),
                 'action'  => __('Use Settings → Database → mysqldump, raise memory_limit, or exclude large tables.', 'rosenheinrich-multisite-migrate'),
@@ -155,7 +195,7 @@ class Rmmigrate_User_Error_Messages
             return __('A file could not be restored.', 'rosenheinrich-multisite-migrate');
         }
 
-        $mapped = self::map($raw);
+        $mapped = self::map($raw, $code);
         $message = $mapped['message'];
         $message = preg_replace('/:\s*(\.?[\w.\-]+|\/[^\s]+|\\\\[^\s]+)\s*$/u', '', $message) ?? $message;
         $message = trim($message);

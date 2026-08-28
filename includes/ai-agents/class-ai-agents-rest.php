@@ -12,6 +12,7 @@ final class Rmmigrate_Ai_Agents_Rest
     public const GITHUB_LATEST_RELEASE_URL = 'https://api.github.com/repos/WordPress/mcp-adapter/releases/latest';
 
     public const RELEASE_CACHE_KEY = 'rmmigrate_mcp_adapter_release';
+    public const RELEASE_FAILURE_CACHE_KEY = 'rmmigrate_mcp_adapter_release_fail';
 
     public const APP_PASSWORD_NAME = 'Multisite Migrate AI Agents';
 
@@ -141,8 +142,13 @@ final class Rmmigrate_Ai_Agents_Rest
     public static function get_mcp_adapter_release()
     {
         $cached = get_transient(self::RELEASE_CACHE_KEY);
-        if (false !== $cached && is_array($cached)) {
+        if (false !== $cached && is_array($cached) && !empty($cached['success'])) {
             return new WP_REST_Response($cached, 200);
+        }
+
+        $cached_failure = get_transient(self::RELEASE_FAILURE_CACHE_KEY);
+        if (false !== $cached_failure && is_array($cached_failure)) {
+            return new WP_REST_Response($cached_failure, 502);
         }
 
         $response = wp_remote_get(
@@ -154,34 +160,22 @@ final class Rmmigrate_Ai_Agents_Rest
         );
 
         if (is_wp_error($response) || 200 !== wp_remote_retrieve_response_code($response)) {
-            return new WP_REST_Response(
-                array(
-                    'success' => false,
-                    'message' => __('Could not fetch the latest MCP Adapter release from GitHub.', 'rosenheinrich-multisite-migrate'),
-                ),
-                502
+            return self::cache_release_failure(
+                __('Could not fetch the latest MCP Adapter release from GitHub.', 'rosenheinrich-multisite-migrate')
             );
         }
 
         $body = json_decode(wp_remote_retrieve_body($response), true);
         if (!is_array($body) || empty($body['tag_name']) || empty($body['assets']) || !is_array($body['assets'])) {
-            return new WP_REST_Response(
-                array(
-                    'success' => false,
-                    'message' => __('GitHub response did not include a downloadable release asset.', 'rosenheinrich-multisite-migrate'),
-                ),
-                502
+            return self::cache_release_failure(
+                __('GitHub response did not include a downloadable release asset.', 'rosenheinrich-multisite-migrate')
             );
         }
 
         $download_url = self::pick_zip_download_url($body['assets']);
-        if ($download_url === '') {
-            return new WP_REST_Response(
-                array(
-                    'success' => false,
-                    'message' => __('GitHub response did not include a downloadable release asset.', 'rosenheinrich-multisite-migrate'),
-                ),
-                502
+        if ($download_url === '' || !self::is_valid_github_zip_download_url($download_url)) {
+            return self::cache_release_failure(
+                __('GitHub response did not include a downloadable release asset.', 'rosenheinrich-multisite-migrate')
             );
         }
 
@@ -196,12 +190,24 @@ final class Rmmigrate_Ai_Agents_Rest
         return new WP_REST_Response($payload, 200);
     }
 
+    private static function cache_release_failure(string $message): WP_REST_Response
+    {
+        $payload = array(
+            'success' => false,
+            'message' => $message,
+        );
+        set_transient(self::RELEASE_FAILURE_CACHE_KEY, $payload, 5 * MINUTE_IN_SECONDS);
+
+        return new WP_REST_Response($payload, 502);
+    }
+
     public static function get_installed_mcp_adapter_file(): string
     {
         if (!function_exists('get_plugins')) {
             require_once ABSPATH . 'wp-admin/includes/plugin.php';
         }
         foreach (array_keys(get_plugins()) as $plugin_file) {
+            $plugin_file = (string) $plugin_file;
             if (0 === strpos($plugin_file, 'mcp-adapter/')) {
                 return $plugin_file;
             }
@@ -253,6 +259,7 @@ final class Rmmigrate_Ai_Agents_Rest
             );
         }
 
+        delete_transient(self::RELEASE_FAILURE_CACHE_KEY);
         $release = self::get_mcp_adapter_release();
         $body = $release->get_data();
         if (empty($body['success']) || empty($body['download_url'])) {
@@ -270,9 +277,20 @@ final class Rmmigrate_Ai_Agents_Rest
         require_once ABSPATH . 'wp-admin/includes/plugin.php';
         require_once ABSPATH . 'wp-admin/includes/class-wp-upgrader.php';
 
+        $download_url = (string) $body['download_url'];
+        if ($download_url === '' || !self::is_valid_github_zip_download_url($download_url)) {
+            return new WP_REST_Response(
+                array(
+                    'success' => false,
+                    'message' => __('Could not resolve a safe MCP Adapter download URL.', 'rosenheinrich-multisite-migrate'),
+                ),
+                502
+            );
+        }
+
         $skin = new WP_Ajax_Upgrader_Skin();
         $upgrader = new Plugin_Upgrader($skin);
-        $result = $upgrader->install($body['download_url']);
+        $result = $upgrader->install($download_url);
 
         if (is_wp_error($result)) {
             return new WP_REST_Response(
@@ -606,14 +624,29 @@ final class Rmmigrate_Ai_Agents_Rest
             }
             $name = (string) ($asset['name'] ?? '');
             $url = (string) ($asset['browser_download_url'] ?? '');
-            if ($url !== '' && (substr($name, -4) === '.zip' || strpos($url, '.zip') !== false)) {
+            if ($url !== '' && substr($name, -4) === '.zip' && self::is_valid_github_zip_download_url($url)) {
                 return $url;
             }
         }
-        if (!empty($assets[0]) && is_array($assets[0]) && !empty($assets[0]['browser_download_url'])) {
-            return (string) $assets[0]['browser_download_url'];
-        }
         return '';
+    }
+
+    public static function is_valid_github_zip_download_url(string $url): bool
+    {
+        $parts = wp_parse_url($url);
+        if (!is_array($parts) || empty($parts['host']) || empty($parts['scheme'])) {
+            return false;
+        }
+        if (strtolower((string) $parts['scheme']) !== 'https') {
+            return false;
+        }
+        $host = strtolower((string) $parts['host']);
+        if (!in_array($host, array('github.com', 'codeload.github.com', 'api.github.com'), true)) {
+            return false;
+        }
+        $path = (string) ($parts['path'] ?? '');
+
+        return substr($path, -4) === '.zip';
     }
 
     /**

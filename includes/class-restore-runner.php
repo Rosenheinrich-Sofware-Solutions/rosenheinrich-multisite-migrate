@@ -22,7 +22,7 @@ class Rmmigrate_Restore_Runner
         $step = $steps->current();
 
         if ($job->get_status() === Rmmigrate_Job::STATUS_PENDING) {
-            return self::step_init($job, $steps);
+            return self::step_init($job);
         }
 
         switch ($step) {
@@ -37,7 +37,7 @@ class Rmmigrate_Restore_Runner
             case Rmmigrate_Restore_Build_Steps::STEP_CLEANUP:
                 return self::step_cleanup($job, $steps);
             case Rmmigrate_Restore_Build_Steps::STEP_MIGRATION_FINALIZE:
-                return self::step_migration_finalize($job, $steps);
+                return self::step_migration_finalize($job);
         }
 
         return array('message' => $job->get_status_label());
@@ -46,7 +46,7 @@ class Rmmigrate_Restore_Runner
     /**
      * @return array{message:string}
      */
-    private static function step_init(Rmmigrate_Job $job, Rmmigrate_Restore_Build_Steps $steps): array
+    private static function step_init(Rmmigrate_Job $job): array
     {
         if (!defined('WP_IMPORTING')) {
             // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedConstantFound -- WordPress core import flag required during restore/import.
@@ -80,10 +80,11 @@ class Rmmigrate_Restore_Runner
         $decrypt = is_array($progress['decrypt'] ?? null) ? $progress['decrypt'] : array();
         if (!empty($decrypt['plain_path']) && empty($decrypt['pending']) && Rmmigrate_Filesystem::exists((string) $decrypt['plain_path'])) {
             $source_path = (string) $decrypt['plain_path'];
-        } elseif (substr($source_path, -5) === Rmmigrate_Archive_Encryption::EXT
+        } elseif (substr($source_path, -strlen(Rmmigrate_Archive_Encryption::EXT)) === Rmmigrate_Archive_Encryption::EXT
             || (!empty($decrypt['pending']) && !empty($decrypt['enc_path']))) {
             $enc_path = !empty($decrypt['enc_path']) ? (string) $decrypt['enc_path'] : $source_path;
-            $plain_name = preg_replace('/\.venc$/', '', basename($enc_path));
+            $enc_ext = preg_quote(Rmmigrate_Archive_Encryption::EXT, '/');
+            $plain_name = preg_replace('/' . $enc_ext . '$/', '', basename($enc_path));
             if ($plain_name === basename($enc_path)) {
                 $plain_name = 'archive.zip';
             }
@@ -94,33 +95,41 @@ class Rmmigrate_Restore_Runner
             if ($passphrase !== '') {
                 Rmmigrate_Archive_Encryption::set_runtime_passphrase($passphrase);
             }
-            $offset = (int) ($progress['decrypt_offset'] ?? 0);
-            $result = Rmmigrate_Archive_Encryption::decrypt_slice(
-                $enc_path,
-                $plain_path,
-                $offset,
-                Rmmigrate_Runner::remaining_budget_sec()
-            );
-            if ($result === null) {
-                Rmmigrate_Archive_Encryption::clear_runtime_passphrase();
-                // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
-                throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::DECRYPT_PASSPHRASE),
-                    esc_html(__('Failed to decrypt backup archive. Enter the correct passphrase in Restore.', 'rosenheinrich-multisite-migrate'))
+            try {
+                $offset = (int) ($progress['decrypt_offset'] ?? 0);
+                $plain_bytes = (int) ($progress['decrypt_plain_bytes'] ?? -1);
+                if ($offset === 0) {
+                    $plain_bytes = -1;
+                }
+                $result = Rmmigrate_Archive_Encryption::decrypt_slice(
+                    $enc_path,
+                    $plain_path,
+                    $offset,
+                    Rmmigrate_Runner::remaining_budget_sec(),
+                    $plain_bytes
                 );
+                if ($result === null) {
+                    // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+                    throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::DECRYPT_PASSPHRASE),
+                        esc_html(__('Failed to decrypt backup archive. Enter the correct passphrase in Restore.', 'rosenheinrich-multisite-migrate'))
+                    );
+                }
+                $job->update_progress(array(
+                    'decrypt_offset'      => (int) $result['byte_offset'],
+                    'decrypt_plain_bytes' => (int) ($result['plain_bytes'] ?? 0),
+                    'decrypt'             => array(
+                        'enc_path'   => $enc_path,
+                        'plain_path' => $plain_path,
+                        'pending'    => empty($result['done']),
+                    ),
+                ));
+                if (empty($result['done'])) {
+                    return array('message' => __('Decrypting backup archive…', 'rosenheinrich-multisite-migrate'));
+                }
+                $source_path = $plain_path;
+            } finally {
+                Rmmigrate_Archive_Encryption::clear_runtime_passphrase();
             }
-            $job->update_progress(array(
-                'decrypt_offset' => (int) $result['byte_offset'],
-                'decrypt'        => array(
-                    'enc_path'   => $enc_path,
-                    'plain_path' => $plain_path,
-                    'pending'    => empty($result['done']),
-                ),
-            ));
-            if (empty($result['done'])) {
-                return array('message' => __('Decrypting backup archive…', 'rosenheinrich-multisite-migrate'));
-            }
-            Rmmigrate_Archive_Encryption::clear_runtime_passphrase();
-            $source_path = $plain_path;
         }
 
         self::maybe_warn_php_version_mismatch($job, $source_path);
@@ -286,9 +295,11 @@ class Rmmigrate_Restore_Runner
      */
     private static function step_cleanup(Rmmigrate_Job $job, Rmmigrate_Restore_Build_Steps $steps): array
     {
-        $extract_dir = trailingslashit($job->get_work_dir()) . 'extracted/';
-        if (Rmmigrate_Filesystem::is_dir($extract_dir)) {
-            Rmmigrate_Filesystem::delete_directory($extract_dir);
+        if ($job->get_restore_type() !== Rmmigrate_Job::RESTORE_TYPE_MIGRATION) {
+            $extract_dir = trailingslashit($job->get_work_dir()) . 'extracted/';
+            if (Rmmigrate_Filesystem::is_dir($extract_dir)) {
+                Rmmigrate_Filesystem::delete_directory($extract_dir);
+            }
         }
 
         if ($job->get_restore_type() === Rmmigrate_Job::RESTORE_TYPE_MIGRATION) {
@@ -316,7 +327,7 @@ class Rmmigrate_Restore_Runner
     /**
      * @return array{message:string}
      */
-    private static function step_migration_finalize(Rmmigrate_Job $job, Rmmigrate_Restore_Build_Steps $steps): array
+    private static function step_migration_finalize(Rmmigrate_Job $job): array
     {
         $map = $job->get_migration_map();
         $mode = $job->get_restore_mode();
@@ -369,7 +380,7 @@ class Rmmigrate_Restore_Runner
             if ($new_host && DOMAIN_CURRENT_SITE !== $new_host) {
                 $notices[] = sprintf(
                     "define('DOMAIN_CURRENT_SITE', '%s');",
-                    esc_html($new_host)
+                    $new_host
                 );
             }
         }
@@ -383,6 +394,11 @@ class Rmmigrate_Restore_Runner
         }
 
         self::run_topology_finalize($job, $map, $manifest);
+
+        $extract_dir = trailingslashit($job->get_work_dir()) . 'extracted/';
+        if (Rmmigrate_Filesystem::is_dir($extract_dir)) {
+            Rmmigrate_Filesystem::delete_directory($extract_dir);
+        }
 
         $job->set_status(Rmmigrate_Job::STATUS_COMPLETE, self::restore_complete_warning($job));
         self::disable_maintenance();
@@ -417,7 +433,7 @@ class Rmmigrate_Restore_Runner
         $current = $steps->current();
         $idx = array_search($current, $all, true);
         $step_count = max(1, count($all));
-        $base = $idx === false ? 0 : (int) floor(($idx / $step_count) * 90);
+        $base = $idx === false ? 0 : (int) floor(((int) $idx / $step_count) * 90);
         $step_span = (int) floor(90 / $step_count);
 
         $progress = $job->get_progress();
@@ -641,12 +657,18 @@ class Rmmigrate_Restore_Runner
             return;
         }
 
+        if (!headers_sent()) {
+            header('Retry-After: 600');
+            header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+            header('Pragma: no-cache');
+            nocache_headers();
+        }
+
         wp_die(
             esc_html__('Briefly unavailable for scheduled maintenance. Check back in a minute.', 'rosenheinrich-multisite-migrate'),
             esc_html__('Maintenance', 'rosenheinrich-multisite-migrate'),
             array(
                 'response'  => 503,
-                'retry-after' => 600,
             )
         );
     }
@@ -813,9 +835,10 @@ class Rmmigrate_Restore_Runner
         if (!Rmmigrate_Filesystem::exists($path)) {
             return array();
         }
+        $enc_ext = Rmmigrate_Archive_Encryption::EXT;
         $ext = strtolower(pathinfo($path, PATHINFO_EXTENSION));
-        if ($ext === 'venc') {
-            $ext = strtolower(pathinfo(substr($path, 0, -5), PATHINFO_EXTENSION));
+        if ($ext === ltrim($enc_ext, '.')) {
+            $ext = strtolower(pathinfo(substr($path, 0, -strlen($enc_ext)), PATHINFO_EXTENSION));
         }
 
         return array(
@@ -832,21 +855,11 @@ class Rmmigrate_Restore_Runner
      */
     private static function read_manifest_from_archive(string $archive_path): ?array
     {
-        if ($archive_path === '' || !Rmmigrate_Filesystem::exists($archive_path) || !class_exists('ZipArchive')) {
+        if ($archive_path === '' || !Rmmigrate_Filesystem::exists($archive_path)) {
             return null;
         }
-        $zip = new ZipArchive();
-        if ($zip->open($archive_path) !== true) {
-            return null;
-        }
-        $json = $zip->getFromName('manifest.json');
-        $zip->close();
-        if ($json === false) {
-            return null;
-        }
-        $data = json_decode($json, true);
 
-        return is_array($data) ? $data : null;
+        return Rmmigrate_Manifest::read_from_archive($archive_path);
     }
 
     private static function maybe_warn_php_version_mismatch(Rmmigrate_Job $job, string $source_path): void

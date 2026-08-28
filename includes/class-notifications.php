@@ -44,7 +44,7 @@ class Rmmigrate_Notifications
         $activity_url = Rmmigrate_Admin_Router::admin_url(
             'multisite-migrate-activity',
             array(),
-            is_multisite() && current_user_can('manage_network')
+            is_multisite() && self::blog_id_from_job($job) === null
         );
         self::send(
             $subject,
@@ -84,7 +84,12 @@ class Rmmigrate_Notifications
         }
 
         $site = wp_specialchars_decode(get_bloginfo('name'), ENT_QUOTES);
-        $subject = sprintf('[%s] Multisite Migrate — %s', $site, ucfirst($context));
+        $subject = sprintf(
+            /* translators: 1: site name, 2: notification context (manual, schedule, restore). */
+            __('[%1$s] Multisite Migrate — %2$s', 'rosenheinrich-multisite-migrate'),
+            $site,
+            ucfirst($context)
+        );
         $home = home_url('/');
         self::send(
             $subject,
@@ -115,7 +120,11 @@ class Rmmigrate_Notifications
             $settings['email_address'] = $posted;
         }
         $site = wp_specialchars_decode(get_bloginfo('name'), ENT_QUOTES);
-        $subject = sprintf('[%s] Multisite Migrate test email', $site);
+        $subject = sprintf(
+            /* translators: %s: site name */
+            __('[%s] Multisite Migrate test email', 'rosenheinrich-multisite-migrate'),
+            $site
+        );
         $detail = sprintf(
             /* translators: %s: site name */
             __('If you received this message, email delivery is working for %s.', 'rosenheinrich-multisite-migrate'),
@@ -155,13 +164,18 @@ class Rmmigrate_Notifications
         }
 
         $site = wp_specialchars_decode(get_bloginfo('name'), ENT_QUOTES);
-        $subject = sprintf('[%s] Multisite Migrate — scheduled backup failures', $site);
+        $subject = sprintf(
+            /* translators: %s: site name */
+            __('[%s] Multisite Migrate — scheduled backup failures', 'rosenheinrich-multisite-migrate'),
+            $site
+        );
         $activity_url = Rmmigrate_Admin_Router::admin_url(
             'multisite-migrate-activity',
             array(),
             is_multisite() && current_user_can('manage_network')
         );
         $body = sprintf(
+            /* translators: 1: consecutive failure count, 2: last error message */
             __("Failed %1\$d times in a row.\n\nLast error: %2\$s", 'rosenheinrich-multisite-migrate'),
             $count,
             $last_error
@@ -246,8 +260,30 @@ class Rmmigrate_Notifications
     private static function build_subject(Rmmigrate_Job $job, bool $success): string
     {
         $site = wp_specialchars_decode(get_bloginfo('name'), ENT_QUOTES);
+        $site = str_replace(array("\r", "\n"), '', $site);
         $label = $success ? __('completed', 'rosenheinrich-multisite-migrate') : __('failed', 'rosenheinrich-multisite-migrate');
-        return sprintf('[%s] Multisite Migrate %s #%d %s', $site, ucfirst($job->get_job_type()), $job->get_id(), $label);
+        $type_label = self::job_type_subject_label($job->get_job_type());
+
+        return sprintf(
+            /* translators: 1: site name, 2: job type label, 3: job ID, 4: completed/failed label */
+            __('[%1$s] Multisite Migrate %2$s #%3$d %4$s', 'rosenheinrich-multisite-migrate'),
+            $site,
+            $type_label,
+            $job->get_id(),
+            $label
+        );
+    }
+
+    private static function job_type_subject_label(string $job_type): string
+    {
+        switch ($job_type) {
+            case Rmmigrate_Job::JOB_TYPE_RESTORE:
+                return __('restore', 'rosenheinrich-multisite-migrate');
+            case 'import':
+                return __('import', 'rosenheinrich-multisite-migrate');
+            default:
+                return __('backup', 'rosenheinrich-multisite-migrate');
+        }
     }
 
     private static function build_body(Rmmigrate_Job $job, bool $success, ?string $error): string
@@ -276,6 +312,8 @@ class Rmmigrate_Notifications
         if (!self::can_send()) {
             return false;
         }
+
+        $subject = str_replace(array("\r", "\n"), '', $subject);
 
         $to = !empty($settings['email_address']) ? (string) $settings['email_address'] : '';
         if ($to === '' || !is_email($to)) {
@@ -309,10 +347,13 @@ class Rmmigrate_Notifications
         add_action('wp_mail_failed', $on_fail, 10, 1);
         add_filter('wp_mail_from', $from_email, 20);
         add_filter('wp_mail_from_name', $from_name, 20);
-        $sent = (bool) wp_mail($to, $subject, $html, $headers);
-        remove_filter('wp_mail_from_name', $from_name, 20);
-        remove_filter('wp_mail_from', $from_email, 20);
-        remove_action('wp_mail_failed', $on_fail, 10);
+        try {
+            $sent = (bool) wp_mail($to, $subject, $html, $headers);
+        } finally {
+            remove_filter('wp_mail_from_name', $from_name, 20);
+            remove_filter('wp_mail_from', $from_email, 20);
+            remove_action('wp_mail_failed', $on_fail, 10);
+        }
 
         self::record_send_result($sent, $options, $to, $mail_error);
         return $sent;
@@ -348,20 +389,23 @@ class Rmmigrate_Notifications
         $kind = isset($options['activity']) ? (string) $options['activity'] : 'notification';
         $data = array();
         if ($to !== '') {
-            $data['to'] = $to;
+            $parts = explode('@', $to, 2);
+            $data['to'] = isset($parts[1])
+                ? substr($parts[0], 0, 2) . '***@' . $parts[1]
+                : '***';
         }
         if (isset($options['job_id'])) {
             $data['job_id'] = (int) $options['job_id'];
         }
         if (!$sent && $mail_error !== '') {
-            $data['error'] = $mail_error;
+            $data['error'] = self::mask_recipient_in_error($mail_error, $to);
         }
 
         if ($kind === 'test') {
             if ($sent) {
                 $message = __('Test email sent.', 'rosenheinrich-multisite-migrate');
             } elseif ($mail_error !== '') {
-                $friendly = self::friendly_mail_error($mail_error);
+                $friendly = self::friendly_mail_error(self::mask_recipient_in_error($mail_error, $to));
                 $message = sprintf(
                     /* translators: %s: mailer error */
                     __('Test email could not be sent: %s', 'rosenheinrich-multisite-migrate'),
@@ -379,13 +423,27 @@ class Rmmigrate_Notifications
                     ? sprintf(
                         /* translators: %s: mailer error */
                         __('Notification email failed to send: %s', 'rosenheinrich-multisite-migrate'),
-                        self::friendly_mail_error($mail_error)
+                        self::friendly_mail_error(self::mask_recipient_in_error($mail_error, $to))
                     )
                     : __('Notification email failed to send.', 'rosenheinrich-multisite-migrate')
                 );
         }
 
         Rmmigrate_Activity_Log::record('email', $message, $sent ? 'success' : 'error', $data);
+    }
+
+    private static function mask_recipient_in_error(string $mail_error, string $to): string
+    {
+        if ($to === '' || $mail_error === '') {
+            return $mail_error;
+        }
+        $parts = explode('@', $to, 2);
+        $masked = isset($parts[1])
+            ? substr($parts[0], 0, 2) . '***@' . $parts[1]
+            : '***';
+        $sanitized = str_ireplace($to, $masked, $mail_error);
+
+        return is_string($sanitized) ? $sanitized : $mail_error;
     }
 
     private static function friendly_mail_error(string $mail_error): string
@@ -562,7 +620,7 @@ class Rmmigrate_Notifications
         $lang = esc_attr(get_bloginfo('language') ?: 'en');
         $year = esc_html(gmdate('Y'));
         $email_date = function_exists('date_i18n')
-            ? date_i18n('M j') . ', ' . gmdate('Y')
+            ? date_i18n((string) get_option('date_format', 'M j, Y'))
             : gmdate('M j, Y');
         $preheader = esc_html($heading !== '' ? $heading : $app_name);
         $privacy = esc_url(Rmmigrate_Capabilities::marketing_url(Rmmigrate_Capabilities::privacy_url(), 'email_notification'));
@@ -676,7 +734,7 @@ table { border-collapse: collapse; mso-table-lspace: 0pt; mso-table-rspace: 0pt;
 ' . esc_html(__('You received this email because notifications are enabled for this WordPress site.', 'rosenheinrich-multisite-migrate')) . '
 </td></tr>
 <tr><td align="center" style="font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',system-ui,Arial,sans-serif;font-size:11px;line-height:18px;color:#50575e;padding-bottom:12px;border-collapse:collapse;">
-' . esc_html(__('Need help?', 'rosenheinrich-multisite-migrate')) . ' ' . $footer_link('mailto:phillip@rosenheinrich.com', 'phillip@rosenheinrich.com') . '
+' . esc_html(__('Need help?', 'rosenheinrich-multisite-migrate')) . ' ' . $footer_link('mailto:' . Rmmigrate_Capabilities::support_email(), Rmmigrate_Capabilities::support_email()) . '
 </td></tr>
 <tr><td align="center" style="font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',system-ui,Arial,sans-serif;font-size:11px;line-height:18px;color:#50575e;padding-bottom:12px;border-collapse:collapse;">
 <strong style="color:#0a1220;font-weight:700;">Rosenheinrich Software Solutions</strong><br />

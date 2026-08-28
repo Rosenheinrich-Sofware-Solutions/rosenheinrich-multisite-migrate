@@ -20,6 +20,7 @@ class Rmmigrate_Setup_Wizard
             'skipped'             => false,
             'banner_dismissed'    => false,
             'newsletter_opted_in' => false,
+            'newsletter_pending'  => false,
             'newsletter_skipped'  => false,
             'steps'               => array(
                 'welcome'  => false,
@@ -38,8 +39,12 @@ class Rmmigrate_Setup_Wizard
         if (!is_array($stored)) {
             $stored = array();
         }
+        $stored_steps = $stored['steps'] ?? array();
+        if (!is_array($stored_steps)) {
+            $stored_steps = array();
+        }
         $merged = array_merge(self::defaults(), $stored, array(
-            'steps' => array_merge(self::defaults()['steps'], $stored['steps'] ?? array()),
+            'steps' => array_merge(self::defaults()['steps'], $stored_steps),
         ));
         // Drop legacy keys from older wizard versions.
         unset($merged['test_backup_done']);
@@ -117,11 +122,17 @@ class Rmmigrate_Setup_Wizard
 
     private static function is_fresh_activation_request(): bool
     {
-        if (Rmmigrate_Request_Input::get_exists('activate')) {
+        global $pagenow;
+
+        if ($pagenow !== 'plugins.php') {
+            return false;
+        }
+
+        if (Rmmigrate_Request_Input::get_text('activate') === 'true') {
             return true;
         }
 
-        return Rmmigrate_Request_Input::get_exists('activated');
+        return Rmmigrate_Request_Input::get_text('activated') === 'true';
     }
 
     public static function clear_pending_post_activation_redirect(): void
@@ -289,12 +300,19 @@ class Rmmigrate_Setup_Wizard
         add_action('wp_ajax_rmmigrate_setup_wizard_step', array(__CLASS__, 'ajax_save_step'));
         add_action('wp_ajax_rmmigrate_setup_wizard_dismiss_banner', array(__CLASS__, 'ajax_dismiss_banner'));
         add_action('wp_ajax_rmmigrate_setup_wizard_newsletter', array(__CLASS__, 'ajax_newsletter'));
+        add_action('wp_ajax_rmmigrate_setup_wizard_newsletter_confirm', array(__CLASS__, 'ajax_newsletter_confirm'));
         add_action('wp_ajax_rmmigrate_setup_wizard_newsletter_fallback', array(__CLASS__, 'ajax_newsletter_fallback'));
     }
 
     public static function maybe_redirect(): void
     {
         if (wp_doing_ajax()) {
+            return;
+        }
+        $request_method = isset($_SERVER['REQUEST_METHOD'])
+            ? strtoupper(sanitize_text_field(wp_unslash($_SERVER['REQUEST_METHOD'])))
+            : 'GET';
+        if ($request_method !== 'GET') {
             return;
         }
         if (Rmmigrate_Request_Input::get_exists('activate-multi')) {
@@ -373,26 +391,69 @@ class Rmmigrate_Setup_Wizard
     {
         self::verify_setup_ajax();
 
-        $allow = Rmmigrate_Request_Input::post_text('allow') === '1';
+        $allow_raw = Rmmigrate_Request_Input::post_text('allow');
+        if ($allow_raw !== '1' && $allow_raw !== '0') {
+            wp_send_json_error(
+                array('message' => __('Invalid newsletter choice.', 'rosenheinrich-multisite-migrate')),
+                400
+            );
+        }
+        $allow = $allow_raw === '1';
         $state = self::get_state();
 
         if (!$allow) {
             $state['newsletter_skipped'] = true;
+            $state['newsletter_pending'] = false;
             $state['steps']['welcome'] = true;
             self::save_state($state);
             wp_send_json_success(array('skipped' => true));
         }
 
         $fields = self::newsletter_payload();
-        $state['newsletter_opted_in'] = true;
+        $subscribe_url = self::newsletter_subscribe_url();
+        if (!self::is_valid_newsletter_subscribe_url($subscribe_url)) {
+            wp_send_json_error(
+                array('message' => __('Newsletter subscription is unavailable right now.', 'rosenheinrich-multisite-migrate')),
+                502
+            );
+        }
+        $state['newsletter_pending'] = true;
+        $state['newsletter_opted_in'] = false;
         $state['newsletter_skipped'] = false;
         $state['steps']['welcome'] = true;
         self::save_state($state);
 
         wp_send_json_success(array(
-            'subscribeUrl' => self::newsletter_subscribe_url(),
+            'subscribeUrl' => $subscribe_url,
             'fields'       => $fields,
         ));
+    }
+
+    /**
+     * Promote pending newsletter consent after browser subscribe succeeds.
+     */
+    public static function ajax_newsletter_confirm(): void
+    {
+        self::verify_setup_ajax();
+
+        $state = self::get_state();
+        if (empty($state['newsletter_pending'])) {
+            wp_send_json_error(
+                array(
+                    'message' => esc_html__(
+                        'Newsletter opt-in is required before confirming subscription.',
+                        'rosenheinrich-multisite-migrate'
+                    ),
+                ),
+                403
+            );
+        }
+
+        $state['newsletter_opted_in'] = true;
+        $state['newsletter_pending'] = false;
+        self::save_state($state);
+
+        wp_send_json_success(array('ok' => true));
     }
 
     /**
@@ -402,17 +463,78 @@ class Rmmigrate_Setup_Wizard
     {
         self::verify_setup_ajax();
 
+        $state = self::get_state();
+        if (empty($state['newsletter_pending'])) {
+            wp_send_json_error(
+                array(
+                    'message' => esc_html__(
+                        'Newsletter opt-in is required before subscribing.',
+                        'rosenheinrich-multisite-migrate'
+                    ),
+                ),
+                403
+            );
+        }
+
         $fields = self::newsletter_payload();
         $fields['consent_mode'] = 'unknown';
 
-        $response = wp_remote_post(self::newsletter_subscribe_url(), array(
+        $subscribe_url = self::newsletter_subscribe_url();
+        if (!self::is_valid_newsletter_subscribe_url($subscribe_url)) {
+            $state['newsletter_pending'] = false;
+            self::save_state($state);
+            wp_send_json_error(
+                array(
+                    'message' => esc_html__(
+                        'Newsletter subscription could not be completed. Please try again later.',
+                        'rosenheinrich-multisite-migrate'
+                    ),
+                ),
+                502
+            );
+        }
+
+        $response = wp_remote_post($subscribe_url, array(
             'timeout' => 12,
             'headers' => array('Content-Type' => 'application/json'),
             'body'    => wp_json_encode($fields),
         ));
 
-        $ok = !is_wp_error($response) && (int) wp_remote_retrieve_response_code($response) < 400;
-        wp_send_json_success(array('ok' => $ok));
+        if (is_wp_error($response)) {
+            $state['newsletter_pending'] = false;
+            self::save_state($state);
+            wp_send_json_error(
+                array(
+                    'message' => esc_html__(
+                        'Newsletter subscription could not be completed. Please try again later.',
+                        'rosenheinrich-multisite-migrate'
+                    ),
+                ),
+                502
+            );
+        }
+
+        $status_code = (int) wp_remote_retrieve_response_code($response);
+        if ($status_code >= 400) {
+            $state['newsletter_pending'] = false;
+            self::save_state($state);
+            wp_send_json_error(
+                array(
+                    'message' => __(
+                        'Newsletter subscription could not be completed. Please try again later.',
+                        'rosenheinrich-multisite-migrate'
+                    ),
+                    'upstream_status' => $status_code,
+                ),
+                502
+            );
+        }
+
+        $state['newsletter_opted_in'] = true;
+        $state['newsletter_pending'] = false;
+        self::save_state($state);
+
+        wp_send_json_success(array('ok' => true));
     }
 
     /**
@@ -447,6 +569,22 @@ class Rmmigrate_Setup_Wizard
             'rmmigrate_newsletter_subscribe_url',
             $base . '/wp-json/multisite-migrate-portal/v1/newsletter/subscribe'
         );
+    }
+
+    private static function is_valid_newsletter_subscribe_url(string $url): bool
+    {
+        if ($url === '') {
+            return false;
+        }
+        $parts = wp_parse_url($url);
+        if (!is_array($parts) || !isset($parts['scheme'], $parts['host'])) {
+            return false;
+        }
+        if (strtolower((string) $parts['scheme']) !== 'https') {
+            return false;
+        }
+
+        return strtolower((string) $parts['host']) === strtolower(Rmmigrate_Capabilities::commerce_host());
     }
 
     /**

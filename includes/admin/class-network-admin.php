@@ -9,7 +9,7 @@ class Rmmigrate_Network_Admin
     public static function register(): void
     {
         add_action('network_admin_menu', array(__CLASS__, 'menu'));
-        add_action('admin_enqueue_scripts', array(__CLASS__, 'assets'));
+        add_action('network_admin_enqueue_scripts', array(__CLASS__, 'assets'));
     }
 
     public static function menu(): void

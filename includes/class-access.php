@@ -15,18 +15,6 @@ if (!defined('ABSPATH')) {
 class Rmmigrate_Access
 {
     /**
-     * Admin pages hidden from subsite administrators (network-only surfaces).
-     *
-     * @return string[]
-     */
-    private static function subsite_hidden_pages(): array
-    {
-        return array(
-            'multisite-migrate-setup',
-        );
-    }
-
-    /**
      * @return string[]
      */
     private static function subsite_allowed_pages(): array
@@ -58,18 +46,26 @@ class Rmmigrate_Access
             && current_user_can('manage_options');
     }
 
+    /**
+     * Subsite administrators may use plugin UI when any allowed page is visible.
+     */
+    public static function subsite_plugin_visible(): bool
+    {
+        if (!self::is_subsite_admin_context() || !current_user_can('manage_options')) {
+            return false;
+        }
+
+        return self::subsite_any_page_visible();
+    }
+
     public static function subsite_page_visible(string $slug): bool
     {
         if (!self::is_subsite_admin_context() || !current_user_can('manage_options')) {
             return false;
         }
 
-        if (in_array($slug, self::subsite_hidden_pages(), true)) {
-            return false;
-        }
-
         if ($slug === 'multisite-migrate-subsite') {
-            return self::subsite_any_page_visible();
+            return self::subsite_allowed_pages() !== array();
         }
 
         return in_array($slug, self::subsite_allowed_pages(), true);
@@ -81,13 +77,7 @@ class Rmmigrate_Access
             return false;
         }
 
-        foreach (self::subsite_allowed_pages() as $slug) {
-            if (self::subsite_page_visible($slug)) {
-                return true;
-            }
-        }
-
-        return false;
+        return self::subsite_allowed_pages() !== array();
     }
 
     public static function subsite_menu_visible(): bool
@@ -226,10 +216,17 @@ class Rmmigrate_Access
         return self::can(get_current_blog_id(), $action);
     }
 
+    /**
+     * Whether the user may act on the given blog.
+     *
+     * Authorization is blog-scope only; `$action` is accepted for caller compatibility
+     * (e.g. backup_create) but does not select different capability rules yet.
+     *
+     * @param int    $blog_id Target blog ID.
+     * @param string $action  Caller action label (reserved).
+     */
     public static function can(int $blog_id, string $action): bool
     {
-        unset($action);
-
         if (self::is_super_admin()) {
             return true;
         }

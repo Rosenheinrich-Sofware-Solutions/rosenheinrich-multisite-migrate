@@ -18,8 +18,11 @@ final class Rmmigrate_Backup_Service
         $scope = (string) ($input['scope'] ?? Rmmigrate_Multisite_Scope::SCOPE_NETWORK);
         if (!is_multisite()) {
             $scope = Rmmigrate_Multisite_Scope::SCOPE_NETWORK;
-        } elseif (!$is_cron && !current_user_can('manage_network')) {
-            $scope = Rmmigrate_Multisite_Scope::SCOPE_SUBSITE;
+        } elseif (!$is_cron && !current_user_can('manage_network') && $scope !== Rmmigrate_Multisite_Scope::SCOPE_SUBSITE) {
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Structured service exception payload.
+            throw new Rmmigrate_Service_Exception(
+                esc_html(__('Network backup requires super admin.', 'rosenheinrich-multisite-migrate')),
+                array(), sanitize_key(Rmmigrate_Error_Codes::PERMISSION_DENIED));
         }
 
         $excluded = isset($input['excluded_blogs']) && is_array($input['excluded_blogs'])
@@ -28,12 +31,13 @@ final class Rmmigrate_Backup_Service
         $included = isset($input['included_blogs']) && is_array($input['included_blogs'])
             ? array_map('intval', $input['included_blogs'])
             : array();
+        $settings = null;
         if ($scope === Rmmigrate_Multisite_Scope::SCOPE_NETWORK_INCLUDED && $included === array()) {
             $settings = Rmmigrate_Settings::get();
             $included = array_map('intval', (array) ($settings['default_included_blogs'] ?? array()));
         }
         if ($scope === Rmmigrate_Multisite_Scope::SCOPE_NETWORK_FILTERED && $excluded === array()) {
-            $settings = isset($settings) ? $settings : Rmmigrate_Settings::get();
+            $settings = $settings ?? Rmmigrate_Settings::get();
             $excluded = array_map('intval', (array) ($settings['default_excluded_blogs'] ?? array()));
         }
         // Backups are stored locally on this server.
@@ -76,12 +80,6 @@ final class Rmmigrate_Backup_Service
             $archive_mode_override = '';
         }
 
-        if (!$is_cron && is_multisite() && !current_user_can('manage_network') && $scope !== Rmmigrate_Multisite_Scope::SCOPE_SUBSITE) {
-            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Structured service exception payload.
-            throw new Rmmigrate_Service_Exception(
-                esc_html(__('Network backup requires super admin.', 'rosenheinrich-multisite-migrate')),
-                array(), sanitize_key(Rmmigrate_Error_Codes::PERMISSION_DENIED));
-        }
         $resolved = Rmmigrate_Multisite_Scope::resolve_backup_scope($scope, $excluded, $included, $is_cron);
         if (is_wp_error($resolved)) {
             // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Structured service exception payload.
@@ -109,8 +107,12 @@ final class Rmmigrate_Backup_Service
             if ($include_wp_core_override !== null) {
                 $settings['include_wp_core'] = $include_wp_core_override;
             }
-            $settings['exclude_log_tables'] = $exclude_log_tables;
-            $settings['exclude_revisions'] = $exclude_revisions;
+            if (array_key_exists('exclude_log_tables', $input)) {
+                $settings['exclude_log_tables'] = $exclude_log_tables;
+            }
+            if (array_key_exists('exclude_revisions', $input)) {
+                $settings['exclude_revisions'] = $exclude_revisions;
+            }
             Rmmigrate_Settings::save($settings);
         }
 
@@ -199,7 +201,7 @@ final class Rmmigrate_Backup_Service
 
     /**
      * @param int[] $job_ids
-     * @return array{deleted:int,skipped:int,warnings:string[],message:string}
+     * @return array{deleted:int,skipped:int,warnings:string[],message:string,queued:bool}
      */
     public static function delete_jobs(array $job_ids): array
     {
@@ -326,7 +328,7 @@ final class Rmmigrate_Backup_Service
     }
 
     /**
-     * @return array{ok:bool,message:string,warning:string}
+     * @return array{ok:bool,message:string,warning:string,queued?:bool}
      */
     private static function delete_job_record(Rmmigrate_Job $job): array
     {
@@ -353,6 +355,7 @@ final class Rmmigrate_Backup_Service
             );
         }
 
+        $job->update_progress(array('purge_failed' => false));
         $job->set_status(Rmmigrate_Job::STATUS_DELETING);
 
         $message = sprintf(

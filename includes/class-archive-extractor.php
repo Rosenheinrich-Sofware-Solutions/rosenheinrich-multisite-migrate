@@ -28,10 +28,10 @@ class Rmmigrate_Archive_Extractor
         $plan_index = (int) ($progress['plan_index'] ?? 0);
 
         if ($plan !== array() && isset($plan[$plan_index])) {
-            $zip_path = $plan[$plan_index]['archive_path'];
-            $format = $plan[$plan_index]['format'] ?? 'zip';
+            $zip_path = (string) ($plan[$plan_index]['archive_path'] ?? '');
+            $format = (string) ($plan[$plan_index]['format'] ?? 'zip');
         } else {
-            $zip_path = $progress['source']['zip_path'] ?? '';
+            $zip_path = (string) ($progress['source']['zip_path'] ?? '');
             $format = strtolower(pathinfo($zip_path, PATHINFO_EXTENSION));
         }
 
@@ -49,16 +49,16 @@ class Rmmigrate_Archive_Extractor
         if ($done && $plan !== array() && $plan_index < count($plan) - 1) {
             $this->job->update_progress(array(
                 'plan_index'           => $plan_index + 1,
-                'extract'              => array(),
                 'extract_shell_failed' => false,
             ));
+            $this->job->replace_progress_section('extract', array());
             return false;
         }
 
         return $done;
     }
 
-    private function extract_zip(string $zip_path, int $budget_sec): bool
+    private function extract_zip(string $zip_path, float $budget_sec): bool
     {
         $extract_dir = trailingslashit($this->job->get_work_dir()) . 'extracted/';
         wp_mkdir_p($extract_dir);
@@ -78,7 +78,7 @@ class Rmmigrate_Archive_Extractor
         if ( ! $chunk_in_progress ) {
             $engine = Rmmigrate_Extract_Engine::resolve( $zip_path, $engine_state, 'zip' );
 
-            if ( $engine === Rmmigrate_Extract_Engine::ENGINE_SHELL ) {
+            if ( $engine === Rmmigrate_Extract_Engine::ENGINE_SHELL && ! $only_sql ) {
                 try {
                     Rmmigrate_Extract_Engine::run_shell_unzip( $zip_path, $extract_dir, $password );
                     $this->job->update_progress( array(
@@ -192,6 +192,7 @@ class Rmmigrate_Archive_Extractor
         $done = false;
         $timeouts = (int) ($progress['php_execution_timeouts'] ?? 0);
         $had_partial_at_start = $partial !== null;
+        $daf_slice_first_block = true;
 
         // Always run at least one pass: a tiny budget (or a loaded host) can be
         // exhausted during open/seek above, which would otherwise return without
@@ -206,6 +207,11 @@ class Rmmigrate_Archive_Extractor
                 }
                 $header = $fh->read(4);
                 if ($header === false || strlen($header) < 4) {
+                    if ($byte_offset < $archive_size) {
+                        $fh->close();
+                        // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+                        throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::DAF_CORRUPT), esc_html__('Invalid DAF archive entry.', 'rosenheinrich-multisite-migrate'));
+                    }
                     $done = true;
                     break;
                 }
@@ -278,6 +284,9 @@ class Rmmigrate_Archive_Extractor
             $uncomp_len = (int) $partial['uncomp_len'];
             $out_fh = null;
             if ($dest !== null) {
+                if ($bytes_done > 0) {
+                    RMMIGRATE_IO::truncate_file($dest, $bytes_done);
+                }
                 $out_fh = Rmmigrate_Filesystem::open($dest, 'ab');
                 if ($out_fh === false) {
                     $fh->close();
@@ -287,9 +296,9 @@ class Rmmigrate_Archive_Extractor
             }
 
             while ($bytes_done < $uncomp_len) {
-                // Yield before every block (including the first). After soft PHP
-                // timeouts, keep 2s headroom once some extract progress exists.
-                $headroom = ($timeouts > 0 && ($had_partial_at_start || $bytes_done > 0 || $entries > 0))
+                // Yield before every block. After soft PHP timeouts, keep 2s headroom
+                // once some extract progress exists — except the first block this slice.
+                $headroom = (!$daf_slice_first_block && $timeouts > 0 && ($had_partial_at_start || $bytes_done > 0 || $entries > 0))
                     ? 2.0
                     : 0.0;
                 if ((microtime(true) - $start) + $headroom >= $budget_sec) {
@@ -326,7 +335,7 @@ class Rmmigrate_Archive_Extractor
                 $block_comp = (int) $bu['comp'];
                 $block_uncomp = (int) $bu['uncomp'];
 
-                if ($block_comp < 0 || $block_comp > $archive_size || $block_uncomp < 0) {
+                if ($block_comp < 0 || $block_comp > $archive_size || $block_uncomp <= 0) {
                     if ($out_fh !== null) {
                         $out_fh->close();
                     }
@@ -358,6 +367,12 @@ class Rmmigrate_Archive_Extractor
                         // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
                         throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::DAF_CORRUPT), esc_html__('DAF archive block is corrupt.', 'rosenheinrich-multisite-migrate'));
                     }
+                    if (strlen($out) !== $block_uncomp) {
+                        $out_fh->close();
+                        $fh->close();
+                        // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+                        throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::DAF_CORRUPT), esc_html__('DAF archive block is corrupt.', 'rosenheinrich-multisite-migrate'));
+                    }
                     // After soft timeouts, write in smaller appends to reduce LOCK_EX stalls.
                     $write_chunk = $timeouts > 0 ? 524288 : strlen($out);
                     $out_len = strlen($out);
@@ -371,6 +386,7 @@ class Rmmigrate_Archive_Extractor
                     }
                 }
                 $bytes_done += $block_uncomp;
+                $daf_slice_first_block = false;
             }
 
             if ($out_fh !== null) {

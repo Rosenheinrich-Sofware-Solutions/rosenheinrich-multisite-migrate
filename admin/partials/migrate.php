@@ -4,12 +4,16 @@ if (!defined('ABSPATH')) {
 }
 
 $rmmigrate_migrate_tab = $rmmigrate_migrate_tab ?? Rmmigrate_Request_Input::get_key('tab', 'import');
+$rmmigrate_is_network = $rmmigrate_is_network ?? false;
 $rmmigrate_base_url = Rmmigrate_Admin_Router::admin_url('multisite-migrate-migrate', array(), $rmmigrate_is_network);
 $rmmigrate_tabs = array(
     'import'        => __('Import', 'rosenheinrich-multisite-migrate'),
     'recovery'      => __('Recovery', 'rosenheinrich-multisite-migrate'),
     'searchreplace' => __('Search & Replace', 'rosenheinrich-multisite-migrate'),
 );
+if (!isset($rmmigrate_tabs[$rmmigrate_migrate_tab])) {
+    $rmmigrate_migrate_tab = 'import';
+}
 $rmmigrate_active_tab = $rmmigrate_migrate_tab;
 include RMMIGRATE_PATH . 'admin/partials/layout/tabs.php';
 

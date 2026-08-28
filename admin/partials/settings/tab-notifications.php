@@ -29,11 +29,9 @@ $rmmigrate_default_email = Rmmigrate_Settings::default_admin_email(
 
     <table class="form-table">
         <tr>
-            <th scope="row"><?php esc_html_e('Enable email notifications', 'rosenheinrich-multisite-migrate'); ?></th>
+            <th scope="row"><label for="email_enabled"><?php esc_html_e('Enable email notifications', 'rosenheinrich-multisite-migrate'); ?></label></th>
             <td>
-                <label>
-                    <input type="checkbox" name="email_enabled" value="1" <?php checked(!empty($rmmigrate_settings['email_enabled'])); ?>>
-                </label>
+                <input type="checkbox" name="email_enabled" id="email_enabled" value="1" <?php checked(!empty($rmmigrate_settings['email_enabled'])); ?>>
             </td>
         </tr>
         <tr>

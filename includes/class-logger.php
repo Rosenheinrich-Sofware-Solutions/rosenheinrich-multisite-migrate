@@ -14,25 +14,29 @@ class Rmmigrate_Logger
         self::$job_id = $job_id;
     }
 
+    private static function log_to(int $job_id, string $message): void
+    {
+        Rmmigrate_Plugin::ensure_backup_root();
+        $path = Rmmigrate_Activity_Log::job_log_path($job_id);
+        if ($path === '') {
+            return;
+        }
+        $line = gmdate('Y-m-d H:i:s') . ' UTC ' . RMMIGRATE_IO::redact_log_message($message) . "\n";
+        Rmmigrate_Filesystem::put_contents($path, $line, FILE_APPEND | LOCK_EX);
+        Rmmigrate_Log_Rotator::maybe_rotate($path);
+    }
+
     public static function log(string $message): void
     {
         if (self::$job_id === null) {
             return;
         }
-        Rmmigrate_Plugin::ensure_backup_root();
-        $path = Rmmigrate_Activity_Log::job_log_path(self::$job_id);
-        if ($path === '') {
-            return;
-        }
-        $line = gmdate('Y-m-d g:i:s a') . ' UTC ' . RMMIGRATE_IO::redact_log_message($message) . "\n";
-        Rmmigrate_Filesystem::put_contents($path, $line, FILE_APPEND | LOCK_EX);
-        Rmmigrate_Log_Rotator::maybe_rotate($path);
+        self::log_to(self::$job_id, $message);
     }
 
     public static function log_job(int $job_id, string $message): void
     {
-        self::for_job($job_id);
-        self::log($message);
+        self::log_to($job_id, $message);
     }
 
     /**
@@ -83,12 +87,15 @@ class Rmmigrate_Logger
     {
         Rmmigrate_Plugin::ensure_backup_root();
         $path = Rmmigrate_Activity_Log::system_log_path();
-        $line = gmdate('Y-m-d g:i:s a') . ' UTC ' . RMMIGRATE_IO::redact_log_message($message) . "\n";
-        Rmmigrate_Filesystem::put_contents($path, $line, FILE_APPEND | LOCK_EX);
-        Rmmigrate_Log_Rotator::maybe_rotate($path);
         Rmmigrate_Activity_Log::record('system', RMMIGRATE_IO::redact_log_message($message), $status, array(
             'job_id'  => (int) ($context['job_id'] ?? 0),
             'context' => RMMIGRATE_IO::redact_context($context),
         ));
+        if ($path === '') {
+            return;
+        }
+        $line = gmdate('Y-m-d H:i:s') . ' UTC ' . RMMIGRATE_IO::redact_log_message($message) . "\n";
+        Rmmigrate_Filesystem::put_contents($path, $line, FILE_APPEND | LOCK_EX);
+        Rmmigrate_Log_Rotator::maybe_rotate($path);
     }
 }

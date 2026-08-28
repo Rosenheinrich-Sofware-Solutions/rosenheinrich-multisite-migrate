@@ -28,6 +28,9 @@ class Rmmigrate_Extract_Engine
     /** @var bool|null */
     public static $test_shell_available = null;
 
+    /** @var string|null */
+    private static $resolved_unzip_binary = null;
+
     private static function filesystem_exists(string $path): bool
     {
         if (defined('RMMIGRATE_INSTALLER')) {
@@ -84,6 +87,9 @@ class Rmmigrate_Extract_Engine
         if (self::$test_unzip_binary !== null) {
             return self::$test_unzip_binary;
         }
+        if (self::$resolved_unzip_binary !== null) {
+            return self::$resolved_unzip_binary;
+        }
 
         $candidates = array('unzip');
         if (DIRECTORY_SEPARATOR === '/') {
@@ -94,16 +100,19 @@ class Rmmigrate_Extract_Engine
             if ($candidate === 'unzip') {
                 $path = self::shell_which('unzip');
                 if ($path !== '') {
-                    return $path;
+                    self::$resolved_unzip_binary = $path;
+                    return self::$resolved_unzip_binary;
                 }
                 continue;
             }
             if (is_executable($candidate)) {
-                return $candidate;
+                self::$resolved_unzip_binary = $candidate;
+                return self::$resolved_unzip_binary;
             }
         }
 
-        return '';
+        self::$resolved_unzip_binary = '';
+        return self::$resolved_unzip_binary;
     }
 
     /**
@@ -122,7 +131,7 @@ class Rmmigrate_Extract_Engine
         }
 
         if ( $requested === self::ENGINE_SHELL ) {
-            if ( self::blocking_engine_unsafe( $archive_path ) ) {
+            if ( self::archive_password( $state ) !== '' || self::blocking_engine_unsafe( $archive_path ) ) {
                 return self::ENGINE_ZIP_CHUNK;
             }
             return self::is_shell_unzip_available() ? self::ENGINE_SHELL : self::ENGINE_ZIP_CHUNK;
@@ -137,7 +146,11 @@ class Rmmigrate_Extract_Engine
             return self::ENGINE_ZIP_CHUNK;
         }
 
-        if ( ! self::blocking_engine_unsafe( $archive_path ) && self::is_shell_unzip_available() ) {
+        if (
+            self::archive_password( $state ) === ''
+            && ! self::blocking_engine_unsafe( $archive_path )
+            && self::is_shell_unzip_available()
+        ) {
             return self::ENGINE_SHELL;
         }
         if ( ! self::blocking_engine_unsafe( $archive_path ) && self::can_oneshot_zip( $archive_path, $state ) ) {
@@ -150,7 +163,7 @@ class Rmmigrate_Extract_Engine
     public static function blocking_engine_unsafe(string $archive_path): bool
     {
         if (!self::filesystem_exists($archive_path)) {
-            return false;
+            return true;
         }
         $size = (int) self::filesystem_filesize($archive_path);
         if ($size > self::BLOCKING_SAFE_BYTES) {
@@ -160,7 +173,7 @@ class Rmmigrate_Extract_Engine
         }
         $max_exec = (int) ini_get('max_execution_time');
 
-        return $max_exec !== 0;
+        return $max_exec > 0 && $max_exec < 60;
     }
 
     /**
@@ -183,7 +196,7 @@ class Rmmigrate_Extract_Engine
         }
 
         $max_exec = (int) ini_get( 'max_execution_time' );
-        if ( $max_exec !== 0 && $max_exec < 60 ) {
+        if ( $max_exec > 0 && $max_exec < 60 ) {
             return false;
         }
 
@@ -260,11 +273,21 @@ class Rmmigrate_Extract_Engine
             );
         }
 
-        $command = escapeshellarg( $binary ) . ' -o -qq';
         if ( $password !== '' ) {
-            $command .= ' -P ' . escapeshellarg( $password );
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+            throw Rmmigrate_Job_Exception::raise(
+                sanitize_key( Rmmigrate_Error_Codes::EXTRACT_FAILED ),
+                esc_html__(
+                    'Password-protected archives must use PHP extraction, not shell unzip.',
+                    'rosenheinrich-multisite-migrate'
+                )
+            );
         }
-        $command .= ' ' . escapeshellarg( $archive ) . ' -d ' . escapeshellarg( $dest ) . ' 2>&1';
+
+        $pre_extract_count = self::count_extracted_files( $dest );
+
+        $command = escapeshellarg( $binary ) . ' -o -qq ' . escapeshellarg( $archive ) . ' -d ' . escapeshellarg( $dest ) . ' 2>&1';
+        $command = self::wrap_shell_timeout( $command, self::shell_command_timeout_seconds() );
 
         $exit_code = 1;
         $output = self::run_shell_command( $command, $exit_code );
@@ -275,14 +298,22 @@ class Rmmigrate_Extract_Engine
             );
         }
 
-        if ( $exit_code !== 0 && ! self::shell_extract_looks_complete( $dest ) ) {
+        if ( $exit_code !== 0 ) {
+            $warning_only = ( $exit_code === 1 );
+            if ( ! $warning_only || ! self::shell_extract_looks_complete( $archive, $dest, $pre_extract_count ) ) {
+                // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+                throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::EXTRACT_FAILED),
+                    esc_html(
+                        trim($output) !== ''
+                            ? trim($output)
+                            : __('Shell unzip did not complete successfully.', 'rosenheinrich-multisite-migrate')
+                    )
+                );
+            }
+        } elseif ( ! self::shell_extract_looks_complete( $archive, $dest, $pre_extract_count ) ) {
             // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
             throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::EXTRACT_FAILED),
-                esc_html(
-                    trim($output) !== ''
-                        ? trim($output)
-                        : __('Shell unzip did not complete successfully.', 'rosenheinrich-multisite-migrate')
-                )
+                esc_html__('Shell unzip did not extract all archive entries.', 'rosenheinrich-multisite-migrate')
             );
         }
     }
@@ -311,21 +342,34 @@ class Rmmigrate_Extract_Engine
         }
 
         if ( $only_sql ) {
+            $names_to_extract = array();
             for ( $i = 0; $i < $zip->numFiles; $i++ ) {
                 $name = (string) $zip->getNameIndex( $i );
                 if ( $name !== 'database.sql' && $name !== 'manifest.json' ) {
                     continue;
                 }
                 if ( Rmmigrate_Path_Safety_Core::resolve_extract_dest( $dest, $name ) === null ) {
-                    continue;
-                }
-                if ( $zip->extractTo( $dest, array( $name ) ) === false ) {
                     $zip->close();
                     // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
                     throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::EXTRACT_FAILED),
-                        esc_html__('Cannot extract archive entry.', 'rosenheinrich-multisite-migrate')
+                        esc_html__('Archive contains an unsafe path.', 'rosenheinrich-multisite-migrate')
                     );
                 }
+                $names_to_extract[] = $name;
+            }
+            if ( $names_to_extract === array() ) {
+                $zip->close();
+                // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+                throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::EXTRACT_FAILED),
+                    esc_html__('Archive does not contain database.sql or manifest.json.', 'rosenheinrich-multisite-migrate')
+                );
+            }
+            if ( $zip->extractTo( $dest, $names_to_extract ) === false ) {
+                $zip->close();
+                // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+                throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::EXTRACT_FAILED),
+                    esc_html__('Cannot extract archive entry.', 'rosenheinrich-multisite-migrate')
+                );
             }
         } else {
             for ( $i = 0; $i < $zip->numFiles; $i++ ) {
@@ -334,7 +378,11 @@ class Rmmigrate_Extract_Engine
                     continue;
                 }
                 if ( Rmmigrate_Path_Safety_Core::resolve_extract_dest( $dest, $name ) === null ) {
-                    continue;
+                    $zip->close();
+                    // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+                    throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::EXTRACT_FAILED),
+                        esc_html__('Archive contains an unsafe path.', 'rosenheinrich-multisite-migrate')
+                    );
                 }
                 if ( $zip->extractTo( $dest, array( $name ) ) === false ) {
                     $zip->close();
@@ -404,7 +452,7 @@ class Rmmigrate_Extract_Engine
     private static function shell_functions_available(): bool
     {
         $disabled = (string) ini_get( 'disable_functions' );
-        $needed = array( 'shell_exec', 'exec', 'proc_open' );
+        $needed = array( 'exec' );
         foreach ( $needed as $function ) {
             if ( ! function_exists( $function ) ) {
                 return false;
@@ -428,12 +476,57 @@ class Rmmigrate_Extract_Engine
             return '';
         }
 
-        $line = trim( strtok( $output, "\r\n" ) );
+        $token = strtok( $output, "\r\n" );
+        $line = trim( $token !== false ? $token : '' );
         if ( $line === '' || ! is_executable( $line ) ) {
             return '';
         }
 
         return $line;
+    }
+
+    private static function shell_command_timeout_seconds(): int
+    {
+        $limit = (int) ini_get( 'max_execution_time' );
+        if ( $limit <= 0 ) {
+            return 300;
+        }
+
+        return max( 30, $limit - 10 );
+    }
+
+    private static function resolve_timeout_binary(): string
+    {
+        if ( DIRECTORY_SEPARATOR === '\\' ) {
+            return '';
+        }
+
+        foreach ( array( '/usr/bin/timeout', '/bin/timeout' ) as $candidate ) {
+            if ( is_executable( $candidate ) ) {
+                return $candidate;
+            }
+        }
+
+        if ( ! self::shell_functions_available() ) {
+            return '';
+        }
+
+        $line = trim( (string) self::run_shell_command( 'command -v timeout 2>/dev/null' ) );
+        if ( $line === '' || ! is_executable( $line ) ) {
+            return '';
+        }
+
+        return $line;
+    }
+
+    private static function wrap_shell_timeout( string $command, int $seconds ): string
+    {
+        $timeout = self::resolve_timeout_binary();
+        if ( $timeout === '' || $seconds <= 0 ) {
+            return $command;
+        }
+
+        return escapeshellarg( $timeout ) . ' ' . (int) $seconds . 's ' . $command;
     }
 
     private static function run_shell_command( string $command, ?int &$exit_code = null ): ?string
@@ -446,9 +539,7 @@ class Rmmigrate_Extract_Engine
         $code = 1;
         // phpcs:ignore Squiz.PHP.DiscouragedFunctions.Discouraged -- Standalone installer: host capability probe requires shell function check.
         exec( $command, $lines, $code );
-        if ( $exit_code !== null ) {
-            $exit_code = $code;
-        }
+        $exit_code = $code;
 
         return implode( "\n", $lines );
     }
@@ -491,6 +582,21 @@ class Rmmigrate_Extract_Engine
             if ( $name === '' || substr( $name, -1 ) === '/' ) {
                 continue;
             }
+            $opsys = 0;
+            $external_attr = 0;
+            if ( $zip->getExternalAttributesIndex( $i, $opsys, $external_attr ) ) {
+                $opsys = (int) $opsys;
+                if ( $opsys === ZipArchive::OPSYS_UNIX ) {
+                    $mode = ( (int) $external_attr >> 16 ) & 0xFFFF;
+                    if ( ( $mode & 0170000 ) === 0120000 ) {
+                        $zip->close();
+                        // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+                        throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::EXTRACT_FAILED),
+                            esc_html__('Archive contains a symlink entry.', 'rosenheinrich-multisite-migrate')
+                        );
+                    }
+                }
+            }
             if ( Rmmigrate_Path_Safety_Core::resolve_extract_dest( $dest, $name ) === null ) {
                 $zip->close();
                 // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
@@ -503,7 +609,6 @@ class Rmmigrate_Extract_Engine
     }
 
     private static function assert_safe_shell_path( string $path ): void
-
     {
         if ( $path === '' || strpbrk( $path, "\0\r\n" ) !== false ) {
             // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
@@ -513,11 +618,76 @@ class Rmmigrate_Extract_Engine
         }
     }
 
-    private static function shell_extract_looks_complete( string $dest ): bool
+    private static function shell_extract_looks_complete( string $archive, string $dest, int $pre_extract_count = 0 ): bool
     {
-        return self::filesystem_exists( $dest . '/database.sql' )
-            || self::filesystem_exists( $dest . '/manifest.json' )
-            || self::dest_has_files( $dest );
+        if ( ! class_exists( 'ZipArchive' ) ) {
+            return self::filesystem_exists( $dest . '/database.sql' )
+                || self::filesystem_exists( $dest . '/manifest.json' )
+                || self::dest_has_files( $dest );
+        }
+
+        $zip = new ZipArchive();
+        if ( $zip->open( $archive ) !== true ) {
+            return false;
+        }
+
+        $file_entries = 0;
+        $complete = true;
+        for ( $i = 0; $i < $zip->numFiles; $i++ ) {
+            $name = (string) $zip->getNameIndex( $i );
+            if ( $name === '' || substr( $name, -1 ) === '/' ) {
+                continue;
+            }
+            $file_entries++;
+            $resolved = Rmmigrate_Path_Safety_Core::resolve_extract_dest( $dest, $name );
+            if ( $resolved === null || ! self::filesystem_exists( $resolved ) ) {
+                $complete = false;
+                break;
+            }
+        }
+        $zip->close();
+
+        if ( $file_entries <= 0 ) {
+            return self::dest_has_files( $dest );
+        }
+
+        return $complete;
+    }
+
+    private static function count_archive_file_entries( ZipArchive $zip ): int
+    {
+        $count = 0;
+        for ( $i = 0; $i < $zip->numFiles; $i++ ) {
+            $name = (string) $zip->getNameIndex( $i );
+            if ( $name !== '' && substr( $name, -1 ) !== '/' ) {
+                $count++;
+            }
+        }
+
+        return $count;
+    }
+
+    private static function count_extracted_files( string $dest ): int
+    {
+        if ( ! is_dir( $dest ) ) {
+            return 0;
+        }
+
+        $count = 0;
+        try {
+            $iterator = new RecursiveIteratorIterator(
+                new RecursiveDirectoryIterator( $dest, RecursiveDirectoryIterator::SKIP_DOTS )
+            );
+            foreach ( $iterator as $file ) {
+                if ( $file->isFile() ) {
+                    $count++;
+                }
+            }
+        } catch ( Exception $e ) {
+            return 0;
+        }
+
+        return $count;
     }
 
     private static function dest_has_files( string $dest ): bool

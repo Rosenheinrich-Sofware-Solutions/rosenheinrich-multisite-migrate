@@ -29,11 +29,11 @@ if (!defined('ABSPATH')) {
         </p>
         <div class="mm-setup-card__actions mm-setup-optin__choices"<?php echo !empty($rmmigrate_optin_done) ? ' hidden' : ''; ?>>
             <label class="mm-setup-optin-choice">
-                <input type="checkbox" class="mm-setup-optin-email" value="1" checked="checked" />
+                <input type="checkbox" class="mm-setup-optin-email" value="1" <?php checked(!empty($rmmigrate_optin_done) ? !empty($rmmigrate_setup_state['newsletter_opted_in']) : true); ?> />
                 <span><?php esc_html_e('Receive product emails about updates, tips, and occasional offers', 'rosenheinrich-multisite-migrate'); ?></span>
             </label>
             <label class="mm-setup-optin-choice">
-                <input type="checkbox" class="mm-setup-optin-telemetry" value="1" checked="checked" />
+                <input type="checkbox" class="mm-setup-optin-telemetry" value="1" <?php checked(!empty($rmmigrate_optin_done) ? Rmmigrate_Telemetry::has_consent() : true); ?> />
                 <span><?php esc_html_e('Share anonymous usage signals to help improve Multisite Migrate', 'rosenheinrich-multisite-migrate'); ?></span>
             </label>
         </div>
@@ -43,7 +43,7 @@ if (!defined('ABSPATH')) {
         <details class="mm-setup-disclosure">
             <summary><?php esc_html_e('What we may collect when you opt in', 'rosenheinrich-multisite-migrate'); ?></summary>
             <div class="mm-setup-disclosure__section">
-                <h3 class="mm-setup-disclosure__heading"><?php esc_html_e('If you allow email notifications', 'rosenheinrich-multisite-migrate'); ?></h3>
+                <h3 class="mm-setup-disclosure__heading"><?php esc_html_e('If you allow product emails', 'rosenheinrich-multisite-migrate'); ?></h3>
                 <ul class="mm-setup-disclosure__list">
                     <?php foreach ($rmmigrate_disclosure as $rmmigrate_row) : ?>
                         <li>

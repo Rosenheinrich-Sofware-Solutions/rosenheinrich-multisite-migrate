@@ -35,7 +35,7 @@ final class Rmmigrate_Cleanup_Service
         $deleted_count = count($result['deleted']);
         $failed_count = count($result['failed']);
 
-        if ($deleted_count > 0) {
+        if ($deleted_count > 0 || $failed_count > 0) {
             Rmmigrate_Activity_Log::record(
                 'install_cleanup',
                 sprintf(

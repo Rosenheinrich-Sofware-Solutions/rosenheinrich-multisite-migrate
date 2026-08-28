@@ -80,7 +80,11 @@ if (!function_exists('rmmigrate_dashboard_widget_is_job')) {
                         continue;
                     } ?>
                     <li>
-                        <a href="<?php echo esc_url(add_query_arg('job_id', $rmmigrate_widget_job->get_id(), $rmmigrate_widget_archives_url)); ?>">
+                        <?php if ($rmmigrate_widget_archives_url !== '') : ?>
+                            <a href="<?php echo esc_url(add_query_arg('job_id', $rmmigrate_widget_job->get_id(), $rmmigrate_widget_archives_url)); ?>">
+                        <?php else : ?>
+                            <span class="mm-dashboard-widget-job-row">
+                        <?php endif; ?>
                             <span class="dashicons dashicons-yes-alt"></span>
                             <span>
                                 <strong>#<?php echo (int) $rmmigrate_widget_job->get_id(); ?></strong>
@@ -99,7 +103,11 @@ if (!function_exists('rmmigrate_dashboard_widget_is_job')) {
                                 );
                                 ?>
                             </span>
-                        </a>
+                        <?php if ($rmmigrate_widget_archives_url !== '') : ?>
+                            </a>
+                        <?php else : ?>
+                            </span>
+                        <?php endif; ?>
                     </li>
                 <?php endforeach; ?>
             </ul>

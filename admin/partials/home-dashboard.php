@@ -23,7 +23,10 @@ if (!$rmmigrate_is_network && is_multisite()) {
     $rmmigrate_failed_args['scope'] = Rmmigrate_Multisite_Scope::SCOPE_SUBSITE;
     $rmmigrate_failed_args['blog_id'] = get_current_blog_id();
 }
-$rmmigrate_failed_jobs = Rmmigrate_Job::list_jobs($rmmigrate_failed_args);
+$rmmigrate_failed_count = Rmmigrate_Snap_DB::jobs_count_rows($rmmigrate_failed_args);
+$rmmigrate_failed_display = $rmmigrate_failed_count > 5
+    ? '5+'
+    : (string) $rmmigrate_failed_count;
 
 $rmmigrate_scope_label = __('Full network', 'rosenheinrich-multisite-migrate');
 if (is_multisite()) {
@@ -161,14 +164,20 @@ if (is_multisite()) {
             </div>
             
             <div class="mm-network-stat-item">
-                <span class="mm-network-stat-value mm-stat-value-text"><?php echo esc_html($rmmigrate_scope_label); ?></span>
+                <span class="mm-network-stat-value mm-stat-value-text"><?php
+                if (is_object($rmmigrate_last) && method_exists($rmmigrate_last, 'get_display_scope')) {
+                    echo esc_html($rmmigrate_last->get_display_scope());
+                } else {
+                    esc_html_e('—', 'rosenheinrich-multisite-migrate');
+                }
+                ?></span>
                 <span class="mm-network-stat-label"><?php esc_html_e('Last backup scope', 'rosenheinrich-multisite-migrate'); ?></span>
             </div>
             
-            <?php if (!empty($rmmigrate_failed_jobs)) : ?>
+            <?php if ($rmmigrate_failed_count > 0) : ?>
                 <div class="mm-network-stat-item mm-status-warn mm-stat-full-width">
                     <span class="mm-network-stat-value">
-                        <?php echo esc_html(count($rmmigrate_failed_jobs)); ?>
+                        <?php echo esc_html($rmmigrate_failed_display); ?>
                     </span>
                     <span class="mm-network-stat-label"><?php esc_html_e('Failed jobs', 'rosenheinrich-multisite-migrate'); ?></span>
                     <a href="<?php echo esc_url($rmmigrate_failed_url); ?>" class="mm-stat-link"><?php esc_html_e('View failed jobs', 'rosenheinrich-multisite-migrate'); ?></a>

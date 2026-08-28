@@ -3,7 +3,7 @@
  * Plugin Name:       Rosenheinrich Multisite Migrate – Backup, Restore & AI (MCP)
  * Plugin URI:        https://multisitemigrate.rosenheinrich.com/
  * Description:       Back up, restore and migrate single sites or multisite networks. Free, portable archives, search & replace, plus AI/MCP tools.
- * Version:           1.1.9
+ * Version:           1.2.0
  * Requires at least: 6.9
  * Requires PHP:      7.4
  * Author:            Rosenheinrich Software Solutions
@@ -28,6 +28,10 @@ if (!is_file($rmmigrate_bootstrap_file)) {
 }
 require_once $rmmigrate_bootstrap_file;
 
+if (!class_exists('Rmmigrate_Bootstrap', false)) {
+    return;
+}
+
 if (!Rmmigrate_Bootstrap::can_run(__FILE__)) {
     return;
 }
@@ -41,7 +45,7 @@ if (!defined('RMMIGRATE_FREE')) {
 }
 
 if (!defined('RMMIGRATE_VERSION')) {
-    define('RMMIGRATE_VERSION', '1.1.9');
+    define('RMMIGRATE_VERSION', '1.2.0');
 }
 if (!defined('RMMIGRATE_PATH')) {
     define('RMMIGRATE_PATH', plugin_dir_path(__FILE__));
@@ -57,6 +61,7 @@ if (!defined('RMMIGRATE_DIR_NAME')) {
 }
 
 Rmmigrate_Bootstrap::mark_owner(Rmmigrate_Bootstrap::OWNER_FREE);
+Rmmigrate_Bootstrap::register_cron_schedules_filter();
 
 foreach (
     array(
@@ -72,15 +77,22 @@ foreach (
         return;
     }
     require_once $rmmigrate_file;
+    if (!class_exists($rmmigrate_class, false)) {
+        return;
+    }
 }
 
-register_activation_hook(__FILE__, array('Rmmigrate_Activator', 'activate'));
-register_deactivation_hook(
-    __FILE__,
-    static function (): void {
-        Rmmigrate_Deactivator::deactivate(plugin_basename(__FILE__));
-    }
-);
+if (class_exists('Rmmigrate_Activator', false)) {
+    register_activation_hook(__FILE__, array('Rmmigrate_Activator', 'activate'));
+}
+if (class_exists('Rmmigrate_Deactivator', false)) {
+    register_deactivation_hook(
+        __FILE__,
+        static function (): void {
+            Rmmigrate_Deactivator::deactivate(plugin_basename(__FILE__));
+        }
+    );
+}
 
 add_action(
     'plugins_loaded',
@@ -90,6 +102,9 @@ add_action(
             return;
         }
         require_once $rmmigrate_plugin_file;
+        if (!class_exists('Rmmigrate_Plugin', false)) {
+            return;
+        }
         Rmmigrate_Plugin::instance()->run();
     },
     0

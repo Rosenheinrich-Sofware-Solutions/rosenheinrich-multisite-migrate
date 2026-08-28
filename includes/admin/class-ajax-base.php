@@ -106,8 +106,6 @@ trait Rmmigrate_Ajax_Base
     {
         if (is_multisite() && is_network_admin()) {
             self::assert_network_management();
-        } elseif (is_multisite() && !self::user_can_import()) {
-            wp_send_json_error(array('message' => __('You do not have permission to run imports.', 'rosenheinrich-multisite-migrate')), 403);
         }
         if (!self::user_can_import()) {
             wp_send_json_error(array('message' => __('You do not have permission to run imports.', 'rosenheinrich-multisite-migrate')), 403);
@@ -153,8 +151,16 @@ trait Rmmigrate_Ajax_Base
             }
             $plain_path = $path . '.import-probe.tmp';
             Rmmigrate_Archive_Encryption::set_runtime_passphrase($archive_passphrase);
-            $decrypted = Rmmigrate_Archive_Encryption::decrypt_file($path, $plain_path);
-            Rmmigrate_Archive_Encryption::clear_runtime_passphrase();
+            $decrypted = false;
+            try {
+                $decrypted = Rmmigrate_Archive_Encryption::decrypt_file($path, $plain_path);
+            } finally {
+                if (!$decrypted) {
+                    Rmmigrate_Filesystem::delete($plain_path);
+                    Rmmigrate_Filesystem::delete($path);
+                }
+                Rmmigrate_Archive_Encryption::clear_runtime_passphrase();
+            }
             if (!$decrypted || !Rmmigrate_Filesystem::exists($plain_path)) {
                 Rmmigrate_Filesystem::delete($plain_path);
                 Rmmigrate_Filesystem::delete($path);
@@ -235,6 +241,14 @@ trait Rmmigrate_Ajax_Base
         if (empty($context['service_code']) && $message !== '') {
             $context['service_code'] = Rmmigrate_Error_Codes::from_message($message);
         }
+        Rmmigrate_Error_Recorder::record(
+            array(
+                'code'     => (string) ($context['service_code'] ?? ''),
+                'message'  => $message,
+                'job_type' => sanitize_key($type),
+                'source'   => 'service',
+            )
+        );
         Rmmigrate_Telemetry::record_operation_error($type, $message, $job_id, $context);
         Rmmigrate_Logger::log_activity($type, $message, 'error', array(
             'job_id'  => $job_id,
@@ -292,7 +306,9 @@ trait Rmmigrate_Ajax_Base
     private static function prepare_binary_download_response(): void
     {
         while (ob_get_level() > 0) {
-            ob_end_clean();
+            if (ob_end_clean() === false) {
+                break;
+            }
         }
     }
 }

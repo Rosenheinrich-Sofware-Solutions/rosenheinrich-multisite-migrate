@@ -36,13 +36,23 @@ class Rmmigrate_Job
     public static function table_name(): string
     {
         global $wpdb;
-        return (is_object($wpdb) && !empty($wpdb->base_prefix) ? $wpdb->base_prefix : 'wp_') . 'rmmigrate_jobs';
+        return (is_object($wpdb) && !empty($wpdb->base_prefix) ? $wpdb->base_prefix : '') . 'rmmigrate_jobs';
     }
 
     /**
      * @param array<string,mixed> $args
      */
     public static function create(array $args): self
+    {
+        return self::with_create_lock(function () use ($args) {
+            return self::create_unlocked($args);
+        });
+    }
+
+    /**
+     * @param array<string,mixed> $args
+     */
+    private static function create_unlocked(array $args): self
     {
         global $wpdb;
 
@@ -56,7 +66,7 @@ class Rmmigrate_Job
         $now = current_time('mysql', true);
         $scope = $args['scope'] ?? Rmmigrate_Multisite_Scope::SCOPE_NETWORK;
         $included_blog_ids = array_values(array_map('intval', (array) ($args['included_blogs'] ?? array())));
-        $excluded = $args['excluded_blogs'] ?? array();
+        $excluded = array_values(array_map('intval', (array) ($args['excluded_blogs'] ?? array())));
         if ($scope === Rmmigrate_Multisite_Scope::SCOPE_NETWORK_INCLUDED && $included_blog_ids !== array()) {
             // Store the selected subsites in progress — not as an inverted exclude
             // list that can exceed the TEXT column on large networks.
@@ -69,11 +79,7 @@ class Rmmigrate_Job
 
         $backup_profile = $args['backup_profile'] ?? 'full';
         $backup_type = 'full';
-        $parent_job_id = 0;
         $destination = 'local';
-
-        $triggered_by = (string) ($args['triggered_by'] ?? 'manual');
-        $backup_intent = 'manual';
 
         $progress_init = array(
             'step'              => 'init',
@@ -81,8 +87,8 @@ class Rmmigrate_Job
             'excluded_tables'   => array_values(array_filter(array_map('trim', (array) ($args['excluded_tables'] ?? array())))),
             'exclude_log_tables'=> !empty($args['exclude_log_tables']),
             'exclude_revisions' => !empty($args['exclude_revisions']),
-            'backup_intent'     => $backup_intent,
-            'include_wp_core'   => $backup_intent === 'migration',
+            'backup_intent'     => 'manual',
+            'include_wp_core'   => false,
             'log_token'         => Rmmigrate_Activity_Log::generate_log_token(),
         );
         // Explicit per-backup override from the wizard wins over both the
@@ -115,10 +121,6 @@ class Rmmigrate_Job
             'updated_at'       => $now,
         );
         $formats = array('%d', '%s', '%s', '%s', '%s', '%d', '%s', '%d', '%s', '%s', '%s', '%s', '%s', '%s');
-        if ($parent_job_id > 0) {
-            $row['parent_job_id'] = $parent_job_id;
-            $formats[] = '%d';
-        }
 
         $inserted = $wpdb->insert(self::table_name(), $row, $formats);
         if ($inserted === false) {
@@ -196,7 +198,7 @@ class Rmmigrate_Job
         $blog_id = is_array($manifest) && isset($manifest['blog_id'])
             ? (int) $manifest['blog_id']
             : get_current_blog_id();
-        $wpdb->insert(
+        $inserted = $wpdb->insert(
             self::table_name(),
             array(
                 'blog_id'          => $blog_id,
@@ -217,6 +219,12 @@ class Rmmigrate_Job
             ),
             array('%d', '%s', '%s', '%d', '%s', '%s', '%d', '%s', '%s', '%s', '%s', '%s')
         );
+        if ($inserted === false) {
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Structured service exception payload.
+            throw new Rmmigrate_Service_Exception(
+                esc_html(__('Failed to register import.', 'rosenheinrich-multisite-migrate')),
+                array(), sanitize_key(Rmmigrate_Error_Codes::IMPORT_REGISTER_FAILED));
+        }
         $job = self::get((int) $wpdb->insert_id);
         if ($job === null) {
             // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Structured service exception payload.
@@ -231,6 +239,16 @@ class Rmmigrate_Job
      * @param array<string,mixed> $options
      */
     public static function create_restore(int $source_job_id, string $mode, array $options = array()): self
+    {
+        return self::with_create_lock(function () use ($source_job_id, $mode, $options) {
+            return self::create_restore_unlocked($source_job_id, $mode, $options);
+        });
+    }
+
+    /**
+     * @param array<string,mixed> $options
+     */
+    private static function create_restore_unlocked(int $source_job_id, string $mode, array $options = array()): self
     {
         global $wpdb;
 
@@ -333,7 +351,7 @@ class Rmmigrate_Job
             }
         }
 
-        $wpdb->insert(
+        $inserted = $wpdb->insert(
             self::table_name(),
             array(
                 'blog_id'         => $source->get_blog_id(),
@@ -354,6 +372,12 @@ class Rmmigrate_Job
             ),
             array('%d', '%s', '%s', '%d', '%s', '%s', '%s', '%d', '%s', '%s', '%s', '%s', '%d', '%s', '%s')
         );
+        if ($inserted === false) {
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Structured service exception payload.
+            throw new Rmmigrate_Service_Exception(
+                esc_html(__('Failed to create restore job.', 'rosenheinrich-multisite-migrate')),
+                array(), sanitize_key(Rmmigrate_Error_Codes::JOB_CREATE_FAILED));
+        }
 
         $job = self::get((int) $wpdb->insert_id);
         if ($job === null) {
@@ -411,6 +435,55 @@ class Rmmigrate_Job
             return null;
         }
         return self::get($id);
+    }
+
+    /**
+     * @template T
+     * @param callable():T $callback
+     * @return T
+     */
+    private static function with_create_lock(callable $callback)
+    {
+        $lock = self::acquire_create_lock();
+        if ($lock === false) {
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Structured service exception payload.
+            throw new Rmmigrate_Service_Exception(
+                esc_html(__('A backup or restore is already in progress.', 'rosenheinrich-multisite-migrate')),
+                array(), sanitize_key(Rmmigrate_Error_Codes::ACTIVE_JOB_CONFLICT));
+        }
+        try {
+            return $callback();
+        } finally {
+            Rmmigrate_Filesystem::release_lock($lock);
+            Rmmigrate_Filesystem::fclose_raw($lock);
+        }
+    }
+
+    /**
+     * @return resource|false
+     */
+    private static function acquire_create_lock()
+    {
+        Rmmigrate_Plugin::ensure_backup_root();
+        $lock_path = trailingslashit(Rmmigrate_Plugin::backups_dir()) . 'jobs/.create.lock';
+        if (!Rmmigrate_Filesystem::ensure_directory(dirname($lock_path))) {
+            return false;
+        }
+        for ($attempt = 0; $attempt < 10; $attempt++) {
+            // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen -- Job-create mutex for concurrent backup/restore starts.
+            $fh = @fopen($lock_path, 'c+');
+            if ($fh === false) {
+                return false;
+            }
+            if (Rmmigrate_Filesystem::try_exclusive_lock($fh)) {
+                return $fh;
+            }
+            // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Release unacquired create lock handle before retry.
+            fclose($fh);
+            usleep(50000 * ($attempt + 1));
+        }
+
+        return false;
     }
 
     public static function stale_threshold_seconds(): int
@@ -589,8 +662,11 @@ class Rmmigrate_Job
         $blog_id = (int) ($error['blog_id'] ?? 0);
 
         if ($scope === Rmmigrate_Multisite_Scope::SCOPE_SUBSITE) {
-            if ($is_network || !is_multisite()) {
+            if ($is_network) {
                 return current_user_can('manage_network') ? $error : array();
+            }
+            if (!is_multisite()) {
+                return $error;
             }
 
             return $blog_id === get_current_blog_id() ? $error : array();
@@ -858,7 +934,10 @@ class Rmmigrate_Job
      */
     public function get_excluded_blogs(): array
     {
-        $raw = $this->data['excluded_blogs'] ?? '[]';
+        $raw = $this->data['excluded_blogs'] ?? '';
+        if ($raw === '' || $raw === null) {
+            $raw = '[]';
+        }
         $decoded = json_decode($raw, true);
         return is_array($decoded) ? array_map('intval', $decoded) : array();
     }
@@ -959,8 +1038,24 @@ class Rmmigrate_Job
                 }
             }
         }
+        if ($status === self::STATUS_CANCELLED) {
+            $fields['completed_at'] = current_time('mysql', true);
+            $formats[] = '%s';
+        }
         if (($status === self::STATUS_ERROR || ($status === self::STATUS_COMPLETE && !$this->is_restore())) && $error !== null) {
-            update_site_option('rmmigrate_last_error', $this->build_last_error_payload($error));
+            $payload = $this->build_last_error_payload($error);
+            update_site_option('rmmigrate_last_error', $payload);
+            if ($status === self::STATUS_ERROR) {
+                Rmmigrate_Error_Recorder::record(
+                    array(
+                        'code'     => (string) ($payload['code'] ?? ''),
+                        'message'  => (string) ($payload['message'] ?? ''),
+                        'job_type' => (string) ($payload['job_type'] ?? ''),
+                        'source'   => 'job',
+                        'time'     => (string) ($payload['time'] ?? ''),
+                    )
+                );
+            }
         }
         $updated = $wpdb->update(self::table_name(), $fields, array('id' => $this->get_id()), $formats, array('%d'));
         if ($updated === false) {
@@ -1087,14 +1182,14 @@ class Rmmigrate_Job
      */
     public function get_progress(): array
     {
-        $raw = $this->data['progress'] ?? '{}';
+        $raw = $this->data['progress'] ?? '';
+        if ($raw === '' || $raw === null) {
+            $raw = '{}';
+        }
         $decoded = json_decode($raw, true);
         return is_array($decoded) ? $decoded : array();
     }
 
-    /**
-     * @param array<string,mixed> $patch
-     */
     /**
      * @param array<string,mixed> $fields
      */
@@ -1117,6 +1212,9 @@ class Rmmigrate_Job
         $this->data = array_merge($this->data, $update);
     }
 
+    /**
+     * @param array<string,mixed> $patch
+     */
     public function update_progress(array $patch): void
     {
         $this->persist_progress(array_replace_recursive($this->get_progress(), $patch));
@@ -1232,7 +1330,7 @@ class Rmmigrate_Job
             self::STATUS_INIT         => 5,
             self::STATUS_DUMPING_DB   => 15,
             self::STATUS_DB_DONE      => 30,
-            self::STATUS_ARCHIVING    => 50,
+            self::STATUS_ARCHIVING    => 30,
             self::STATUS_ARCHIVE_DONE => 90,
         );
         $base = $map[$status] ?? 0;
@@ -1503,9 +1601,40 @@ class Rmmigrate_Job
     public function save_fields(array $fields): void
     {
         global $wpdb;
-        $fields['updated_at'] = current_time('mysql', true);
-        $wpdb->update(self::table_name(), $fields, array('id' => $this->get_id()));
-        $this->data = array_merge($this->data, $fields);
+        $allowed_formats = array(
+            'local_path'            => '%s',
+            'file_size'             => '%d',
+            'purge_delete_attempts' => '%d',
+        );
+        $update = array('updated_at' => current_time('mysql', true));
+        $formats = array('%s');
+        $memory = array();
+        foreach ($fields as $key => $value) {
+            if ($key === 'updated_at') {
+                continue;
+            }
+            if (!array_key_exists($key, $allowed_formats)) {
+                continue;
+            }
+            if ($key === 'purge_delete_attempts') {
+                // Request-scoped; not persisted — jobs table has no column.
+                $memory[$key] = (int) $value;
+                continue;
+            }
+            $update[$key] = $value;
+            $formats[] = $allowed_formats[$key];
+        }
+        $updated = $wpdb->update(
+            self::table_name(),
+            $update,
+            array('id' => $this->get_id()),
+            $formats,
+            array('%d')
+        );
+        if ($updated === false) {
+            self::log_db_write_failure('save_fields', $this->get_id());
+        }
+        $this->data = array_merge($this->data, $update, $memory);
     }
 
     /**

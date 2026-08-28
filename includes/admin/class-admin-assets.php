@@ -80,10 +80,8 @@ class Rmmigrate_Admin_Assets
 
         foreach (array('heartbeat', 'wp-auth-check') as $handle) {
             wp_dequeue_script($handle);
-            wp_deregister_script($handle);
         }
         wp_dequeue_style('wp-auth-check');
-        wp_deregister_style('wp-auth-check');
 
         foreach ((array) $wp_scripts->queue as $handle) {
             if (strpos((string) $handle, 'rmmigrate') === 0) {
@@ -93,7 +91,6 @@ class Rmmigrate_Admin_Assets
                 continue;
             }
             wp_dequeue_script($handle);
-            wp_deregister_script($handle);
         }
 
         foreach ((array) $wp_styles->queue as $handle) {
@@ -104,7 +101,6 @@ class Rmmigrate_Admin_Assets
                 continue;
             }
             wp_dequeue_style($handle);
-            wp_deregister_style($handle);
         }
     }
 
@@ -295,11 +291,14 @@ class Rmmigrate_Admin_Assets
         }
 
         $server_max = (int) wp_max_upload_size();
-        $safe_max = $server_max > 0 ? (int) max(131072, (int) floor($server_max / 2)) : 524288;
+        $safe_max = $server_max > 0
+            ? min((int) max(131072, (int) floor($server_max / 2)), $server_max)
+            : 524288;
 
         $localize = array(
             'ajaxUrl'             => admin_url('admin-ajax.php'),
             'nonce'               => wp_create_nonce('rmmigrate_admin'),
+            'siteUrl'             => home_url('/'),
             'setupDismissAction'  => 'rmmigrate_setup_wizard_dismiss_banner',
             'isNetwork'       => $is_network,
             'scope'           => is_multisite() ? Rmmigrate_Multisite_Scope::SCOPE_SUBSITE : Rmmigrate_Multisite_Scope::SCOPE_NETWORK,
@@ -341,6 +340,7 @@ class Rmmigrate_Admin_Assets
                 'installCleanupFailed' => __('Could not delete installation files.', 'rosenheinrich-multisite-migrate'),
                 'installCleanupScanFailed' => __('Could not scan for installation files.', 'rosenheinrich-multisite-migrate'),
                 'enterNewUrl'         => __('Enter a new URL.', 'rosenheinrich-multisite-migrate'),
+                'enterNewSiteUrl'     => __('Enter a valid new site URL (https://…).', 'rosenheinrich-multisite-migrate'),
                 'srPreviewTemplate'   => $sr_preview_template,
                 'srNoPairs'           => __('No replacement pairs generated for these URLs.', 'rosenheinrich-multisite-migrate'),
                 'failed'              => __('Failed', 'rosenheinrich-multisite-migrate'),
@@ -352,6 +352,9 @@ class Rmmigrate_Admin_Assets
                 'saveFailed'          => __('Save failed', 'rosenheinrich-multisite-migrate'),
                 'setupComplete'       => __('Setup complete', 'rosenheinrich-multisite-migrate'),
                 'activityDetails'     => __('Activity details', 'rosenheinrich-multisite-migrate'),
+                'eventSummary'        => __('Event summary', 'rosenheinrich-multisite-migrate'),
+                'file'                => __('File', 'rosenheinrich-multisite-migrate'),
+                'uploadId'            => __('Upload ID', 'rosenheinrich-multisite-migrate'),
                 'event'               => __('Event', 'rosenheinrich-multisite-migrate'),
                 'type'                => __('Type', 'rosenheinrich-multisite-migrate'),
                 'status'              => __('Status', 'rosenheinrich-multisite-migrate'),
@@ -382,13 +385,15 @@ class Rmmigrate_Admin_Assets
                 'labelScope'          => __('Scope', 'rosenheinrich-multisite-migrate'),
                 'labelProfile'        => __('Profile', 'rosenheinrich-multisite-migrate'),
                 'labelArchiveFormat'  => __('Archive format', 'rosenheinrich-multisite-migrate'),
-            'labelIncludeWpCore'  => __('Include WordPress core', 'rosenheinrich-multisite-migrate'),
-            'labelDestination'    => __('Destination', 'rosenheinrich-multisite-migrate'),
+                'labelIncludeWpCore'  => __('Include WordPress core', 'rosenheinrich-multisite-migrate'),
+                'labelDestination'    => __('Destination', 'rosenheinrich-multisite-migrate'),
                 'destLocal'           => __('Local — on this server', 'rosenheinrich-multisite-migrate'),
                 'edit'                => __('Edit', 'rosenheinrich-multisite-migrate'),
                 'selectSubsiteInclude' => __('Select at least one subsite to include.', 'rosenheinrich-multisite-migrate'),
                 'selectSubsiteExclude' => __('Select at least one subsite to exclude, or choose Full network.', 'rosenheinrich-multisite-migrate'),
                 'cannotExcludeAll'    => __('Cannot exclude every subsite. Use “Only selected subsites” to back up specific sites.', 'rosenheinrich-multisite-migrate'),
+                'subsiteSearchEmpty'  => __('No subsites matched your search.', 'rosenheinrich-multisite-migrate'),
+                'subsiteSearchAdd'    => __('Add', 'rosenheinrich-multisite-migrate'),
                 'backupComplete'      => __('Backup complete', 'rosenheinrich-multisite-migrate'),
                 'backupFailed'        => __('Backup failed', 'rosenheinrich-multisite-migrate'),
                 /* translators: %d: progress percentage */
@@ -433,6 +438,15 @@ class Rmmigrate_Admin_Assets
                 'loading'             => __('Loading…', 'rosenheinrich-multisite-migrate'),
                 'enabled'             => __('Enabled', 'rosenheinrich-multisite-migrate'),
                 'notSet'              => __('Not set', 'rosenheinrich-multisite-migrate'),
+                'reviewLabelType'     => __('Type', 'rosenheinrich-multisite-migrate'),
+                'reviewLabelMode'     => __('Mode', 'rosenheinrich-multisite-migrate'),
+                'reviewLabelSafetySnapshot' => __('Safety snapshot', 'rosenheinrich-multisite-migrate'),
+                'reviewLabelNewSiteUrl' => __('New site URL', 'rosenheinrich-multisite-migrate'),
+                'restoreTypeMigration' => __('Migration', 'rosenheinrich-multisite-migrate'),
+                'restoreTypeSameServer' => __('Same server', 'rosenheinrich-multisite-migrate'),
+                'restoreModeBoth'     => __('Database and files', 'rosenheinrich-multisite-migrate'),
+                'restoreModeDb'       => __('Database only', 'rosenheinrich-multisite-migrate'),
+                'restoreModeFiles'    => __('Files only', 'rosenheinrich-multisite-migrate'),
                 'copied'              => __('Copied', 'rosenheinrich-multisite-migrate'),
                 'close'               => __('Close', 'rosenheinrich-multisite-migrate'),
                 'dismiss'             => __('Dismiss', 'rosenheinrich-multisite-migrate'),

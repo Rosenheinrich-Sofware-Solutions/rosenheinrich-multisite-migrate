@@ -107,7 +107,7 @@ class Rmmigrate_Snap_DB
     /**
      * @param array<string,mixed>|null $offset
      */
-    public static function build_pk_where(string $table, array $pk_cols, $offset): string
+    public static function build_pk_where(array $pk_cols, $offset): string
     {
         global $wpdb;
         if ($offset === null || $pk_cols === array()) {
@@ -177,6 +177,11 @@ class Rmmigrate_Snap_DB
     }
 
     /**
+     * Fetch the next row from a mysqli result or a buffered list of rows.
+     *
+     * When $result is an array, it must be a list of rows (0..n-1), not a single
+     * associative row; the internal __mm_stack key is reserved for buffering.
+     *
      * @param mysqli_result|array<int,mixed>|false $result
      * @return array<string,mixed>|null
      */
@@ -186,10 +191,17 @@ class Rmmigrate_Snap_DB
             return $result->fetch_assoc();
         }
         if (is_array($result)) {
-            if (empty($result)) {
+            if (!isset($result['__mm_stack'])) {
+                if ($result === array()) {
+                    return null;
+                }
+                $result = array('__mm_stack' => array_reverse($result, false));
+            }
+            if ($result['__mm_stack'] === array()) {
+                $result = false;
                 return null;
             }
-            return array_shift($result);
+            return array_pop($result['__mm_stack']);
         }
 
         return null;
@@ -289,7 +301,7 @@ class Rmmigrate_Snap_DB
         return ($id === null || $id === '') ? null : (int) $id;
     }
 
-    public static function jobs_get_latest_import_id(): ?int
+    public static function jobs_get_latest_completed_backup_id(): ?int
     {
         global $wpdb;
         if (!is_object($wpdb) || !method_exists($wpdb, 'get_var')) {
@@ -307,6 +319,14 @@ class Rmmigrate_Snap_DB
         );
 
         return ($id === null || $id === '') ? null : (int) $id;
+    }
+
+    /**
+     * @deprecated 1.2.0 Use jobs_get_latest_completed_backup_id().
+     */
+    public static function jobs_get_latest_import_id(): ?int
+    {
+        return self::jobs_get_latest_completed_backup_id();
     }
 
     /**
@@ -345,12 +365,10 @@ class Rmmigrate_Snap_DB
 
     /**
      * @param array<string,mixed> $filters
-     * @return array<int,array<string,mixed>>
+     * @return array{0: string[], 1: array<int|string>}
      */
-    public static function jobs_list_rows(array $filters): array
+    private static function jobs_list_where(array $filters): array
     {
-        global $wpdb;
-        $table = self::jobs_table_sql();
         $where = array('1=1');
         $params = array();
 
@@ -424,6 +442,40 @@ class Rmmigrate_Snap_DB
             $where[] = "COALESCE(NULLIF(completed_at, ''), created_at) <= %s";
             $params[] = $filters['date_to'] . ' 23:59:59';
         }
+
+        return array($where, $params);
+    }
+
+    /**
+     * @param array<string,mixed> $filters
+     */
+    public static function jobs_count_rows(array $filters): int
+    {
+        global $wpdb;
+        $table = self::jobs_table_sql();
+        list($where, $params) = self::jobs_list_where($filters);
+        $sql = 'SELECT COUNT(*) FROM ' . $table . ' WHERE ' . implode(' AND ', $where);
+
+        if ($params === array()) {
+            // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- Plugin jobs table; identifier via quote_identifier(); no value placeholders.
+            $count = $wpdb->get_var($sql);
+        } else {
+            // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- Plugin jobs table; identifier via quote_identifier(); values use prepare().
+            $count = $wpdb->get_var($wpdb->prepare($sql, ...$params));
+        }
+
+        return max(0, (int) $count);
+    }
+
+    /**
+     * @param array<string,mixed> $filters
+     * @return array<int,array<string,mixed>>
+     */
+    public static function jobs_list_rows(array $filters): array
+    {
+        global $wpdb;
+        $table = self::jobs_table_sql();
+        list($where, $params) = self::jobs_list_where($filters);
 
         $limit = max(1, min(200, (int) ($filters['limit'] ?? 100)));
 

@@ -64,7 +64,7 @@ final class Rmmigrate_Abilities
     /**
      * @return array<string,mixed>
      */
-    private function mcp_meta(bool $readonly = true): array
+    private function mcp_meta(bool $readonly = true, ?array $write_annotations = null): array
     {
         $meta = array(
             'mcp' => array(
@@ -77,6 +77,8 @@ final class Rmmigrate_Abilities
                 'destructive' => false,
                 'idempotent'  => true,
             );
+        } elseif ($write_annotations !== null) {
+            $meta['annotations'] = $write_annotations;
         }
         return $meta;
     }
@@ -211,7 +213,11 @@ final class Rmmigrate_Abilities
                 ),
                 'execute_callback'    => array($this, 'execute_cancel_job'),
                 'permission_callback' => array($this, 'can_write_ops'),
-                'meta'                => $this->mcp_meta(false),
+                'meta'                => $this->mcp_meta(false, array(
+                    'readonly'    => false,
+                    'destructive' => true,
+                    'idempotent'  => true,
+                )),
             )
         );
     }
@@ -306,7 +312,11 @@ final class Rmmigrate_Abilities
                 ),
                 'execute_callback'    => array($this, 'execute_backup_now'),
                 'permission_callback' => array($this, 'can_write_ops'),
-                'meta'                => $this->mcp_meta(false),
+                'meta'                => $this->mcp_meta(false, array(
+                    'readonly'    => false,
+                    'destructive' => false,
+                    'idempotent'  => false,
+                )),
             )
         );
     }
@@ -368,7 +378,7 @@ final class Rmmigrate_Abilities
 
     /**
      * @param array<string,mixed> $input
-     * @return array<string,mixed>
+     * @return array<string,mixed>|\WP_Error
      */
     public function execute_backup_status($input = array())
     {
@@ -378,6 +388,23 @@ final class Rmmigrate_Abilities
             $job_id = null;
         }
         $want_detail = !empty($input['detail']) || $job_id !== null;
+        if ($job_id !== null) {
+            $job = Rmmigrate_Job::get($job_id);
+            if ($job === null) {
+                return new WP_Error(
+                    'rmmigrate_job_not_found',
+                    __('Job not found.', 'rosenheinrich-multisite-migrate'),
+                    array('status' => 404)
+                );
+            }
+            if (!Rmmigrate_Access::can_view_job($job)) {
+                return new WP_Error(
+                    'rmmigrate_forbidden',
+                    __('Permission denied.', 'rosenheinrich-multisite-migrate'),
+                    array('status' => 403)
+                );
+            }
+        }
         try {
             $status = Rmmigrate_Backup_Service::get_status($job_id);
         } catch (Rmmigrate_Service_Exception $e) {
@@ -453,7 +480,7 @@ final class Rmmigrate_Abilities
 
     /**
      * @param array<string,mixed> $input
-     * @return array<string,mixed>
+     * @return array<string,mixed>|\WP_Error
      */
     public function execute_list_archives($input = array())
     {
@@ -534,31 +561,7 @@ final class Rmmigrate_Abilities
         }
 
         if ($job_id > 0) {
-            $raw = Rmmigrate_Activity_Log::list_entries(500, 1, $type_filter);
-            $filtered = array();
-            foreach ((array) ($raw['entries'] ?? array()) as $entry) {
-                if (!is_array($entry)) {
-                    continue;
-                }
-                if ((int) ($entry['job_id'] ?? 0) !== $job_id) {
-                    continue;
-                }
-                $filtered[] = $entry;
-            }
-            $total = count($filtered);
-            $total_pages = $total > 0 ? (int) ceil($total / $per_page) : 1;
-            if ($page > $total_pages) {
-                $page = $total_pages;
-            }
-            $slice = array_slice($filtered, ($page - 1) * $per_page, $per_page);
-            $raw = array(
-                'entries'         => $slice,
-                'total'           => $total,
-                'page'            => $page,
-                'per_page'        => $per_page,
-                'total_pages'     => $total_pages,
-                'total_estimated' => !empty($raw['total_estimated']),
-            );
+            $raw = Rmmigrate_Activity_Log::list_entries($per_page, $page, $type_filter, '', '', $job_id);
         } else {
             $raw = Rmmigrate_Activity_Log::list_entries($per_page, $page, $type_filter);
         }
@@ -607,6 +610,21 @@ final class Rmmigrate_Abilities
                 'rmmigrate_job_required',
                 __('job_id is required.', 'rosenheinrich-multisite-migrate'),
                 array('status' => 400)
+            );
+        }
+        $job = Rmmigrate_Job::get($job_id);
+        if ($job === null) {
+            return new WP_Error(
+                'rmmigrate_job_not_found',
+                __('Job not found.', 'rosenheinrich-multisite-migrate'),
+                array('status' => 404)
+            );
+        }
+        if (!Rmmigrate_Access::can_view_job($job)) {
+            return new WP_Error(
+                'rmmigrate_forbidden',
+                __('Permission denied.', 'rosenheinrich-multisite-migrate'),
+                array('status' => 403)
             );
         }
         try {
@@ -689,6 +707,20 @@ final class Rmmigrate_Abilities
             $scope = Rmmigrate_Multisite_Scope::SCOPE_NETWORK;
         }
 
+        $allowed_scopes = array(
+            Rmmigrate_Multisite_Scope::SCOPE_NETWORK,
+            Rmmigrate_Multisite_Scope::SCOPE_NETWORK_FILTERED,
+            Rmmigrate_Multisite_Scope::SCOPE_NETWORK_INCLUDED,
+            Rmmigrate_Multisite_Scope::SCOPE_SUBSITE,
+        );
+        if (!in_array($scope, $allowed_scopes, true)) {
+            return new WP_Error(
+                'rmmigrate_invalid_scope',
+                __('Invalid backup scope.', 'rosenheinrich-multisite-migrate'),
+                array('status' => 400)
+            );
+        }
+
         $profile = isset($input['profile']) ? sanitize_key((string) $input['profile']) : 'full';
         if (!in_array($profile, array('full', 'db'), true)) {
             $profile = 'full';
@@ -715,8 +747,20 @@ final class Rmmigrate_Abilities
             'exclude_log_tables' => !empty($input['exclude_log_tables']),
             'exclude_revisions'  => !empty($input['exclude_revisions']),
         );
-        if (isset($input['exclude_tables'])) {
-            $payload['exclude_tables'] = $input['exclude_tables'];
+        if (isset($input['exclude_tables']) && is_array($input['exclude_tables'])) {
+            $exclude_tables = array();
+            foreach ($input['exclude_tables'] as $table) {
+                if (!is_scalar($table)) {
+                    continue;
+                }
+                $name = trim((string) $table);
+                if ($name !== '') {
+                    $exclude_tables[] = $name;
+                }
+            }
+            if ($exclude_tables !== array()) {
+                $payload['exclude_tables'] = $exclude_tables;
+            }
         }
 
         try {
@@ -826,6 +870,9 @@ final class Rmmigrate_Abilities
         }
         $out = array();
         foreach (wp_get_abilities() as $ability) {
+            if (!is_object($ability)) {
+                continue;
+            }
             $name = method_exists($ability, 'get_name') ? (string) $ability->get_name() : '';
             if ($name === '' || strpos($name, 'multisite-migrate/') !== 0) {
                 continue;

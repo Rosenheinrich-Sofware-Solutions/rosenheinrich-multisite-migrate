@@ -56,14 +56,12 @@ class Rmmigrate_SQL_Importer
             $set_queries = array();
         }
 
-        if ($offset > 0 && $set_queries !== array() && empty($import['sets_replayed'])) {
+        if ($offset > 0 && $set_queries !== array()) {
             foreach ($set_queries as $set_sql) {
                 if (is_string($set_sql) && $set_sql !== '') {
                     $this->execute_statement($set_sql);
                 }
             }
-            $import['sets_replayed'] = true;
-            $this->job->update_progress(array('import' => array('sets_replayed' => true)));
         }
 
         $handle = Rmmigrate_Filesystem::open($sql_path, 'rb');
@@ -77,10 +75,6 @@ class Rmmigrate_SQL_Importer
 
         $start = microtime(true);
         $executed = 0;
-
-        if (Rmmigrate_Engine_Config::sql_import_transactions()) {
-            $this->begin_import_transaction();
-        }
 
         try {
             while ((microtime(true) - $start) < $budget_sec) {
@@ -109,9 +103,10 @@ class Rmmigrate_SQL_Importer
                 }
 
                 $buffer .= $chunk;
-                while (($pos = $this->find_statement_end($buffer)) !== false) {
-                    $statement = substr($buffer, 0, $pos);
-                    $buffer = substr($buffer, $pos + 1);
+                $scan_pos = 0;
+                while (($pos = $this->find_statement_end($buffer, $scan_pos)) !== false) {
+                    $statement = substr($buffer, $scan_pos, $pos - $scan_pos);
+                    $scan_pos = $pos + 1;
                     $statement = trim($statement);
                     if ($statement !== '' && $this->is_delimiter_directive($statement)) {
                         continue;
@@ -126,6 +121,9 @@ class Rmmigrate_SQL_Importer
                         }
                     }
                 }
+                if ($scan_pos > 0) {
+                    $buffer = substr($buffer, $scan_pos);
+                }
 
                 $offset = (int) $handle->tell();
             }
@@ -137,7 +135,7 @@ class Rmmigrate_SQL_Importer
                     'offset'      => $offset,
                     'total'       => $total_bytes,
                     'rows'        => $rows_done + $executed,
-                    'set_queries' => $set_queries,
+                    'set_queries' => array_values(array_unique($set_queries)),
                 ),
             ));
             $this->commit_import_transaction();
@@ -190,16 +188,41 @@ class Rmmigrate_SQL_Importer
         }
     }
 
-    private function find_statement_end(string $buffer)
+    private function find_statement_end(string $buffer, int $start = 0)
     {
         $len = strlen($buffer);
         $in_string = false;
         $quote = '';
         $escaped = false;
+        $in_line_comment = false;
+        $in_block_comment = false;
 
-        for ($i = 0; $i < $len; $i++) {
+        for ($i = max(0, $start); $i < $len; $i++) {
             $ch = $buffer[$i];
+            if ($in_line_comment) {
+                if ($ch === "\n") {
+                    $in_line_comment = false;
+                }
+                continue;
+            }
+            if ($in_block_comment) {
+                if ($ch === '*' && $i + 1 < $len && $buffer[$i + 1] === '/') {
+                    $in_block_comment = false;
+                    $i++;
+                }
+                continue;
+            }
             if ($in_string) {
+                if ($quote === '`') {
+                    if ($ch === '`') {
+                        if ($i + 1 < $len && $buffer[$i + 1] === '`') {
+                            $i++;
+                            continue;
+                        }
+                        $in_string = false;
+                    }
+                    continue;
+                }
                 if ($escaped) {
                     $escaped = false;
                     continue;
@@ -211,6 +234,16 @@ class Rmmigrate_SQL_Importer
                 if ($ch === $quote) {
                     $in_string = false;
                 }
+                continue;
+            }
+            if (!$in_string && $ch === '-' && $i + 1 < $len && $buffer[$i + 1] === '-') {
+                $in_line_comment = true;
+                $i++;
+                continue;
+            }
+            if (!$in_string && $ch === '/' && $i + 1 < $len && $buffer[$i + 1] === '*') {
+                $in_block_comment = true;
+                $i++;
                 continue;
             }
             if ($ch === "'" || $ch === '"' || $ch === '`') {
@@ -227,11 +260,48 @@ class Rmmigrate_SQL_Importer
         return false;
     }
 
-    private function is_executable(string $statement): bool
+    private function strip_leading_sql_comments(string $statement): string
     {
         $trim = ltrim($statement);
+        $len = strlen($trim);
+        $i = 0;
+        while ($i < $len) {
+            while ($i < $len && ($trim[$i] === ' ' || $trim[$i] === "\t" || $trim[$i] === "\n" || $trim[$i] === "\r")) {
+                $i++;
+            }
+            if ($i >= $len) {
+                break;
+            }
+            if ($trim[$i] === '-' && $i + 1 < $len && $trim[$i + 1] === '-') {
+                while ($i < $len && $trim[$i] !== "\n") {
+                    $i++;
+                }
+                continue;
+            }
+            if ($trim[$i] === '/' && $i + 1 < $len && $trim[$i + 1] === '*') {
+                $i += 2;
+                while ($i + 1 < $len && !($trim[$i] === '*' && $trim[$i + 1] === '/')) {
+                    $i++;
+                }
+                if ($i + 1 < $len) {
+                    $i += 2;
+                }
+                continue;
+            }
+            break;
+        }
+
+        return substr($trim, $i);
+    }
+
+    private function is_executable(string $statement): bool
+    {
+        $trim = $this->strip_leading_sql_comments($statement);
         if ($trim === '') {
             return false;
+        }
+        if ($this->is_set_statement($trim)) {
+            return true;
         }
         if (strpos($trim, '--') === 0 || strpos($trim, '/*') === 0) {
             return false;
@@ -307,8 +377,9 @@ class Rmmigrate_SQL_Importer
 
     private function statement_table_name(string $statement): string
     {
+        $statement = $this->strip_leading_sql_comments($statement);
         if (preg_match(
-            '/^\s*(?:\/\*!\d+\s*)?(?:DROP\s+TABLE(?:\s+IF\s+EXISTS)?|CREATE\s+TABLE(?:\s+IF\s+NOT\s+EXISTS)?|INSERT\s+(?:IGNORE\s+)?INTO|REPLACE\s+INTO|UPDATE|ALTER\s+TABLE|LOCK\s+TABLES|TRUNCATE(?:\s+TABLE)?)\s+`?([a-zA-Z0-9_]+)`?/i',
+            '/^\s*(?:\/\*!\d+\s*)?(?:DROP\s+TABLE(?:\s+IF\s+EXISTS)?|CREATE\s+TABLE(?:\s+IF\s+NOT\s+EXISTS)?|INSERT\s+(?:IGNORE\s+)?INTO|REPLACE\s+INTO|UPDATE|ALTER\s+TABLE|LOCK\s+TABLES|TRUNCATE(?:\s+TABLE)?)\s+(?:`?[a-zA-Z0-9_]+`?\.)?`?([a-zA-Z0-9_]+)`?/i',
             $statement,
             $m
         )) {
@@ -328,29 +399,75 @@ class Rmmigrate_SQL_Importer
         if (!preg_match('/^\s*(?:\/\*!\d+\s*)?CREATE\s+TABLE/i', $statement)) {
             return $statement;
         }
+        $removed = false;
         $stripped = preg_replace(
             '/,?\s*CONSTRAINT\s+`[^`]+`\s+FOREIGN\s+KEY\s*\([^)]*\)\s*REFERENCES\s+`[^`]+`\s*\([^)]*\)(?:\s+ON\s+(?:DELETE|UPDATE)\s+(?:CASCADE|SET\s+NULL|RESTRICT|NO\s+ACTION|SET\s+DEFAULT))*/i',
             '',
-            $statement
+            $statement,
+            -1,
+            $constraint_count
         );
         if (!is_string($stripped)) {
             return $statement;
+        }
+        if ($constraint_count > 0) {
+            $removed = true;
         }
         $stripped = preg_replace(
             '/,?\s*FOREIGN\s+KEY\s*\([^)]*\)\s*REFERENCES\s+`[^`]+`\s*\([^)]*\)(?:\s+ON\s+(?:DELETE|UPDATE)\s+(?:CASCADE|SET\s+NULL|RESTRICT|NO\s+ACTION|SET\s+DEFAULT))*/i',
             '',
-            $stripped
+            $stripped,
+            -1,
+            $foreign_key_count
         );
         if (!is_string($stripped)) {
             return $statement;
         }
-        $cleaned = preg_replace('/,\s*([)\]])/', '$1', $stripped);
+        if ($foreign_key_count > 0) {
+            $removed = true;
+        }
+        if (!$removed) {
+            return $statement;
+        }
+        $open = strpos($stripped, '(');
+        if ($open === false) {
+            return $stripped;
+        }
+        $depth = 0;
+        $len = strlen($stripped);
+        $close = false;
+        for ($i = $open; $i < $len; $i++) {
+            if ($stripped[$i] === '(') {
+                $depth++;
+            } elseif ($stripped[$i] === ')') {
+                $depth--;
+                if ($depth === 0) {
+                    $close = $i;
+                    break;
+                }
+            }
+        }
+        if ($close === false) {
+            return $stripped;
+        }
+        $column_list = substr($stripped, $open + 1, $close - $open - 1);
+        $column_list = preg_replace('/,\s*,/', ',', $column_list) ?? $column_list;
+        $column_list = preg_replace('/,\s*$/', '', $column_list) ?? $column_list;
 
-        return is_string($cleaned) ? $cleaned : $stripped;
+        return substr($stripped, 0, $open + 1) . $column_list . substr($stripped, $close);
     }
 
     private function execute_statement(string $statement): void
     {
+        if ($this->is_implicit_commit_statement($statement)) {
+            $this->commit_import_transaction();
+        } elseif (
+            Rmmigrate_Engine_Config::sql_import_transactions()
+            && $this->is_transactional_data_statement($statement)
+        ) {
+            $this->begin_import_transaction();
+        }
+
         if ($this->search_replace !== null) {
             $statement = $this->search_replace->apply($statement);
         }
@@ -374,6 +491,23 @@ class Rmmigrate_SQL_Importer
         }
     }
 
+    private function is_implicit_commit_statement(string $statement): bool
+    {
+        $statement = $this->strip_leading_sql_comments($statement);
+        return (bool) preg_match(
+            '/^\s*(?:\/\*!\d+\s*)?(?:CREATE|DROP|ALTER|TRUNCATE|RENAME|LOCK\s+TABLES|UNLOCK\s+TABLES)\b/i',
+            $statement
+        );
+    }
+
+    private function is_transactional_data_statement(string $statement): bool
+    {
+        return (bool) preg_match(
+            '/^\s*(?:\/\*!\d+\s*)?(?:INSERT|REPLACE\s+INTO|UPDATE|DELETE\s+FROM)\b/i',
+            $statement
+        );
+    }
+
     private function begin_import_transaction(): void
     {
         if ($this->transaction_open) {
@@ -381,7 +515,10 @@ class Rmmigrate_SQL_Importer
         }
         global $wpdb;
         // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Plugin: custom plugin tables; values use prepare().
-        $wpdb->query('START TRANSACTION');
+        $started = $wpdb->query('START TRANSACTION');
+        if ($started === false) {
+            return;
+        }
         $this->transaction_open = true;
     }
 
@@ -392,7 +529,10 @@ class Rmmigrate_SQL_Importer
         }
         global $wpdb;
         // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Plugin: custom plugin tables; values use prepare().
-        $wpdb->query('COMMIT');
+        $committed = $wpdb->query('COMMIT');
+        if ($committed === false) {
+            return;
+        }
         $this->transaction_open = false;
     }
 

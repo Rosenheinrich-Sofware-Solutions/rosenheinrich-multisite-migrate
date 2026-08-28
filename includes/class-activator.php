@@ -14,8 +14,18 @@ class Rmmigrate_Activator
         unset($network_wide);
 
         ob_start();
-        self::run_activate();
-        ob_end_clean();
+        try {
+            self::run_activate();
+        } finally {
+            $noise = (string) ob_get_clean();
+            if ($noise !== '' && class_exists('Rmmigrate_Logger')) {
+                Rmmigrate_Logger::log_system(
+                    'Unexpected output during activation: ' . substr($noise, 0, 500),
+                    array('operation' => 'activate'),
+                    'warning'
+                );
+            }
+        }
     }
 
     /**
@@ -26,6 +36,9 @@ class Rmmigrate_Activator
     {
         if (!function_exists('dbDelta') && file_exists(ABSPATH . 'wp-admin/includes/upgrade.php')) {
             require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+        }
+        if (!function_exists('dbDelta')) {
+            return;
         }
 
         global $wpdb;
@@ -57,7 +70,7 @@ class Rmmigrate_Activator
             created_at DATETIME NOT NULL,
             updated_at DATETIME NOT NULL,
             completed_at DATETIME NULL,
-            PRIMARY KEY (id),
+            PRIMARY KEY  (id),
             KEY status (status),
             KEY blog_id (blog_id),
             KEY job_type (job_type),
@@ -79,6 +92,7 @@ class Rmmigrate_Activator
 
         require_once RMMIGRATE_PATH . 'includes/ai-agents/oauth/class-oauth-store.php';
         Rmmigrate_OAuth_Store::maybe_install_tables();
+        Rmmigrate_OAuth_Store::schedule_purge_cron();
         update_site_option('rmmigrate_oauth_flush_rewrite', 1);
         update_option('rmmigrate_oauth_flush_rewrite', 1);
 
@@ -99,10 +113,18 @@ class Rmmigrate_Activator
         // Activation runs before plugins_loaded — Scheduler is not loaded yet.
         require_once RMMIGRATE_PATH . 'includes/class-scheduler.php';
 
-        self::ensure_backup_root();
+        if (!self::ensure_backup_root()) {
+            update_site_option('rmmigrate_backup_root_failed', 1);
+        } else {
+            delete_site_option('rmmigrate_backup_root_failed');
+        }
 
-        // Register 5-minute interval before scheduling (Plugin::add_cron_schedules not hooked yet).
-        add_filter('cron_schedules', array(__CLASS__, 'register_cron_schedules'));
+        if (class_exists('Rmmigrate_Bootstrap', false)) {
+            Rmmigrate_Bootstrap::register_cron_schedules_filter();
+        } else {
+            // Fallback: register 5-minute interval before scheduling.
+            add_filter('cron_schedules', array(__CLASS__, 'register_cron_schedules'));
+        }
 
         if (!wp_next_scheduled('rmmigrate_deferred_hosting_detect')) {
             wp_schedule_single_event(time() + 30, 'rmmigrate_deferred_hosting_detect');
@@ -163,22 +185,13 @@ class Rmmigrate_Activator
 
     private static function resolve_backup_dir(): string
     {
-        if (isset($GLOBALS['rmmigrate_test_backup_dir']) && is_string($GLOBALS['rmmigrate_test_backup_dir']) && $GLOBALS['rmmigrate_test_backup_dir'] !== '') {
+        if (defined('RMMIGRATE_UNIT_TEST') && RMMIGRATE_UNIT_TEST
+            && isset($GLOBALS['rmmigrate_test_backup_dir'])
+            && is_string($GLOBALS['rmmigrate_test_backup_dir'])
+            && $GLOBALS['rmmigrate_test_backup_dir'] !== '') {
             return wp_normalize_path($GLOBALS['rmmigrate_test_backup_dir']);
         }
 
-        $settings = get_site_option('rmmigrate_settings', array());
-        $custom = is_array($settings) ? trim((string) ($settings['local_storage_path'] ?? '')) : '';
-        if ($custom === '') {
-            // Default to the uploads directory per the WordPress plugin guidelines.
-            return Rmmigrate_Engine_Config::default_local_storage_path();
-        }
-        if ($custom[0] === '/' || preg_match('#^[A-Za-z]:[\\\\/]#', $custom)) {
-            return wp_normalize_path($custom);
-        }
-
-        $basedir = Rmmigrate_Engine_Config::uploads_basedir();
-
-        return wp_normalize_path(trailingslashit($basedir) . ltrim($custom, '/'));
+        return Rmmigrate_Engine_Config::resolve_local_storage_path();
     }
 }

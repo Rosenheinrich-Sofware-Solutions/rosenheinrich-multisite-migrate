@@ -10,6 +10,9 @@ if (!defined('ABSPATH')) {
  */
 class Rmmigrate_Schedules
 {
+    /** Deterministic placeholder id for unsaved/default schedule rows. */
+    public const DEFAULT_BLANK_ID = 'sch_default';
+
     /** Max schedules per context (network row or a single blog_id). */
     const MAX_SCHEDULES = 1;
 
@@ -29,7 +32,7 @@ class Rmmigrate_Schedules
         }
 
         return array(
-            'id'             => self::new_id(),
+            'id'             => self::DEFAULT_BLANK_ID,
             'name'           => __('Local schedule', 'rosenheinrich-multisite-migrate'),
             'enabled'        => false,
             'interval'       => 'weekly',
@@ -50,11 +53,7 @@ class Rmmigrate_Schedules
 
     public static function new_id(): string
     {
-        if (function_exists('wp_generate_uuid4')) {
-            return 'sch_' . substr(wp_generate_uuid4(), 0, 8);
-        }
-
-        return 'sch_' . substr(md5(uniqid((string) wp_rand(), true)), 0, 8);
+        return 'sch_' . substr(wp_generate_uuid4(), 0, 8);
     }
 
     /**
@@ -84,7 +83,7 @@ class Rmmigrate_Schedules
     }
 
     /**
-     * Keep at most one network schedule and one schedule per blog_id.
+     * Keep at most MAX_SCHEDULES network schedule(s) and MAX_SCHEDULES per blog_id.
      *
      * @param array<int,array<string,mixed>> $schedules
      * @param array<string,mixed>            $settings
@@ -105,13 +104,13 @@ class Rmmigrate_Schedules
                 || $scope === Rmmigrate_Multisite_Scope::SCOPE_NETWORK_FILTERED
                 || $scope === Rmmigrate_Multisite_Scope::SCOPE_NETWORK_INCLUDED;
             if ($is_network) {
-                if ($network === null) {
+                if ($network === null && self::MAX_SCHEDULES > 0) {
                     $schedule['blog_id'] = 0;
                     $network = $schedule;
                 }
                 continue;
             }
-            if (!isset($by_blog[$blog_id])) {
+            if (!isset($by_blog[$blog_id]) && self::MAX_SCHEDULES > 0) {
                 $by_blog[$blog_id] = $schedule;
             }
         }
@@ -270,6 +269,25 @@ class Rmmigrate_Schedules
     }
 
     /**
+     * @param array<string, array<string,mixed>> $previous_by_id
+     */
+    private static function resolve_schedule_post_id(string $key, array $previous_by_id, string $fallback_id = ''): string
+    {
+        $id = sanitize_key($key);
+        if ($id === '') {
+            return $fallback_id !== '' ? $fallback_id : self::new_id();
+        }
+        if (isset($previous_by_id[$id])) {
+            return $id;
+        }
+        if (ctype_digit($id)) {
+            return $fallback_id !== '' ? $fallback_id : self::new_id();
+        }
+
+        return $id;
+    }
+
+    /**
      * @param array<string,mixed> $settings
      * @param array<string,mixed> $post
      * @return array<string,mixed>
@@ -303,15 +321,13 @@ class Rmmigrate_Schedules
         }
 
         $network_row = null;
+        $network_fallback_id = (string) (self::network_schedule($settings)['id'] ?? '');
         foreach ($raw as $id => $row) {
             if (!is_array($row)) {
                 continue;
             }
-            $id = sanitize_key((string) $id);
-            if ($id === '') {
-                continue;
-            }
-            $network_row = self::sanitize_schedule(array_merge($row, array('id' => $id)), $settings);
+            $schedule_id = self::resolve_schedule_post_id((string) $id, $previous_by_id, $network_fallback_id);
+            $network_row = self::sanitize_schedule(array_merge($row, array('id' => $schedule_id)), $settings);
             $network_row['blog_id'] = 0;
             if (($network_row['scope'] ?? '') === Rmmigrate_Multisite_Scope::SCOPE_SUBSITE) {
                 $network_row['scope'] = Rmmigrate_Multisite_Scope::SCOPE_NETWORK;
@@ -370,17 +386,21 @@ class Rmmigrate_Schedules
         }
 
         $subsite_row = null;
+        $subsite_fallback_id = '';
+        foreach ($current['schedules'] as $schedule) {
+            if ((int) ($schedule['blog_id'] ?? 0) === $blog_id && !empty($schedule['id'])) {
+                $subsite_fallback_id = (string) $schedule['id'];
+                break;
+            }
+        }
         foreach ($raw as $id => $row) {
             if (!is_array($row)) {
                 continue;
             }
-            $id = sanitize_key((string) $id);
-            if ($id === '') {
-                continue;
-            }
+            $schedule_id = self::resolve_schedule_post_id((string) $id, $previous_by_id, $subsite_fallback_id);
             $row['scope'] = Rmmigrate_Multisite_Scope::SCOPE_SUBSITE;
             $row['blog_id'] = $blog_id;
-            $subsite_row = self::sanitize_schedule(array_merge($row, array('id' => $id)), $current);
+            $subsite_row = self::sanitize_schedule(array_merge($row, array('id' => $schedule_id)), $current);
             break;
         }
 
@@ -444,24 +464,31 @@ class Rmmigrate_Schedules
     }
 
     /**
-     * @param array<string,mixed> $settings
-     * @param string              $schedule_id
+     * @param string $schedule_id
      */
-    public static function advance_schedule(array $settings, string $schedule_id): void
+    public static function advance_schedule(string $schedule_id): void
     {
-        $settings = self::normalize($settings);
-        foreach ($settings['schedules'] as $index => $schedule) {
+        $settings = Rmmigrate_Settings::get();
+        $schedules = $settings['schedules'] ?? array();
+        if (!is_array($schedules)) {
+            $schedules = array();
+        }
+        $updated = false;
+        foreach ($schedules as $index => $schedule) {
             if (($schedule['id'] ?? '') !== $schedule_id) {
                 continue;
             }
             if (empty($schedule['enabled'])) {
                 $settings['schedules'][$index]['next_run'] = 0;
-                break;
+            } else {
+                $settings['schedules'][$index]['next_run'] = self::compute_next_run($schedule);
             }
-            $settings['schedules'][$index]['next_run'] = self::compute_next_run($schedule);
+            $updated = true;
             break;
         }
-        Rmmigrate_Settings::save($settings);
+        if ($updated) {
+            Rmmigrate_Settings::save($settings);
+        }
     }
 
     /**
@@ -598,7 +625,7 @@ class Rmmigrate_Schedules
 
         $hour_12 = isset($schedule['hour_12']) ? (int) $schedule['hour_12'] : null;
         $ampm = isset($schedule['ampm']) ? strtolower((string) $schedule['ampm']) : null;
-        if ($hour_12 !== null && $ampm !== null) {
+        if ($hour_12 !== null && ($ampm === 'am' || $ampm === 'pm')) {
             $hour = $hour_12 % 12;
             if ($ampm === 'pm') {
                 $hour += 12;
@@ -730,12 +757,14 @@ class Rmmigrate_Schedules
         }
 
         $rows = array();
-        foreach (get_sites(array('number' => 500, 'fields' => 'ids', 'orderby' => 'domain')) as $blog_id) {
-            $blog_id = (int) $blog_id;
-            $details = get_blog_details($blog_id);
-            $label = get_blog_option($blog_id, 'blogname');
-            if (!is_string($label) || $label === '') {
-                $label = is_object($details) ? (string) $details->domain : (string) $blog_id;
+        foreach (get_sites(array('number' => 500, 'orderby' => 'domain')) as $site) {
+            $blog_id = (int) ($site->blog_id ?? 0);
+            if ($blog_id <= 0) {
+                continue;
+            }
+            $label = isset($site->blogname) && is_string($site->blogname) ? $site->blogname : '';
+            if ($label === '') {
+                $label = isset($site->domain) && is_string($site->domain) ? $site->domain : (string) $blog_id;
             }
             $rows[] = array(
                 'id'    => $blog_id,

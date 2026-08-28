@@ -164,13 +164,24 @@
     }
 
     function reviewNudgePost(action, feedback, done) {
-        $.post(rmmigrateAdmin.ajaxUrl, {
-            action: action,
-            nonce: rmmigrateAdmin.nonce,
-            feedback: feedback || ''
-        }).always(function (res) {
+        var cfg = mmAdminAjaxConfig();
+        if (!cfg || !cfg.ajaxUrl || !cfg.nonce) {
             if (typeof done === 'function') {
-                done(res);
+                done(null);
+            }
+            return;
+        }
+        $.post(cfg.ajaxUrl, {
+            action: action,
+            nonce: cfg.nonce,
+            feedback: feedback || ''
+        }).done(function (res) {
+            if (typeof done === 'function') {
+                done(res && res.success ? res : null);
+            }
+        }).fail(function () {
+            if (typeof done === 'function') {
+                done(null);
             }
         });
     }
@@ -178,7 +189,7 @@
     $(document).on('click', '.mm-review-nudge-dismiss, .mm-notice-card__dismiss.mm-review-nudge-dismiss', function () {
         var $notice = $(this).closest('.mm-review-nudge, .mm-notice-card');
         reviewNudgePost('rmmigrate_review_nudge_dismiss', '', function (res) {
-            if (res.success) {
+            if (res && res.success) {
                 reviewNudgeFadeOut($notice);
             }
         });
@@ -188,7 +199,7 @@
         e.preventDefault();
         var $notice = $(this).closest('.mm-review-nudge, .mm-notice-card');
         reviewNudgePost('rmmigrate_review_nudge_feedback', 'negative', function (res) {
-            if (!res.success) {
+            if (!res || !res.success) {
                 return;
             }
             reviewNudgeFadeOut($notice);
@@ -209,9 +220,13 @@
     $(document).on('click', '.mm-pro-hint__dismiss', function () {
         var $hint = $(this).closest('.mm-pro-hint');
         var slug = $(this).data('slug');
-        $.post(rmmigrateAdmin.ajaxUrl, {
+        var cfg = mmAdminAjaxConfig();
+        if (!cfg || !cfg.ajaxUrl || !cfg.nonce) {
+            return;
+        }
+        $.post(cfg.ajaxUrl, {
             action: 'rmmigrate_pro_hint_dismiss',
-            nonce: rmmigrateAdmin.nonce,
+            nonce: cfg.nonce,
             slug: slug
         }).done(function (res) {
             if (res && res.success) {

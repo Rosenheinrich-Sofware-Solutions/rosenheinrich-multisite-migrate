@@ -106,6 +106,8 @@ class Rmmigrate_Settings
             if (is_string($site_email) && is_email($site_email)) {
                 return $site_email;
             }
+
+            return '';
         }
         if (is_multisite() && ($blog_id === null || $blog_id <= 0)) {
             $network_email = get_site_option('admin_email');
@@ -163,11 +165,10 @@ class Rmmigrate_Settings
     public static function merge_subsite_settings_from_post(array $current, array $post, string $section, int $blog_id): array
     {
         $blog_id = max(1, $blog_id);
+        $baseline = array_merge(self::defaults(), $current);
         $merged = self::merge_post($current, $post, $section);
         foreach (self::network_global_keys() as $key) {
-            if (array_key_exists($key, $current)) {
-                $merged[$key] = $current[$key];
-            }
+            $merged[$key] = $baseline[$key];
         }
         if ($section === 'notifications') {
             $blogs = is_array($current['email_blogs'] ?? null) ? $current['email_blogs'] : array();
@@ -182,9 +183,7 @@ class Rmmigrate_Settings
             $merged['email_blogs'] = $blogs;
             // Keep network flat email_* untouched.
             foreach (array_keys($blogs[$blog_id]) as $key) {
-                if (array_key_exists($key, $current)) {
-                    $merged[$key] = $current[$key];
-                }
+                $merged[$key] = $baseline[$key];
             }
         }
         $merged['email_blogs'] = is_array($merged['email_blogs'] ?? null) ? $merged['email_blogs'] : ($current['email_blogs'] ?? array());
@@ -265,17 +264,33 @@ class Rmmigrate_Settings
         return false;
     }
 
-    private static function decrypt_secret(string $value): string
+    private static function decrypt_secret(string $value, ?string $setting_key = null): string
     {
-        if (strpos($value, 'enc:') === 0) {
-            return Rmmigrate_Crypto::decrypt(substr($value, 4));
+        if (strpos($value, 'enc:') !== 0) {
+            return $value;
         }
-        return $value;
+        $encoded = substr($value, 4);
+        $plain = Rmmigrate_Crypto::decrypt($encoded);
+        if ($plain !== '' && $setting_key !== null && Rmmigrate_Crypto::is_legacy_cbc($encoded)) {
+            self::upgrade_secret_encoding($setting_key, $plain);
+        }
+        return $plain;
+    }
+
+    private static function upgrade_secret_encoding(string $setting_key, string $plain): void
+    {
+        $settings = get_site_option(self::OPTION_KEY, array());
+        if (!is_array($settings) || !array_key_exists($setting_key, $settings)) {
+            return;
+        }
+        $settings[$setting_key] = 'enc:' . Rmmigrate_Crypto::encrypt($plain);
+        update_site_option(self::OPTION_KEY, $settings);
+        self::$cache = null;
     }
 
     public static function get_archive_passphrase(): string
     {
-        return self::decrypt_secret(self::get()['archive_passphrase'] ?? '');
+        return self::decrypt_secret(self::get()['archive_passphrase'] ?? '', 'archive_passphrase');
     }
 
     /**
@@ -328,12 +343,7 @@ class Rmmigrate_Settings
             ));
         } elseif ($section === 'backups') {
             // archive_mode + include_wp_core: set only via backup wizard (last-used).
-            $merged = array_merge($merged, array(
-                'encrypt_archives'        => !empty($post['encrypt_archives']),
-                'archive_passphrase'      => self::secret_field($post, 'archive_passphrase', $current),
-                'safety_snapshot_enabled' => !empty($post['safety_snapshot_enabled']),
-                'exclude_paths'           => array_filter(array_map('trim', explode("\n", sanitize_textarea_field(wp_unslash($post['exclude_paths'] ?? ''))))),
-            ));
+            $merged = array_merge($merged, self::archive_settings_from_post($post, $current));
         } elseif ($section === 'import') {
             $merged['import_chunk_size'] = max(1048576, (int) ($post['import_chunk_size'] ?? 2097152));
             $merged['sql_import_chunk_bytes'] = max(262144, min(4194304, (int) ($post['sql_import_chunk_bytes'] ?? ($current['sql_import_chunk_bytes'] ?? 1048576))));
@@ -349,11 +359,7 @@ class Rmmigrate_Settings
             ));
         } elseif ($section === 'engine') {
             // archive_mode + include_wp_core: set only via backup wizard (last-used).
-            $merged = array_merge($merged, array(
-                'encrypt_archives'        => !empty($post['encrypt_archives']),
-                'archive_passphrase'      => self::secret_field($post, 'archive_passphrase', $current),
-                'safety_snapshot_enabled' => !empty($post['safety_snapshot_enabled']),
-                'exclude_paths'           => array_filter(array_map('trim', explode("\n", sanitize_textarea_field(wp_unslash($post['exclude_paths'] ?? ''))))),
+            $merged = array_merge($merged, self::archive_settings_from_post($post, $current), array(
                 'db_mode'                 => sanitize_text_field(wp_unslash($post['db_mode'] ?? $current['db_mode'] ?? 'auto')),
                 'mysqldump_path'          => sanitize_text_field(wp_unslash($post['mysqldump_path'] ?? '')),
                 'db_insert_query_limit'   => max(32768, min(1048576, (int) ($post['db_insert_query_limit'] ?? $current['db_insert_query_limit'] ?? 131072))),
@@ -381,7 +387,8 @@ class Rmmigrate_Settings
             $merged['activity_page_size'] = max(10, min(50, (int) ($post['activity_page_size'] ?? 25)));
             $merged['log_view_lines'] = max(50, min(500, (int) ($post['log_view_lines'] ?? 200)));
         } elseif ($section === 'access') {
-            unset($merged['installer_brand_name'], $merged['installer_brand_logo']);
+            $merged['installer_brand_name'] = $current['installer_brand_name'] ?? '';
+            $merged['installer_brand_logo'] = $current['installer_brand_logo'] ?? '';
         } elseif ($section === 'notifications') {
             $merged = array_merge($merged, array(
                 'email_enabled'       => !empty($post['email_enabled']),
@@ -406,12 +413,28 @@ class Rmmigrate_Settings
     /**
      * @param array<string,mixed> $post
      * @param array<string,mixed> $current
+     * @return array<string,mixed>
+     */
+    private static function archive_settings_from_post(array $post, array $current): array
+    {
+        return array(
+            'encrypt_archives'        => !empty($post['encrypt_archives']),
+            'archive_passphrase'      => self::secret_field($post, 'archive_passphrase', $current),
+            'safety_snapshot_enabled' => !empty($post['safety_snapshot_enabled']),
+            'exclude_paths'           => array_filter(array_map('trim', explode("\n", sanitize_textarea_field(wp_unslash($post['exclude_paths'] ?? ''))))),
+        );
+    }
+
+    /**
+     * @param array<string,mixed> $post
+     * @param array<string,mixed> $current
      */
     private static function secret_field(array $post, string $key, array $current): string
     {
-        $val = sanitize_text_field(wp_unslash($post[$key] ?? '********'));
+        $raw = $post[$key] ?? '********';
+        $val = is_scalar($raw) ? (string) wp_unslash((string) $raw) : '';
         if ($val === '' || $val === '********') {
-            return $current[$key] ?? '';
+            return is_scalar($current[$key] ?? '') ? (string) ($current[$key] ?? '') : '';
         }
         return $val;
     }

@@ -13,32 +13,18 @@ class Rmmigrate_Dashboard_Data
     {
         $scope_args = self::scope_args($is_network);
 
-        $recent_args = array_merge(
-            $scope_args,
-            array(
-                'limit'        => 3,
-                'status_group' => 'completed',
-            )
-        );
+        $completed_args = array_merge($scope_args, array('status_group' => 'completed'));
+        $recent_args = array_merge($completed_args, array('limit' => 3));
         $failed_args = array_merge(
             $scope_args,
             array(
-                'limit'        => 100,
                 'status_group' => 'failed',
             )
         );
-        $last_args = array_merge(
-            $scope_args,
-            array(
-                'limit'        => 1,
-                'status_group' => 'completed',
-            )
-        );
-
         $recent_jobs = Rmmigrate_Job::list_jobs($recent_args);
-        $failed_jobs = Rmmigrate_Job::list_jobs($failed_args);
-        $last_jobs = Rmmigrate_Job::list_jobs($last_args);
-        $last_job = $last_jobs[0] ?? null;
+        $failed_count = Rmmigrate_Snap_DB::jobs_count_rows($failed_args);
+        $backup_count = Rmmigrate_Snap_DB::jobs_count_rows($completed_args);
+        $last_job = $recent_jobs[0] ?? null;
         $active_job = Rmmigrate_Job::resolve_admin_active_job($is_network, 0);
 
         $archives_url = Rmmigrate_Admin_Router::admin_url('multisite-migrate-archives', array(), $is_network);
@@ -51,13 +37,13 @@ class Rmmigrate_Dashboard_Data
         $sections = array(
             array(
                 'icon'  => 'dashicons-warning',
-                'count' => (string) count($failed_jobs),
+                'count' => (string) $failed_count,
                 'label' => __('Failed jobs', 'rosenheinrich-multisite-migrate'),
                 'url'   => $failed_url,
             ),
             array(
                 'icon'  => 'dashicons-backup',
-                'count' => '',
+                'count' => (string) $backup_count,
                 'label' => __('Open backups', 'rosenheinrich-multisite-migrate'),
                 'url'   => $archives_url,
             ),
@@ -65,11 +51,30 @@ class Rmmigrate_Dashboard_Data
 
         $sections = apply_filters('rmmigrate_dashboard_widget_sections', $sections, $is_network);
 
+        if (!is_array($sections)) {
+            $sections = array();
+        }
+        $sections = array_map(
+            static function ($section) {
+                if (!is_array($section)) {
+                    $section = array();
+                }
+
+                return array(
+                    'icon'  => isset($section['icon']) ? (string) $section['icon'] : '',
+                    'count' => isset($section['count']) ? (string) $section['count'] : '',
+                    'label' => isset($section['label']) ? (string) $section['label'] : '',
+                    'url'   => esc_url_raw(isset($section['url']) ? (string) $section['url'] : ''),
+                );
+            },
+            $sections
+        );
+
         return array(
             'is_network'      => $is_network,
             'last_job'        => $last_job,
             'recent_jobs'     => $recent_jobs,
-            'failed_count'    => count($failed_jobs),
+            'failed_count'    => $failed_count,
             'active_job'      => $active_job,
             'can_create'      => Rmmigrate_Access::can_create_backup(),
             'urls'            => array(

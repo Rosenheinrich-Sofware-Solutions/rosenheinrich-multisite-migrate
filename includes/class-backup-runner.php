@@ -52,7 +52,7 @@ class Rmmigrate_Runner
     }
 
     /**
-     * @return array{done:bool,status:int,percent:int,message:string,error?:string}
+     * @return array{done:bool,status:int,percent:int,message:string,error?:string,waiting?:bool,lease_fresh?:bool}
      */
     public static function process(int $job_id): array
     {
@@ -86,16 +86,7 @@ class Rmmigrate_Runner
         if (!self::acquire_job_lock($job_id)) {
             self::log_lock_wait($job_id);
             self::schedule_continuation_backoff($job_id);
-            return array(
-                'done'        => false,
-                'status'      => $job->get_status(),
-                'percent'     => $job->get_percent(),
-                'message'     => $job->get_progress_message() !== ''
-                    ? $job->get_progress_message()
-                    : __('Waiting for backup worker…', 'rosenheinrich-multisite-migrate'),
-                'waiting'     => true,
-                'lease_fresh' => self::lease_is_fresh($job_id),
-            );
+            return self::waiting_worker_response($job, $job_id);
         }
 
         delete_transient(self::WAIT_BACKOFF_PREFIX . $job_id);
@@ -107,16 +98,7 @@ class Rmmigrate_Runner
                 self::release_job_lock($job_id);
                 self::log_worker_auth_failure($job_id, 'rate_limited');
                 self::schedule_continuation_backoff($job_id);
-                return array(
-                    'done'        => false,
-                    'status'      => $job->get_status(),
-                    'percent'     => $job->get_percent(),
-                    'message'     => $job->get_progress_message() !== ''
-                        ? $job->get_progress_message()
-                        : __('Waiting for backup worker…', 'rosenheinrich-multisite-migrate'),
-                    'waiting'     => true,
-                    'lease_fresh' => self::lease_is_fresh($job_id),
-                );
+                return self::waiting_worker_response($job, $job_id);
             }
         }
 
@@ -163,9 +145,11 @@ class Rmmigrate_Runner
                 Rmmigrate_Local_Storage::ensure_job_work_dir($job, false);
             }
 
-            $result = $job->is_restore()
-                ? Rmmigrate_Restore_Runner::process_slice($job)
-                : self::process_slice($job);
+            if ($job->is_restore()) {
+                Rmmigrate_Restore_Runner::process_slice($job);
+            } else {
+                self::process_slice($job);
+            }
         } catch (Throwable $e) {
             $job = Rmmigrate_Job::get($job_id) ?? $job;
             if (!in_array($job->get_status(), array(
@@ -174,6 +158,11 @@ class Rmmigrate_Runner
                 Rmmigrate_Job::STATUS_CANCELLED,
             ), true)) {
                 Rmmigrate_Logger::log('Error: ' . sanitize_text_field($e->getMessage()));
+                Rmmigrate_Error_Recorder::record_from_throwable(
+                    $e,
+                    'job',
+                    $job->is_restore() ? 'restore' : (string) $job->get_job_type()
+                );
                 $job->set_status(
                     Rmmigrate_Job::STATUS_ERROR,
                     sanitize_text_field($e->getMessage()),
@@ -235,12 +224,7 @@ class Rmmigrate_Runner
     private static function schedule_continuation(int $job_id): void
     {
         $mode = Rmmigrate_Hosting_Detection::effective_kickoff_mode();
-        if ($mode === 'browser') {
-            Rmmigrate_Hosting_Detection::schedule_cron_worker($job_id);
-            return;
-        }
-
-        if ($mode === 'cron') {
+        if ($mode === 'browser' || $mode === 'cron') {
             Rmmigrate_Hosting_Detection::schedule_cron_worker($job_id);
             return;
         }
@@ -422,7 +406,12 @@ class Rmmigrate_Runner
                 $path = trailingslashit($work_dir) . $name;
                 if ($ext === 'zip' && class_exists('ZipArchive')) {
                     $zip = new ZipArchive();
-                    $zip->open($path, ZipArchive::CREATE | ZipArchive::OVERWRITE);
+                    if ($zip->open($path, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== true) {
+                        // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+                        throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::EXTRACT_FAILED),
+                            esc_html__('Cannot open backup archive for writing.', 'rosenheinrich-multisite-migrate')
+                        );
+                    }
                     $zip->addFile(trailingslashit($work_dir) . 'database.sql', 'database.sql');
                     $zip->addFile(trailingslashit($work_dir) . 'manifest.json', 'manifest.json');
                     $zip->close();
@@ -542,8 +531,6 @@ class Rmmigrate_Runner
             $keep_files[] = basename($rel);
         }
 
-        $keep_dirs = array();
-
         try {
             $iterator = new DirectoryIterator($work_dir);
             foreach ($iterator as $file) {
@@ -552,9 +539,6 @@ class Rmmigrate_Runner
                 }
                 $filename = $file->getFilename();
                 if ($file->isDir()) {
-                    if (in_array($filename, $keep_dirs, true)) {
-                        continue;
-                    }
                     Rmmigrate_Filesystem::delete_directory($file->getPathname());
                     continue;
                 }
@@ -986,27 +970,81 @@ class Rmmigrate_Runner
     private static function increment_worker_rate(int $job_id): bool
     {
         $rate_key = 'rmmigrate_worker_rate_' . $job_id;
-        $lock_key = 'rmmigrate_worker_rate_lock_' . $job_id;
 
-        if (function_exists('wp_cache_add') && !wp_cache_add($lock_key, 1, 'rmmigrate', 5)) {
-            return false;
-        }
-
-        $count = (int) get_transient($rate_key);
-        if ($count >= 120) {
-            if (function_exists('wp_cache_delete')) {
-                wp_cache_delete($lock_key, 'rmmigrate');
+        if (wp_using_ext_object_cache() && function_exists('wp_cache_incr')) {
+            $count = wp_cache_incr($rate_key, 1, 'rmmigrate');
+            if ($count === false) {
+                if (!wp_cache_add($rate_key, 1, 'rmmigrate', MINUTE_IN_SECONDS)) {
+                    $count = wp_cache_incr($rate_key, 1, 'rmmigrate');
+                } else {
+                    $count = 1;
+                }
             }
+            if ($count === false) {
+                return false;
+            }
+
+            return $count <= 120;
+        }
+
+        return self::increment_worker_rate_option($rate_key);
+    }
+
+    private static function increment_worker_rate_option(string $rate_key): bool
+    {
+        global $wpdb;
+
+        $option_name = $rate_key . '_bucket';
+        $now = time();
+        $expires = $now + MINUTE_IN_SECONDS;
+
+        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Atomic per-job worker rate bucket; no WP API for guarded ON DUPLICATE KEY increment.
+        $wpdb->query(
+            $wpdb->prepare(
+                "INSERT INTO {$wpdb->options} (option_name, option_value, autoload)
+                 VALUES (%s, %s, 'no')
+                 ON DUPLICATE KEY UPDATE option_value = CASE
+                   WHEN CAST(SUBSTRING_INDEX(option_value, ':', -1) AS UNSIGNED) <= %d
+                     THEN CONCAT('1:', %d)
+                   WHEN CAST(SUBSTRING_INDEX(option_value, ':', 1) AS UNSIGNED) >= 120
+                     THEN option_value
+                   ELSE CONCAT(CAST(SUBSTRING_INDEX(option_value, ':', 1) AS UNSIGNED) + 1, ':', SUBSTRING_INDEX(option_value, ':', -1))
+                 END",
+                $option_name,
+                '1:' . $expires,
+                $now,
+                $expires
+            )
+        );
+
+        if (is_string($wpdb->last_error) && trim($wpdb->last_error) !== '') {
             return false;
         }
 
-        set_transient($rate_key, $count + 1, MINUTE_IN_SECONDS);
+        wp_cache_delete($option_name, 'options');
+        wp_cache_delete('alloptions', 'options');
 
-        if (function_exists('wp_cache_delete')) {
-            wp_cache_delete($lock_key, 'rmmigrate');
+        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Read back atomic rate bucket after guarded increment.
+        $val = $wpdb->get_var(
+            $wpdb->prepare(
+                "SELECT option_value FROM {$wpdb->options} WHERE option_name = %s LIMIT 1",
+                $option_name
+            )
+        );
+        if (!is_string($val) || $val === '') {
+            return false;
         }
 
-        return true;
+        $parts = explode(':', $val, 2);
+        $count = (int) ($parts[0] ?? 0);
+        if ($count > 120) {
+            return false;
+        }
+        if ($count === 120 && (int) $wpdb->rows_affected === 0) {
+            return false;
+        }
+
+        return $count >= 1;
     }
 
     public static function force_release_lock(int $job_id): void
@@ -1126,15 +1164,32 @@ class Rmmigrate_Runner
         $key   = self::WAIT_BACKOFF_PREFIX . $job_id;
         $prev  = (int) get_transient($key);
         $delay = 15;
-        if ($prev >= 60) {
-            $delay = 60;
-        } elseif ($prev >= 30) {
+        if ($prev >= 30) {
             $delay = 60;
         } elseif ($prev >= 15) {
             $delay = 30;
         }
         set_transient($key, $delay, 5 * MINUTE_IN_SECONDS);
         Rmmigrate_Hosting_Detection::schedule_cron_worker($job_id, $delay);
+    }
+
+    /**
+     * Worker lock contention — UI should keep polling; lease_fresh hints whether the holder is alive.
+     *
+     * @return array{done:false,status:int,percent:int,message:string,waiting:true,lease_fresh:bool}
+     */
+    private static function waiting_worker_response(Rmmigrate_Job $job, int $job_id): array
+    {
+        return array(
+            'done'        => false,
+            'status'      => $job->get_status(),
+            'percent'     => $job->get_percent(),
+            'message'     => $job->get_progress_message() !== ''
+                ? $job->get_progress_message()
+                : __('Waiting for backup worker…', 'rosenheinrich-multisite-migrate'),
+            'waiting'     => true,
+            'lease_fresh' => self::lease_is_fresh($job_id),
+        );
     }
 
     private static function register_process_shutdown(): void
@@ -1181,6 +1236,14 @@ class Rmmigrate_Runner
                         );
                         $service_code = 'memory_limit';
                         $message = Rmmigrate_User_Error_Messages::format($exception);
+                        Rmmigrate_Error_Recorder::record(
+                            array(
+                                'code'     => $service_code,
+                                'message'  => $message,
+                                'job_type' => $job->is_restore() ? 'restore' : (string) $job->get_job_type(),
+                                'source'   => 'fatal',
+                            )
+                        );
                         $job->set_status(Rmmigrate_Job::STATUS_ERROR, $message, $service_code);
                         if ($job->is_restore()) {
                             Rmmigrate_Restore_Runner::disable_maintenance();
@@ -1204,6 +1267,14 @@ class Rmmigrate_Runner
                                 __('PHP max_execution_time hit repeatedly.', 'rosenheinrich-multisite-migrate')
                             );
                             $message = Rmmigrate_User_Error_Messages::format($exception);
+                            Rmmigrate_Error_Recorder::record(
+                                array(
+                                    'code'     => Rmmigrate_Error_Codes::TIME_LIMIT,
+                                    'message'  => $message,
+                                    'job_type' => $job->is_restore() ? 'restore' : (string) $job->get_job_type(),
+                                    'source'   => 'fatal',
+                                )
+                            );
                             $job->set_status(Rmmigrate_Job::STATUS_ERROR, $message, Rmmigrate_Error_Codes::TIME_LIMIT);
                             if ($job->is_restore()) {
                                 Rmmigrate_Restore_Runner::disable_maintenance();
@@ -1213,6 +1284,14 @@ class Rmmigrate_Runner
                         $exception = new RuntimeException(__('Worker stopped unexpectedly.', 'rosenheinrich-multisite-migrate'));
                         $service_code = 'worker_stopped';
                         $message = Rmmigrate_User_Error_Messages::format($exception);
+                        Rmmigrate_Error_Recorder::record(
+                            array(
+                                'code'     => $service_code,
+                                'message'  => $message,
+                                'job_type' => $job->is_restore() ? 'restore' : (string) $job->get_job_type(),
+                                'source'   => 'fatal',
+                            )
+                        );
                         $job->set_status(Rmmigrate_Job::STATUS_ERROR, $message, $service_code);
                         if ($job->is_restore()) {
                             Rmmigrate_Restore_Runner::disable_maintenance();
@@ -1326,19 +1405,20 @@ class Rmmigrate_Runner
 
     private static function release_job_lock(int $job_id): void
     {
-        if (Rmmigrate_Hosting_Detection::effective_lock_mode() === 'sql') {
-            self::release_sql_job_lock($job_id);
+        if (isset(self::$job_lock_handles[$job_id])) {
+            Rmmigrate_Filesystem::release_lock(self::$job_lock_handles[$job_id]);
+            unset(self::$job_lock_handles[$job_id]);
             self::clear_worker_lease($job_id);
             return;
         }
 
-        if (!isset(self::$job_lock_handles[$job_id])) {
+        if (Rmmigrate_Hosting_Detection::effective_lock_mode() === 'sql') {
+            if (self::$sql_lock_owner === $job_id) {
+                self::release_sql_job_lock($job_id);
+                self::clear_worker_lease($job_id);
+            }
             return;
         }
-
-        Rmmigrate_Filesystem::release_lock(self::$job_lock_handles[$job_id]);
-        unset(self::$job_lock_handles[$job_id]);
-        self::clear_worker_lease($job_id);
     }
 
     private static function acquire_sql_job_lock(int $job_id): bool

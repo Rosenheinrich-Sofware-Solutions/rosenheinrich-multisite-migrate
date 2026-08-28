@@ -38,8 +38,8 @@ class Rmmigrate_Ajax_Activity
              wp_send_json_error(array('message' => __('No entry or job specified.', 'rosenheinrich-multisite-migrate')));
         }
         $job_data = null;
-        $log_snippet = '';
-        $log_url = '';
+        $log_file = '';
+        $log_chunk = null;
 
         if ($job_id > 0) {
             $job = Rmmigrate_Job::get($job_id);
@@ -61,10 +61,10 @@ class Rmmigrate_Ajax_Activity
                     );
                 }
 
-                $progress = $job->get_progress();
                 $started = strtotime((string) ($job->data['created_at'] ?? ''));
                 $completed = strtotime((string) ($job->data['completed_at'] ?? $job->data['updated_at'] ?? ''));
                 $duration = ($started && $completed && $completed >= $started) ? ($completed - $started) : null;
+                $settings = Rmmigrate_Settings::get();
                 $job_data = array(
                     'id'           => $job->get_id(),
                     'type'         => $job->get_display_job_type(),
@@ -74,21 +74,22 @@ class Rmmigrate_Ajax_Activity
                     'file_size'    => (int) ($job->data['file_size'] ?? 0),
                     'error_message'=> (string) ($job->data['error_message'] ?? ''),
                     'duration_sec' => $duration,
-                    'db_mode'      => Rmmigrate_Settings::get()['db_mode'] ?? 'auto',
-                    'archive_mode' => Rmmigrate_Settings::get()['archive_mode'] ?? 'zip',
+                    'db_mode'      => $settings['db_mode'] ?? 'auto',
+                    'archive_mode' => $settings['archive_mode'] ?? 'zip',
                 );
             }
             // Fetch the first chunk of the complete log file
             $log_basename = Rmmigrate_Activity_Log::job_log_basename($job_id);
             if (Rmmigrate_Activity_Log::job_log_readable($job_id)) {
                 $log_file = $log_basename;
-                $log_chunk = Rmmigrate_Activity_Log::read_file_chunk(
-                    Rmmigrate_Activity_Log::job_log_path($job_id),
-                    Rmmigrate_Engine_Config::log_view_lines(),
-                    0
+                $log_chunk = self::decorate_chunk(
+                    Rmmigrate_Activity_Log::read_file_chunk(
+                        Rmmigrate_Activity_Log::job_log_path($job_id),
+                        Rmmigrate_Engine_Config::log_view_lines(),
+                        0
+                    ),
+                    $log_file
                 );
-                $log_chunk['log'] = $log_file;
-                $log_chunk['line_count'] = $log_chunk['lines'] === '' ? 0 : substr_count($log_chunk['lines'], "\n") + 1;
             }
         }
 
@@ -110,7 +111,7 @@ class Rmmigrate_Ajax_Activity
     {
         self::verify_request();
 
-        $per_page = max(1, (int) Rmmigrate_Request_Input::post_key('per_page', (string) Rmmigrate_Engine_Config::activity_page_size()));
+        $per_page = min(50, max(1, (int) Rmmigrate_Request_Input::post_key('per_page', (string) Rmmigrate_Engine_Config::activity_page_size())));
         $page = max(1, (int) Rmmigrate_Request_Input::post_key('page', '1'));
         $type_filter = Rmmigrate_Request_Input::post_key('type');
         $date_from = Rmmigrate_Activity_Log::normalize_date_filter(
@@ -137,12 +138,28 @@ class Rmmigrate_Ajax_Activity
             wp_send_json_error(array('message' => __('Log file not found.', 'rosenheinrich-multisite-migrate')));
         }
 
-        $lines = max(1, (int) Rmmigrate_Request_Input::post_key('lines', (string) Rmmigrate_Engine_Config::log_view_lines()));
+        $max_lines = max(1, (int) Rmmigrate_Engine_Config::log_view_lines());
+        $lines = min($max_lines, max(1, (int) Rmmigrate_Request_Input::post_key('lines', (string) $max_lines)));
         $offset = max(0, (int) Rmmigrate_Request_Input::post_key('offset', '0'));
-        $chunk = Rmmigrate_Activity_Log::read_file_chunk($path, $lines, $offset);
-        $chunk['log'] = $log;
-        $chunk['line_count'] = $chunk['lines'] === '' ? 0 : substr_count($chunk['lines'], "\n") + 1;
+        $chunk = self::decorate_chunk(
+            Rmmigrate_Activity_Log::read_file_chunk($path, $lines, $offset),
+            $log
+        );
 
         wp_send_json_success($chunk);
+    }
+
+    /**
+     * @param array<string,mixed> $chunk
+     * @return array<string,mixed>
+     */
+    private static function decorate_chunk(array $chunk, string $log): array
+    {
+        $chunk['log'] = $log;
+        $chunk['line_count'] = Rmmigrate_Activity_Log::count_display_lines(
+            (string) ($chunk['lines'] ?? '')
+        );
+
+        return $chunk;
     }
 }

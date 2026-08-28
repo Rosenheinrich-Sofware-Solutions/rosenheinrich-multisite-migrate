@@ -16,9 +16,12 @@ final class Rmmigrate_Telemetry
     const FLUSH_CRON_HOOK        = 'rmmigrate_telemetry_flush';
     const SNAPSHOT_CRON_HOOK     = 'rmmigrate_daily_telemetry_snapshot';
     const SNAPSHOT_ONESHOT_HOOK  = 'rmmigrate_telemetry_snapshot_oneshot';
+    const CONSENT_REMOTE_HOOK    = 'rmmigrate_telemetry_consent_remote';
     const AJAX_CONSENT           = 'rmmigrate_telemetry_consent';
     const MAX_QUEUE              = 100;
     const MAX_FLUSH_BATCH        = 50;
+    const MAX_FLUSH_ATTEMPTS     = 5;
+    const FLUSH_RETRY_OPTION     = 'rmmigrate_telemetry_flush_attempts';
     const OPERATION_ERROR_DEDUP_SEC = 120;
 
     /** @var array<string,true> */
@@ -43,6 +46,7 @@ final class Rmmigrate_Telemetry
         add_action(self::FLUSH_CRON_HOOK, array(__CLASS__, 'flush_queue'));
         add_action(self::SNAPSHOT_CRON_HOOK, array(__CLASS__, 'run_snapshot'));
         add_action(self::SNAPSHOT_ONESHOT_HOOK, array(__CLASS__, 'run_snapshot'));
+        add_action(self::CONSENT_REMOTE_HOOK, array(__CLASS__, 'run_consent_remote_setup'));
         add_action('shutdown', array(__CLASS__, 'maybe_flush_queue_shutdown'), 20);
 
         add_action('rmmigrate_job_terminal', array(__CLASS__, 'on_job_terminal'), 10, 3);
@@ -171,13 +175,16 @@ final class Rmmigrate_Telemetry
         if (empty($props['event']) || !is_string($props['event'])) {
             return $recorded;
         }
-        self::record_event($props['event'], $props);
+        $event = $props['event'];
+        unset($props['event']);
+        self::record_event($event, $props);
         return true;
     }
 
     public static function ajax_consent(): void
     {
-        if (!current_user_can('manage_options')) {
+        $capability = is_multisite() ? 'manage_network' : 'manage_options';
+        if (!current_user_can($capability)) {
             wp_send_json_error(array('message' => __('Permission denied.', 'rosenheinrich-multisite-migrate')), 403);
         }
         $nonce = Rmmigrate_Request_Input::post_text('nonce');
@@ -224,11 +231,22 @@ final class Rmmigrate_Telemetry
         $emit_lifecycle = !$already_granted && self::claim_consent_lifecycle_emission($install_id);
         if ($emit_lifecycle) {
             self::record_consent_lifecycle_event('telemetry_consent_granted', array('source' => sanitize_key($source)));
-            self::maybe_register(true);
-            self::send_on_consent_snapshot();
-            self::schedule_snapshot_cron();
+            if (!wp_next_scheduled(self::CONSENT_REMOTE_HOOK)) {
+                wp_schedule_single_event(time() + 5, self::CONSENT_REMOTE_HOOK);
+            }
         }
-        self::flush_queue();
+    }
+
+    public static function run_consent_remote_setup(): void
+    {
+        self::flush_pending_lifecycle_events();
+        if (!self::has_consent()) {
+            return;
+        }
+        self::maybe_register();
+        self::send_on_consent_snapshot();
+        self::schedule_snapshot_cron();
+        self::schedule_flush();
     }
 
     public static function decline_consent(string $source = 'settings'): void
@@ -238,19 +256,18 @@ final class Rmmigrate_Telemetry
 
         if ($was_granted) {
             self::clear_consent_lifecycle_claim(self::ensure_install_id());
-            self::transmit_lifecycle_event('telemetry_consent_revoked', array('source' => sanitize_key($source)));
+            self::set_queue(array());
         } else {
-            self::transmit_lifecycle_event('telemetry_consent_declined', array('source' => sanitize_key($source)));
+            self::set_queue(array());
         }
 
         $state['consent']    = 'declined';
         $state['consent_at'] = time();
         self::save_state($state);
         self::unschedule_snapshot_cron();
-        self::set_queue(array());
     }
 
-    public static function maybe_register(bool $force = false): bool
+    public static function maybe_register(): bool
     {
         if (!self::has_consent()) {
             return false;
@@ -279,24 +296,22 @@ final class Rmmigrate_Telemetry
     public static function flush_queue(): void
     {
         if (!self::has_consent()) {
-            self::set_queue(array());
             return;
         }
 
-        if (get_transient(self::flush_lock_key())) {
+        if (!self::acquire_flush_lock()) {
             return;
         }
-        set_transient(self::flush_lock_key(), 1, 30);
 
         $queue = self::get_queue();
         if ($queue === array()) {
-            delete_transient(self::flush_lock_key());
+            self::release_flush_lock();
             return;
         }
 
         $install_id = self::ensure_install_id();
         if ($install_id === '') {
-            delete_transient(self::flush_lock_key());
+            self::release_flush_lock();
             return;
         }
 
@@ -312,8 +327,8 @@ final class Rmmigrate_Telemetry
             );
         }
         if ($events === array()) {
-            self::set_queue(array_slice($queue, count($batch)));
-            delete_transient(self::flush_lock_key());
+            self::set_queue(self::queue_after_batch($queue, $batch));
+            self::release_flush_lock();
             return;
         }
 
@@ -329,66 +344,25 @@ final class Rmmigrate_Telemetry
         ));
 
         if (is_wp_error($response)) {
-            self::schedule_flush();
-            delete_transient(self::flush_lock_key());
+            self::schedule_flush_retry();
+            self::release_flush_lock();
             return;
         }
 
         $code = (int) wp_remote_retrieve_response_code($response);
         if ($code < 200 || $code >= 300) {
-            self::schedule_flush();
-            delete_transient(self::flush_lock_key());
+            self::schedule_flush_retry();
+            self::release_flush_lock();
             return;
         }
 
-        $remaining = array_slice($queue, count($batch));
+        delete_site_option(self::FLUSH_RETRY_OPTION);
+        $remaining = self::queue_after_batch($queue, $batch);
         self::set_queue($remaining);
         if ($remaining !== array()) {
             self::schedule_flush();
         }
-        delete_transient(self::flush_lock_key());
-    }
-
-    /**
-     * Send a single consent lifecycle event immediately (revoke while consent still active).
-     *
-     * @param array<string,mixed> $props
-     */
-    private static function transmit_lifecycle_event(string $event, array $props = array()): bool
-    {
-        $event = sanitize_key($event);
-        if (!isset(self::$allowed_events[$event])) {
-            return false;
-        }
-
-        $install_id = self::ensure_install_id();
-        if ($install_id === '') {
-            return false;
-        }
-
-        $response = wp_remote_post(self::events_url(), array(
-            'timeout' => 15,
-            'headers' => array('Content-Type' => 'application/json'),
-            'body'    => wp_json_encode(array(
-                'install_id'     => $install_id,
-                'site_hash'      => self::site_hash(),
-                'product_build'  => self::product_build(),
-                'events'         => array(
-                    array(
-                        'event' => $event,
-                        'props' => self::sanitize_props($props),
-                    ),
-                ),
-            )),
-        ));
-
-        if (is_wp_error($response)) {
-            return false;
-        }
-
-        $code = (int) wp_remote_retrieve_response_code($response);
-
-        return $code >= 200 && $code < 300;
+        self::release_flush_lock();
     }
 
     public static function maybe_flush_queue_shutdown(): void
@@ -397,8 +371,8 @@ final class Rmmigrate_Telemetry
             return;
         }
         $queue = self::get_queue();
-        if (count($queue) <= 5) {
-            self::flush_queue();
+        if (count($queue) > 5) {
+            self::schedule_flush();
         }
     }
 
@@ -446,15 +420,23 @@ final class Rmmigrate_Telemetry
         }
 
         self::record_event('platform_snapshot', array('changed' => $hash !== (string) ($state['snapshot_hash'] ?? '')));
-        self::maybe_register(true);
 
         $payload = self::register_payload();
         $payload['snapshot'] = $snapshot;
-        wp_remote_post(self::register_url(), array(
+        $response = wp_remote_post(self::register_url(), array(
             'timeout' => 15,
             'headers' => array('Content-Type' => 'application/json'),
             'body'    => wp_json_encode($payload),
         ));
+
+        if (is_wp_error($response)) {
+            return;
+        }
+
+        $status_code = (int) wp_remote_retrieve_response_code($response);
+        if ($status_code < 200 || $status_code >= 300) {
+            return;
+        }
 
         $state['snapshot_hash'] = $hash;
         $state['snapshot_at']   = time();
@@ -491,7 +473,7 @@ final class Rmmigrate_Telemetry
     }
 
     /**
-     * @return array<string,mixed>
+     * @return array<int,array{title:string,detail:string}>
      */
     public static function telemetry_disclosure(): array
     {
@@ -528,7 +510,7 @@ final class Rmmigrate_Telemetry
             $service_code = self::classify_error_category($clean_message);
         }
         $phase = sanitize_key((string) ($context['phase'] ?? ''));
-        if (self::should_skip_operation_error($operation, $job_id, $phase)) {
+        if (self::should_skip_operation_error($job_id, $phase)) {
             return;
         }
         if (!self::claim_operation_error_emission($operation, $job_id, $service_code, $phase, $clean_message)) {
@@ -548,7 +530,7 @@ final class Rmmigrate_Telemetry
     /**
      * Skip operation_error when job terminal telemetry already covers this failure.
      */
-    private static function should_skip_operation_error(string $operation, int $job_id, string $phase): bool
+    private static function should_skip_operation_error(int $job_id, string $phase): bool
     {
         if ($job_id <= 0) {
             return false;
@@ -607,14 +589,12 @@ final class Rmmigrate_Telemetry
                 array($install_id, $operation, (string) $job_id, $service_code, $phase, $message)
             )
         );
-        $option = 'rmmigrate_telemetry_op_err_' . substr($fingerprint, 0, 40);
-        $now    = time();
-        $prev   = get_site_option($option);
-        if (is_numeric($prev) && ($now - (int) $prev) < self::OPERATION_ERROR_DEDUP_SEC) {
+        $transient_key = 'rmmigrate_telemetry_op_err_' . substr($fingerprint, 0, 40);
+        if (get_site_transient($transient_key)) {
             return false;
         }
 
-        update_site_option($option, $now);
+        set_site_transient($transient_key, 1, self::OPERATION_ERROR_DEDUP_SEC);
 
         return true;
     }
@@ -622,6 +602,29 @@ final class Rmmigrate_Telemetry
     private static function flush_lock_key(): string
     {
         return 'rmmigrate_telemetry_flush_lock';
+    }
+
+    private static function acquire_flush_lock(): bool
+    {
+        $key = self::flush_lock_key();
+        $now = time();
+        if (add_site_option($key, $now)) {
+            return true;
+        }
+
+        $claimed_at = (int) get_site_option($key, 0);
+        if ($claimed_at > 0 && ($now - $claimed_at) < 30) {
+            return false;
+        }
+
+        delete_site_option($key);
+
+        return add_site_option($key, $now);
+    }
+
+    private static function release_flush_lock(): void
+    {
+        delete_site_option(self::flush_lock_key());
     }
 
     /**
@@ -737,30 +740,30 @@ final class Rmmigrate_Telemetry
             'props' => self::sanitize_props($props),
             'at'    => time(),
         );
+        if (count($queue) > self::MAX_QUEUE) {
+            $queue = array_slice($queue, -self::MAX_QUEUE);
+        }
         self::set_queue($queue);
         self::schedule_flush();
     }
 
     /**
-     * @param array<string,mixed> $props
+     * @param array<int,array<string,mixed>> $queue
+     * @param array<int,array<string,mixed>> $batch
+     * @return array<int,array<string,mixed>>
      */
-    private static function record_event_internal(string $event, array $props = array()): void
+    private static function queue_after_batch(array $queue, array $batch): array
     {
-        if (!self::has_consent()) {
-            return;
+        $sent_count = count($batch);
+        if ($sent_count === 0) {
+            return $queue;
         }
-        $install_id = self::ensure_install_id();
-        if ($install_id === '') {
-            return;
-        }
-        $queue = self::get_queue();
-        $queue[] = array(
-            'event' => sanitize_key($event),
-            'props' => self::sanitize_props($props),
-            'at'    => time(),
-        );
-        self::set_queue($queue);
-        self::schedule_flush();
+
+        $queue_after = self::get_queue();
+        $original_tail = array_slice($queue, $sent_count);
+        $appended = array_slice($queue_after, count($queue));
+
+        return array_merge($original_tail, $appended);
     }
 
     /**
@@ -785,6 +788,84 @@ final class Rmmigrate_Telemetry
         if (!wp_next_scheduled(self::FLUSH_CRON_HOOK)) {
             wp_schedule_single_event(time() + 30, self::FLUSH_CRON_HOOK);
         }
+    }
+
+    private static function schedule_flush_retry(): void
+    {
+        $attempts = (int) get_site_option(self::FLUSH_RETRY_OPTION, 0) + 1;
+        if ($attempts >= self::MAX_FLUSH_ATTEMPTS) {
+            delete_site_option(self::FLUSH_RETRY_OPTION);
+            return;
+        }
+
+        update_site_option(self::FLUSH_RETRY_OPTION, $attempts);
+        $delay = min(30 * (2 ** ($attempts - 1)), 900);
+        wp_clear_scheduled_hook(self::FLUSH_CRON_HOOK);
+        wp_schedule_single_event(time() + $delay, self::FLUSH_CRON_HOOK);
+    }
+
+    /**
+     * Deliver queued consent lifecycle events without requiring active consent.
+     */
+    private static function flush_pending_lifecycle_events(): void
+    {
+        $queue = self::get_queue();
+        if ($queue === array()) {
+            return;
+        }
+
+        $lifecycle_names = array(
+            'telemetry_consent_granted'  => true,
+            'telemetry_consent_revoked'  => true,
+            'telemetry_consent_declined' => true,
+        );
+        $events = array();
+        $remaining = array();
+        foreach ($queue as $row) {
+            if (!is_array($row) || empty($row['event'])) {
+                continue;
+            }
+            $event = sanitize_key((string) $row['event']);
+            if (isset($lifecycle_names[$event])) {
+                $events[] = array(
+                    'event' => $event,
+                    'props' => is_array($row['props'] ?? null) ? self::sanitize_props($row['props']) : array(),
+                );
+                continue;
+            }
+            $remaining[] = $row;
+        }
+
+        if ($events === array()) {
+            return;
+        }
+
+        $install_id = self::ensure_install_id();
+        if ($install_id === '') {
+            return;
+        }
+
+        $response = wp_remote_post(self::events_url(), array(
+            'timeout' => 15,
+            'headers' => array('Content-Type' => 'application/json'),
+            'body'    => wp_json_encode(array(
+                'install_id'    => $install_id,
+                'site_hash'     => self::site_hash(),
+                'product_build' => self::product_build(),
+                'events'        => $events,
+            )),
+        ));
+
+        if (is_wp_error($response)) {
+            return;
+        }
+
+        $code = (int) wp_remote_retrieve_response_code($response);
+        if ($code < 200 || $code >= 300) {
+            return;
+        }
+
+        self::set_queue($remaining);
     }
 
     /**
@@ -895,34 +976,7 @@ final class Rmmigrate_Telemetry
 
     private static function sanitize_error_message(?string $message): string
     {
-        if ($message === null || $message === '') {
-            return '';
-        }
-        $text = wp_strip_all_tags($message);
-        $text = self::redact_paths($text);
-        $text = sanitize_text_field($text);
-        if (function_exists('mb_substr')) {
-            return (string) mb_substr($text, 0, 500);
-        }
-
-        return substr($text, 0, 500);
-    }
-
-    private static function redact_paths(string $text): string
-    {
-        $patterns = array(
-            '#/(?:[^\s"\'<]+)#',
-            '#\\\\(?:[^\s"\'<]+)#',
-            '#[A-Za-z]:\\\\(?:[^\s"\'<]+)#',
-        );
-        foreach ($patterns as $pattern) {
-            $replaced = preg_replace($pattern, '[path]', $text);
-            if (is_string($replaced)) {
-                $text = $replaced;
-            }
-        }
-
-        return $text;
+        return Rmmigrate_Error_Recorder::sanitize_message($message);
     }
 
     private static function parse_memory_limit_mb(string $limit): int
@@ -939,6 +993,9 @@ final class Rmmigrate_Telemetry
             $num /= 1024;
         } elseif ($unit === 'm') {
             // already MB
+        } else {
+            // No unit suffix: the value is raw bytes.
+            $num /= 1048576;
         }
 
         return (int) round($num);

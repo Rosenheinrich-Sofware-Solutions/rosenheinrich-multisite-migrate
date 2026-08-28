@@ -36,12 +36,22 @@ class Rmmigrate_Plugin_Links
 
     private static function user_can_manage(): bool
     {
-        return current_user_can('manage_network') || current_user_can('manage_options');
+        if (current_user_can('manage_network')) {
+            return true;
+        }
+        if (!current_user_can('manage_options')) {
+            return false;
+        }
+        if (is_multisite()) {
+            return Rmmigrate_Access::subsite_plugin_visible();
+        }
+
+        return true;
     }
 
     private static function settings_url(): string
     {
-        if (is_multisite() && (is_network_admin() || current_user_can('manage_network'))) {
+        if (is_multisite() && is_network_admin()) {
             return Rmmigrate_Admin_Router::admin_url('multisite-migrate-advanced', array('tab' => 'engine'), true);
         }
 

@@ -6,6 +6,8 @@ if (!defined('ABSPATH')) {
 
 class Rmmigrate_Restore_Topology_Ui
 {
+    const NETWORK_BLOG_CHOICES_LIMIT = 200;
+
     /**
      * @return string[]
      */
@@ -121,7 +123,7 @@ class Rmmigrate_Restore_Topology_Ui
         }
         $selected = array_values(array_unique(array_filter(array_map('strval', $selected_tables))));
         if ($selected === array()) {
-            return array();
+            return $all;
         }
 
         return array_values(array_diff($all, $selected));
@@ -149,7 +151,7 @@ class Rmmigrate_Restore_Topology_Ui
                 $normalized[] = $table;
                 continue;
             }
-            $candidate = str_starts_with($table, $prefix) ? $table : $prefix . $table;
+            $candidate = (strpos($table, $prefix) === 0) ? $table : $prefix . $table;
             if (in_array($candidate, $all, true)) {
                 $normalized[] = $candidate;
             }
@@ -166,7 +168,7 @@ class Rmmigrate_Restore_Topology_Ui
         if (!function_exists('get_sites')) {
             return array();
         }
-        $sites = get_sites(array('number' => 200, 'orderby' => 'id', 'order' => 'ASC'));
+        $sites = get_sites(array('number' => self::NETWORK_BLOG_CHOICES_LIMIT, 'orderby' => 'id', 'order' => 'ASC'));
         $choices = array();
         foreach ($sites as $site) {
             if (!is_object($site) || !isset($site->blog_id)) {
@@ -183,5 +185,34 @@ class Rmmigrate_Restore_Topology_Ui
         }
 
         return $choices;
+    }
+
+    private static function network_site_count(): int
+    {
+        if (!function_exists('get_sites')) {
+            return 0;
+        }
+
+        return (int) get_sites(array('count' => true));
+    }
+
+    public static function network_blog_choices_truncated(): bool
+    {
+        return self::network_site_count() > self::NETWORK_BLOG_CHOICES_LIMIT;
+    }
+
+    public static function network_blog_choices_limit_notice(): string
+    {
+        $total = self::network_site_count();
+        if ($total <= self::NETWORK_BLOG_CHOICES_LIMIT) {
+            return '';
+        }
+
+        return sprintf(
+            /* translators: 1: number of sites shown, 2: total network site count. */
+            __('Showing the first %1$d network sites (of %2$d). Enter a blog ID manually if yours is not listed.', 'rosenheinrich-multisite-migrate'),
+            self::NETWORK_BLOG_CHOICES_LIMIT,
+            $total
+        );
     }
 }

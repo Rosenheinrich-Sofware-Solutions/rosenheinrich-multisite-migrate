@@ -45,39 +45,28 @@ class Rmmigrate_Path_Safety_Core
             return null;
         }
 
-        $root = rtrim(str_replace('\\', '/', $extract_root), '/') . '/';
         $relative = ltrim(str_replace('\\', '/', $entry_name), '/');
-        $dest = $root . $relative;
 
         $root_real = realpath(rtrim($extract_root, '/\\'));
         if ($root_real !== false) {
             $root_prefix = rtrim(str_replace('\\', '/', $root_real), '/') . '/';
-            $dest_norm = str_replace('\\', '/', $dest);
-            if (strpos($dest_norm, $root_prefix) !== 0) {
+            $dest = $root_prefix . $relative;
+            $parent = dirname($dest);
+            $parent_real = realpath($parent);
+            if ($parent_real !== false) {
+                $parent_prefix = rtrim(str_replace('\\', '/', $parent_real), '/') . '/';
+                if (strpos($parent_prefix, $root_prefix) !== 0) {
+                    return null;
+                }
+            } elseif (strpos(str_replace('\\', '/', $parent) . '/', $root_prefix) !== 0) {
                 return null;
             }
             return $dest;
         }
 
-        $dest_parts = explode('/', str_replace('\\', '/', $dest));
-        $depth = 0;
-        foreach ($dest_parts as $part) {
-            if ($part === '' || $part === '.') {
-                continue;
-            }
-            if ($part === '..') {
-                return null;
-            }
-            $depth++;
-        }
+        $root = rtrim(str_replace('\\', '/', $extract_root), '/') . '/';
 
-        $root_depth = count(array_filter(explode('/', trim($root, '/')), static function ($p) {
-            return $p !== '' && $p !== '.';
-        }));
-        if ($depth < $root_depth) {
-            return null;
-        }
-
-        return $dest;
+        // is_safe_entry_name() is the sole traversal guard when extract_root cannot be realpath()'d.
+        return $root . $relative;
     }
 }

@@ -26,6 +26,64 @@ class Rmmigrate_Restore_Build_Steps
      */
     public function get_steps(): array
     {
+        $progress = $this->job->get_progress();
+        $stored = $progress['restore_steps'] ?? null;
+        $validated = is_array($stored) ? self::validate_stored_steps($stored) : null;
+        if ($validated !== null) {
+            return $validated;
+        }
+
+        $steps = $this->resolve_steps();
+        $this->job->update_progress(array('restore_steps' => $steps));
+
+        return $steps;
+    }
+
+    /**
+     * @return string[]|null
+     */
+    private static function validate_stored_steps(array $stored): ?array
+    {
+        if ($stored === array() || !isset($stored[0])) {
+            return null;
+        }
+        if (array_keys($stored) !== range(0, count($stored) - 1)) {
+            return null;
+        }
+
+        $recognized = array(
+            self::STEP_EXTRACT,
+            self::STEP_DATABASE,
+            self::STEP_POST_IMPORT_SR,
+            self::STEP_FILES,
+            self::STEP_CLEANUP,
+            self::STEP_MIGRATION_FINALIZE,
+        );
+        $last_index = -1;
+        $clean = array();
+        foreach ($stored as $step) {
+            if (!is_string($step)) {
+                return null;
+            }
+            $idx = array_search($step, $recognized, true);
+            if ($idx === false || $idx <= $last_index) {
+                return null;
+            }
+            $last_index = $idx;
+            $clean[] = $step;
+        }
+        if (!in_array(self::STEP_EXTRACT, $clean, true) || !in_array(self::STEP_CLEANUP, $clean, true)) {
+            return null;
+        }
+
+        return $clean;
+    }
+
+    /**
+     * @return string[]
+     */
+    private function resolve_steps(): array
+    {
         $mode = $this->job->get_restore_mode();
         $steps = array(self::STEP_EXTRACT);
 
@@ -74,7 +132,11 @@ class Rmmigrate_Restore_Build_Steps
         $steps = $this->get_steps();
         $current = $this->current();
         $idx = array_search($current, $steps, true);
-        if ($idx === false || !isset($steps[$idx + 1])) {
+        if ($idx === false) {
+            return;
+        }
+        $idx = (int) $idx;
+        if (!isset($steps[$idx + 1])) {
             return;
         }
         $this->advance_to($steps[$idx + 1]);

@@ -8,8 +8,11 @@
 		return document.getElementById(id);
 	}
 
-	function i18n(key) {
-		return (cfg.i18n && cfg.i18n[key]) || key;
+	function i18n(key, fallback) {
+		if (cfg.i18n && cfg.i18n[key]) {
+			return cfg.i18n[key];
+		}
+		return fallback !== undefined ? fallback : key;
 	}
 
 	function confirmDialog(message, onConfirm) {
@@ -18,12 +21,43 @@
 			ui.confirm(message, onConfirm);
 			return;
 		}
+		var previouslyFocused = document.activeElement;
 		var overlay = document.createElement('div');
 		overlay.className = 'mm-confirm-overlay';
 		var modal = document.createElement('div');
 		modal.className = 'mm-confirm-modal';
 		modal.setAttribute('role', 'alertdialog');
 		modal.setAttribute('aria-modal', 'true');
+
+		function closeDialog() {
+			if (overlay.parentNode) {
+				overlay.parentNode.removeChild(overlay);
+			}
+			document.removeEventListener('keydown', onKeydown);
+			if (previouslyFocused && typeof previouslyFocused.focus === 'function') {
+				previouslyFocused.focus();
+			}
+		}
+
+		function onKeydown(event) {
+			if (event.key === 'Escape') {
+				event.preventDefault();
+				closeDialog();
+				return;
+			}
+			if (event.key === 'Tab') {
+				var focusables = [cancelBtn, okBtn];
+				var currentIndex = focusables.indexOf(document.activeElement);
+				if (currentIndex === -1) {
+					return;
+				}
+				event.preventDefault();
+				var nextIndex = event.shiftKey
+					? (currentIndex - 1 + focusables.length) % focusables.length
+					: (currentIndex + 1) % focusables.length;
+				focusables[nextIndex].focus();
+			}
+		}
 
 		var p = document.createElement('p');
 		p.textContent = message;
@@ -37,9 +71,7 @@
 		cancelBtn.className = 'button';
 		cancelBtn.textContent = (cfg.i18n && cfg.i18n.cancel) || 'Cancel';
 		cancelBtn.onclick = function () {
-			if (overlay.parentNode) {
-				overlay.parentNode.removeChild(overlay);
-			}
+			closeDialog();
 		};
 
 		var okBtn = document.createElement('button');
@@ -47,9 +79,7 @@
 		okBtn.className = 'button button-primary mm-btn-teal';
 		okBtn.textContent = (cfg.i18n && cfg.i18n.confirm) || 'Confirm';
 		okBtn.onclick = function () {
-			if (overlay.parentNode) {
-				overlay.parentNode.removeChild(overlay);
-			}
+			closeDialog();
 			if (typeof onConfirm === 'function') {
 				onConfirm();
 			}
@@ -60,6 +90,8 @@
 		modal.appendChild(actions);
 		overlay.appendChild(modal);
 		document.body.appendChild(overlay);
+		document.addEventListener('keydown', onKeydown);
+		cancelBtn.focus();
 	}
 
 	function setStepState(step, state, label) {
@@ -79,6 +111,25 @@
 		}
 	}
 
+	function restAbortSignal(timeoutMs) {
+		if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function') {
+			return { signal: AbortSignal.timeout(timeoutMs), clear: function () {} };
+		}
+		if (typeof AbortController !== 'undefined') {
+			var controller = new AbortController();
+			var timeoutId = setTimeout(function () {
+				controller.abort();
+			}, timeoutMs);
+			return {
+				signal: controller.signal,
+				clear: function () {
+					clearTimeout(timeoutId);
+				},
+			};
+		}
+		return { signal: undefined, clear: function () {} };
+	}
+
 	function rest(path, method, body) {
 		var opts = {
 			method: method || 'GET',
@@ -88,14 +139,28 @@
 			},
 			credentials: 'same-origin',
 		};
+		var abort = restAbortSignal(30000);
+		if (abort.signal) {
+			opts.signal = abort.signal;
+		}
 		if (body) {
 			opts.headers['Content-Type'] = 'application/json';
 			opts.body = JSON.stringify(body);
 		}
 		return fetch((cfg.restBase || '') + path, opts).then(function (r) {
-			return r.json().then(function (data) {
+			return r.text().then(function (text) {
+				var data = null;
+				if (text) {
+					try {
+						data = JSON.parse(text);
+					} catch (e) {
+						data = text;
+					}
+				}
 				return { ok: r.ok, status: r.status, data: data };
 			});
+		}).finally(function () {
+			abort.clear();
 		});
 	}
 
@@ -123,7 +188,16 @@
 	function basicHeader(password) {
 		try {
 			var pw = (password || '').replace(/\s+/g, '');
-			return btoa(cfg.userLogin + ':' + (pw || '{application-password}'));
+			var credentials = cfg.userLogin + ':' + (pw || '{application-password}');
+			if (typeof TextEncoder !== 'undefined') {
+				var bytes = new TextEncoder().encode(credentials);
+				var binary = '';
+				bytes.forEach(function (byte) {
+					binary += String.fromCharCode(byte);
+				});
+				return btoa(binary);
+			}
+			return btoa(unescape(encodeURIComponent(credentials)));
 		} catch (e) {
 			return '{base64(user:app-password)}';
 		}
@@ -156,44 +230,43 @@
 		var total = 4;
 
 		if (cfg.abilitiesApiAvailable) {
-			setStepState(1, 'done', 'OK');
+			setStepState(1, 'done', i18n('stepOk', 'OK'));
 			done++;
 			var d1 = $('mm-mcp-step-1-desc');
 			if (d1) {
-				d1.textContent =
-					(cfg.registeredAbilities || []).length +
-					' Multisite Migrate abilities registered.';
+				var regTemplate = i18n('abilitiesRegistered', '%d Multisite Migrate abilities registered.');
+				d1.textContent = regTemplate.replace('%d', String((cfg.registeredAbilities || []).length));
 			}
 		} else {
-			setStepState(1, 'blocked', 'WP 6.9+');
+			setStepState(1, 'blocked', i18n('stepWp69Short', 'WP 6.9+'));
 			var d1b = $('mm-mcp-step-1-desc');
 			if (d1b) {
-				d1b.textContent = i18n('wp69');
+				d1b.textContent = i18n('wp69', 'Requires WordPress 6.9+ (Abilities API).');
 			}
 		}
 
 		if (cfg.mcpAdapterActive) {
-			setStepState(2, 'done', 'Active');
+			setStepState(2, 'done', i18n('adapterActive', 'Active'));
 			done++;
 		} else if (cfg.mcpAdapterInstalled) {
-			setStepState(2, 'todo', 'Inactive');
+			setStepState(2, 'todo', i18n('stepInactive', 'Inactive'));
 		} else {
-			setStepState(2, 'todo', 'Install');
+			setStepState(2, 'todo', i18n('stepInstall', 'Install'));
 		}
 
 		var installBtn = $('mm-mcp-install-adapter');
 		if (installBtn) {
 			if (cfg.mcpAdapterActive) {
 				installBtn.disabled = true;
-				installBtn.textContent = i18n('adapterActive') || 'Active';
+				installBtn.textContent = i18n('adapterActive', 'Active');
 				installBtn.classList.add('button-disabled');
 			} else if (cfg.mcpAdapterInstalled) {
 				installBtn.disabled = false;
-				installBtn.textContent = i18n('activateAdapter') || 'Activate MCP Adapter';
+				installBtn.textContent = i18n('activateAdapter', 'Activate MCP Adapter');
 				installBtn.classList.remove('button-disabled');
 			} else {
 				installBtn.disabled = false;
-				installBtn.textContent = i18n('installAdapter') || 'Install MCP Adapter';
+				installBtn.textContent = i18n('installAdapter', 'Install MCP Adapter');
 				installBtn.classList.remove('button-disabled');
 			}
 		}
@@ -201,14 +274,14 @@
 		var appDesc = $('mm-mcp-app-pw-desc');
 		var appHelp = $('mm-mcp-app-pw-help');
 		if (!cfg.applicationPasswordsAvailable) {
-			setStepState(3, 'blocked', 'Disabled');
+			setStepState(3, 'blocked', i18n('stepDisabled', 'Disabled'));
 			if (appDesc) {
 				if (!cfg.isSsl) {
-					appDesc.textContent = i18n('appPwNoSsl');
+					appDesc.textContent = i18n('appPwNoSsl', 'This page is not served over HTTPS. WordPress disables Application Passwords until the site uses HTTPS.');
 				} else if (!cfg.applicationPasswordsSiteOk) {
-					appDesc.textContent = i18n('appPwSiteOff');
+					appDesc.textContent = i18n('appPwSiteOff', 'WordPress reports Application Passwords unavailable site-wide — usually a security plugin or host filter.');
 				} else {
-					appDesc.textContent = i18n('appPwUserOff');
+					appDesc.textContent = i18n('appPwUserOff', 'Application Passwords are unavailable for your user account (role or security policy).');
 				}
 			}
 			if (appHelp) {
@@ -219,47 +292,50 @@
 				genBtn.disabled = true;
 			}
 		} else if (appPassword || cfg.currentUserHasMcpAppPassword) {
-			setStepState(3, 'done', appPassword ? 'Generated' : 'Exists');
+			setStepState(3, 'done', appPassword ? i18n('stepGenerated', 'Generated') : i18n('stepExists', 'Exists'));
 			done++;
 			if (appHelp) {
 				appHelp.hidden = true;
 			}
 			if (appDesc) {
 				appDesc.textContent = appPassword
-					? 'Copy the password below into your client config.'
-					: i18n('appPwExistsHint');
+					? i18n('appPwCopyHint', 'Copy the password below into your client config.')
+					: i18n('appPwExistsHint', 'An mm-mcp Application Password already exists. Reuse it in your client, or revoke unused ones below before generating another.');
 			}
 		} else {
-			setStepState(3, 'todo', 'Needed');
+			setStepState(3, 'todo', i18n('stepNeeded', 'Needed'));
 			if (appHelp) {
 				appHelp.hidden = true;
 			}
 			if (appDesc) {
-				appDesc.textContent =
-					'Create an Application Password for this WordPress user, then paste it into your AI client snippet below.';
+				appDesc.textContent = i18n(
+					'appPwCreateHint',
+					'Create an Application Password for this WordPress user, then paste it into your AI client snippet below.'
+				);
 			}
 		}
 
 		var genBtnLabel = $('mm-mcp-generate-app-pw');
 		if (genBtnLabel && cfg.applicationPasswordsAvailable) {
 			genBtnLabel.textContent = cfg.currentUserHasMcpAppPassword
-				? i18n('appPwGenerateAnother')
-				: i18n('appPwGenerate');
+				? i18n('appPwGenerateAnother', 'Generate another Application Password')
+				: i18n('appPwGenerate', 'Generate Application Password');
 		}
 
 		renderAppPasswords(cfg.applicationPasswords || []);
 
 		var testResult = $('mm-mcp-test-result');
 		if (testResult && testResult.classList.contains('is-ok')) {
-			setStepState(4, 'done', 'OK');
+			setStepState(4, 'done', i18n('stepOk', 'OK'));
 			done++;
 		} else {
-			setStepState(4, 'todo', 'Test');
+			setStepState(4, 'todo', i18n('stepTest', 'Test'));
 		}
 
 		var status = $('mm-mcp-stepper-status');
 		if (status) {
-			status.textContent = done + ' of ' + total + ' steps complete';
+			var stepsTemplate = i18n('stepsComplete', '%1$d of %2$d steps complete');
+			status.textContent = stepsTemplate.replace('%1$d', String(done)).replace('%2$d', String(total));
 		}
 	}
 
@@ -272,6 +348,9 @@
 	}
 
 	function appendAbilityRow(list, a) {
+		if (!a || typeof a !== 'object') {
+			return;
+		}
 		var li = document.createElement('li');
 		if (isProAbility(a)) {
 			li.className = 'mm-mcp-ability--pro';
@@ -385,12 +464,35 @@
 				if (!el) {
 					return;
 				}
-				navigator.clipboard.writeText(el.textContent || '').then(function () {
-					btn.textContent = i18n('copied');
+				var text = el.textContent || '';
+				function markCopied() {
+					btn.textContent = i18n('copied', 'Copied');
 					setTimeout(function () {
-						btn.textContent = i18n('copy');
+						btn.textContent = i18n('copy', 'Copy');
 					}, 1500);
-				});
+				}
+				function fallbackCopy() {
+					var ta = document.createElement('textarea');
+					ta.value = text;
+					ta.setAttribute('readonly', '');
+					ta.style.position = 'absolute';
+					ta.style.left = '-9999px';
+					document.body.appendChild(ta);
+					ta.select();
+					try {
+						if (document.execCommand('copy')) {
+							markCopied();
+						}
+					} catch (e) {
+						// Clipboard unavailable.
+					}
+					document.body.removeChild(ta);
+				}
+				if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+					navigator.clipboard.writeText(text).then(markCopied).catch(fallbackCopy);
+				} else {
+					fallbackCopy();
+				}
 			});
 		});
 	}
@@ -408,7 +510,8 @@
 					err.hidden = true;
 				}
 				installBtn.disabled = true;
-				installBtn.textContent = i18n('installing');
+				var installLabel = installBtn.textContent;
+				installBtn.textContent = i18n('installing', 'Installing…');
 				rest('/ai-agents/install-mcp-adapter', 'POST')
 					.then(function (res) {
 						if (res.ok && res.data && res.data.success) {
@@ -417,23 +520,26 @@
 							updateStepper();
 							return;
 						}
-						installBtn.disabled = false;
-						installBtn.textContent = cfg.mcpAdapterInstalled
-							? i18n('activateAdapter') || 'Activate MCP Adapter'
-							: i18n('installAdapter') || 'Install MCP Adapter';
 						if (err) {
 							err.hidden = false;
 							err.textContent =
-								(res.data && res.data.message) || i18n('testFail') || 'Failed';
+								(res.data && res.data.message) || i18n('testFail', 'Connection failed');
 						}
 					})
 					.catch(function () {
-						installBtn.disabled = false;
-						installBtn.textContent = i18n('installAdapter') || 'Install MCP Adapter';
 						if (err) {
 							err.hidden = false;
-							err.textContent = i18n('testFail') || 'Failed';
+							err.textContent = i18n('testFail', 'Connection failed');
 						}
+					})
+					.finally(function () {
+						if (cfg.mcpAdapterActive) {
+							return;
+						}
+						installBtn.disabled = false;
+						installBtn.textContent = cfg.mcpAdapterInstalled
+							? i18n('activateAdapter', 'Activate MCP Adapter')
+							: installLabel;
 					});
 			});
 		}
@@ -443,7 +549,7 @@
 			genPw.addEventListener('click', function () {
 				function executeGenerate() {
 					genPw.disabled = true;
-					genPw.textContent = i18n('generating');
+					genPw.textContent = i18n('generating', 'Generating…');
 					rest('/ai-agents/generate-app-password', 'POST')
 						.then(function (res) {
 							if (!res.ok || !res.data || !res.data.success) {
@@ -470,16 +576,22 @@
 							refreshSnippets();
 							updateStepper();
 						})
+						.catch(function () {
+							var displayErr = $('mm-mcp-app-pw-desc');
+							if (displayErr) {
+								displayErr.textContent = i18n('testFail', 'Connection failed');
+							}
+						})
 						.finally(function () {
 							genPw.disabled = false;
 							genPw.textContent = cfg.currentUserHasMcpAppPassword
-								? i18n('appPwGenerateAnother')
-								: i18n('appPwGenerate');
+								? i18n('appPwGenerateAnother', 'Generate another Application Password')
+								: i18n('appPwGenerate', 'Generate Application Password');
 						});
 				}
 
 				if (cfg.currentUserHasMcpAppPassword) {
-					confirmDialog(i18n('appPwGenerateConfirm'), executeGenerate);
+					confirmDialog(i18n('appPwGenerateConfirm', 'You already have an mm-mcp Application Password. Generate another anyway? Old passwords stay valid until revoked.'), executeGenerate);
 				} else {
 					executeGenerate();
 				}
@@ -492,7 +604,7 @@
 				var result = $('mm-mcp-test-result');
 				if (result) {
 					result.className = 'mm-mcp-test-result';
-					result.textContent = i18n('testing');
+					result.textContent = i18n('testing', 'Testing…');
 				}
 				testBtn.disabled = true;
 
@@ -501,6 +613,10 @@
 					method: 'GET',
 					headers: { Accept: 'application/json' },
 				};
+				var testAbort = restAbortSignal(30000);
+				if (testAbort.signal) {
+					fetchOpts.signal = testAbort.signal;
+				}
 				if (useBasic) {
 					fetchOpts.credentials = 'omit';
 					fetchOpts.headers.Authorization = 'Basic ' + basicHeader(appPassword);
@@ -524,11 +640,11 @@
 						if (!res.ok) {
 							if (result) {
 								result.className = 'mm-mcp-test-result is-fail';
-								var msg = i18n('testFail');
+								var msg = i18n('testFail', 'Connection failed');
 								if (res.status === 401 || res.status === 403) {
-									msg += ' — ' + (useBasic ? i18n('testAuthFail') : i18n('testPermFail'));
+									msg += ' — ' + (useBasic ? i18n('testAuthFail', 'Application Password rejected (401/403). Generate a new one or check your username.') : i18n('testPermFail', 'Permission denied. Your user role may lack the required capability.'));
 								} else if (res.status === 404) {
-									msg += ' — ' + i18n('testNotFound');
+									msg += ' — ' + i18n('testNotFound', 'Abilities endpoint not found. Is the MCP Adapter active and WordPress 6.9+?');
 								} else if (res.data && res.data.message) {
 									msg += ' — ' + res.data.message;
 								}
@@ -564,30 +680,20 @@
 							}
 							var name = String(item.name || item.id || item.ability || item.slug || '');
 							var category = String(item.category || '');
-							if (name.indexOf('multisite-migrate') === 0 || category.indexOf('multisite-migrate') === 0) {
-								return true;
-							}
-							try {
-								return JSON.stringify(item).indexOf('multisite-migrate') !== -1;
-							} catch (e) {
-								return false;
-							}
+							return name.indexOf('multisite-migrate') === 0 || category.indexOf('multisite-migrate') === 0;
 						});
 						var count = mm.length;
-						if (count === 0 && (cfg.registeredAbilities || []).length > 0) {
-							count = cfg.registeredAbilities.length;
-						}
 						if (result) {
 							if (count > 0) {
 								result.className = 'mm-mcp-test-result is-ok';
 								result.textContent =
-									i18n('testOk') + ' — ' + count + ' abilities.';
+									i18n('testOk', 'Connection successful') + ' — ' + count + ' abilities.';
 								if (!useBasic) {
-									result.textContent += ' ' + i18n('testCookieHint');
+									result.textContent += ' ' + i18n('testCookieHint', '(Tested via session — generate an Application Password to verify external client access.)');
 								}
 							} else {
 								result.className = 'mm-mcp-test-result is-fail';
-								result.textContent = i18n('testNoAbilities');
+								result.textContent = i18n('testNoAbilities', 'Endpoint reachable but no Multisite Migrate abilities found. Deactivate and reactivate the plugin.');
 							}
 						}
 						updateStepper();
@@ -595,10 +701,11 @@
 					.catch(function () {
 						if (result) {
 							result.className = 'mm-mcp-test-result is-fail';
-							result.textContent = i18n('testFail') + ' — ' + i18n('testNetworkFail');
+							result.textContent = i18n('testFail', 'Connection failed') + ' — ' + i18n('testNetworkFail', 'Network error — check the site URL and try again.');
 						}
 					})
 					.finally(function () {
+						testAbort.clear();
 						testBtn.disabled = false;
 					});
 			});
@@ -608,7 +715,7 @@
 		if (oauthBtn) {
 			oauthBtn.addEventListener('click', function () {
 				oauthBtn.disabled = true;
-				oauthBtn.textContent = i18n('generating');
+				oauthBtn.textContent = i18n('generating', 'Generating…');
 				rest('/ai-agents/oauth/generate-client', 'POST', { name: 'ChatGPT MCP' })
 					.then(function (res) {
 						var msg = $('mm-mcp-oauth-msg');
@@ -639,9 +746,15 @@
 						}
 						loadOauthClients();
 					})
+					.catch(function () {
+						var msg = $('mm-mcp-oauth-msg');
+						if (msg) {
+							msg.textContent = i18n('testFail', 'Connection failed');
+						}
+					})
 					.finally(function () {
 						oauthBtn.disabled = false;
-						oauthBtn.textContent = 'Generate ChatGPT OAuth credentials';
+						oauthBtn.textContent = i18n('oauthGenerateCredentials', 'Generate ChatGPT OAuth credentials');
 					});
 			});
 		}
@@ -659,10 +772,16 @@
 		}
 		rest('/ai-agents/oauth/clients', 'GET').then(function (res) {
 			list.innerHTML = '';
+			if (!res || !res.ok) {
+				var fail = document.createElement('li');
+				fail.textContent = i18n('oauthClientsLoadFail', 'Could not load OAuth clients.');
+				list.appendChild(fail);
+				return;
+			}
 			var clients = (res.data && res.data.clients) || [];
 			if (!clients.length) {
 				var empty = document.createElement('li');
-				empty.textContent = 'No OAuth clients yet.';
+				empty.textContent = i18n('oauthClientsEmpty', 'No OAuth clients yet.');
 				list.appendChild(empty);
 				return;
 			}
@@ -683,11 +802,23 @@
 				var btn = document.createElement('button');
 				btn.type = 'button';
 				btn.className = 'button button-small mm-mcp-revoke';
-				btn.textContent = 'Revoke';
+				btn.textContent = i18n('appPwRevoke', 'Revoke');
 				btn.addEventListener('click', function () {
-					confirmDialog(i18n('oauthRevokeConfirm') || 'Revoke this OAuth client and its tokens?', function () {
-						rest('/ai-agents/oauth/clients/' + encodeURIComponent(c.client_id), 'DELETE').then(function () {
+					confirmDialog(i18n('oauthRevokeConfirm', 'Revoke this OAuth client and its tokens?'), function () {
+						rest('/ai-agents/oauth/clients/' + encodeURIComponent(c.client_id), 'DELETE').then(function (res) {
+							if (!res || !res.ok) {
+								var msg = $('mm-mcp-oauth-msg');
+								if (msg) {
+									msg.textContent = (res && res.data && res.data.message) || i18n('testFail', 'Connection failed');
+								}
+								return;
+							}
 							loadOauthClients();
+						}).catch(function () {
+							var msg = $('mm-mcp-oauth-msg');
+							if (msg) {
+								msg.textContent = i18n('testNetworkFail', 'Network error — check the site URL and try again.');
+							}
 						});
 					});
 				});
@@ -696,6 +827,11 @@
 				li.appendChild(btn);
 				list.appendChild(li);
 			});
+		}).catch(function () {
+			list.innerHTML = '';
+			var err = document.createElement('li');
+			err.textContent = i18n('testNetworkFail', 'Network error — check the site URL and try again.');
+			list.appendChild(err);
 		});
 	}
 
@@ -709,7 +845,7 @@
 		if (!items.length) {
 			var empty = document.createElement('li');
 			empty.className = 'mm-mcp-app-pw-empty';
-			empty.textContent = i18n('appPwNone');
+			empty.textContent = i18n('appPwNone', 'No Application Passwords for your user yet.');
 			list.appendChild(empty);
 			return;
 		}
@@ -729,7 +865,7 @@
 			if (p.is_mcp) {
 				var badge = document.createElement('span');
 				badge.className = 'mm-mcp-app-pw__badge';
-				badge.textContent = i18n('appPwMcpBadge');
+				badge.textContent = i18n('appPwMcpBadge', 'MCP');
 				title.appendChild(badge);
 			}
 			meta.appendChild(title);
@@ -737,22 +873,29 @@
 			var dates = document.createElement('div');
 			dates.className = 'mm-mcp-app-pw__dates';
 			dates.textContent =
-				i18n('appPwCreated') +
+				i18n('appPwCreated', 'Created') +
 				': ' +
 				(p.created || '—') +
 				' · ' +
-				i18n('appPwLastUsed') +
+				i18n('appPwLastUsed', 'Last used') +
 				': ' +
-				(p.last_used || i18n('appPwNever'));
+				(p.last_used || i18n('appPwNever', 'Never'));
 			meta.appendChild(dates);
 
 			var btn = document.createElement('button');
 			btn.type = 'button';
 			btn.className = 'button button-small mm-mcp-revoke';
-			btn.textContent = i18n('appPwRevoke');
+			btn.textContent = i18n('appPwRevoke', 'Revoke');
 			btn.addEventListener('click', function () {
-				confirmDialog(i18n('appPwRevokeConfirm'), function () {
+				confirmDialog(i18n('appPwRevokeConfirm', 'Revoke this Application Password? Clients using it will stop working.'), function () {
 					rest('/ai-agents/app-passwords/' + encodeURIComponent(p.uuid), 'DELETE').then(function (res) {
+						if (!res || !res.ok) {
+							var displayErr = $('mm-mcp-app-pw-desc');
+							if (displayErr) {
+								displayErr.textContent = (res && res.data && res.data.message) || i18n('testFail', 'Failed');
+							}
+							return;
+						}
 						if (res.data && Array.isArray(res.data.passwords)) {
 							cfg.applicationPasswords = res.data.passwords;
 						} else {
@@ -763,7 +906,18 @@
 						cfg.currentUserHasMcpAppPassword = (cfg.applicationPasswords || []).some(function (row) {
 							return !!row.is_mcp;
 						});
+						appPassword = '';
+						var display = $('mm-mcp-app-pw-display');
+						if (display) {
+							display.textContent = '';
+						}
+						refreshSnippets();
 						updateStepper();
+					}).catch(function () {
+						var displayErr = $('mm-mcp-app-pw-desc');
+						if (displayErr) {
+							displayErr.textContent = i18n('testFail', 'Failed');
+						}
 					});
 				});
 			});

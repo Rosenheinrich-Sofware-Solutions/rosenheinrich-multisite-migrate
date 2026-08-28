@@ -18,7 +18,7 @@ class Rmmigrate_Archive_Factory
     public static function resolve_archive_path(Rmmigrate_Job $job): string
     {
         $progress = $job->get_progress();
-        $path = $progress['archive']['archive_path'] ?? $progress['archive']['zip_path'] ?? '';
+        $path = (string) ($progress['archive']['archive_path'] ?? $progress['archive']['zip_path'] ?? '');
         if ($path !== '' && Rmmigrate_Filesystem::exists($path)) {
             return $path;
         }

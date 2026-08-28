@@ -324,9 +324,6 @@
         }
         lastDisplayedPercent = Math.max(lastDisplayedPercent, pct);
         var msg = data.message || opts.fallbackMessage || '';
-        if (!msg && pct === 0 && lastDisplayedPercent > 0) {
-            return true;
-        }
         updateProgress(pct, msg);
         return true;
     }
@@ -563,7 +560,7 @@
             finishJobUi(true, data.message);
             return true;
         }
-        if (status === -1 || status === -2) {
+        if (status !== null && status < 0) {
             finishJobUi(false, data.error || data.message || t('backupFailed', 'Backup failed'));
             return true;
         }
@@ -876,7 +873,7 @@
     });
 
     $(document).on('click', '#multisite-migrate-cancel', function () {
-        if ($('#mm-active-job-banner').hasClass('mm-finished-job') || $('#mm-active-job-banner').hasClass('mm-finished-job')) {
+        if ($('#mm-active-job-banner').hasClass('mm-finished-job')) {
             reloadWithoutJobId();
             return;
         }
@@ -973,8 +970,8 @@
         rmmigrateAdminUI.confirm(confirmMsg, function () {
             $('#mm-bulk-delete-backups').prop('disabled', true);
             rmmigrateAdminUI.toast(rmmigrateAdmin.deletingBackup || t('deletingBackup', 'Deleting…'), 'info');
-            ids.forEach(function (jobId) {
-                $('.mm-backup-select[value="' + jobId + '"]').closest('tr').addClass('mm-row-deleting').fadeOut(150);
+            ids.forEach(function (bulkJobId) {
+                $('.mm-backup-select[value="' + bulkJobId + '"]').closest('tr').addClass('mm-row-deleting').fadeOut(150);
             });
             $.post(rmmigrateAdmin.ajaxUrl, {
                 action: 'rmmigrate_delete_bulk',
@@ -1026,4 +1023,87 @@
     } catch (e) {
         // ignore
     }
+
+    var subsiteSearchTimer = null;
+
+    function subsiteFieldName($fieldset) {
+        return ($fieldset.data('mmSelectionMode') || 'exclude') === 'include'
+            ? 'included_blogs[]'
+            : 'excluded_blogs[]';
+    }
+
+    function ensureSubsiteOption($fieldset, site, checked) {
+        var blogId = parseInt(site.blog_id, 10);
+        if (!blogId) {
+            return;
+        }
+        var blogIdStr = String(blogId);
+        if ($fieldset.find('input[value="' + blogIdStr + '"]').length) {
+            if (checked) {
+                $fieldset.find('input[value="' + blogIdStr + '"]').prop('checked', true);
+            }
+            return;
+        }
+        var $extra = $fieldset.find('.mm-subsite-extra');
+        if (!$extra.length) {
+            $extra = $('<div class="mm-subsite-extra"></div>');
+            $fieldset.find('.mm-subsite-search-results').first().after($extra);
+        }
+        var $label = $('<label class="mm-subsite-option"></label>');
+        var $input = $('<input type="checkbox">').attr('name', subsiteFieldName($fieldset)).val(blogId);
+        if (checked) {
+            $input.prop('checked', true);
+        }
+        $label.append($input).append(
+            $('<span class="mm-subsite-option__text"></span>').text(site.label || blogId)
+        );
+        $extra.append($label);
+    }
+
+    $(document).on('input', '.mm-subsite-search-input', function () {
+        var $input = $(this);
+        var $fieldset = $input.closest('.mm-subsite-list');
+        var $results = $fieldset.find('.mm-subsite-search-results');
+        clearTimeout(subsiteSearchTimer);
+        var q = ($input.val() || '').trim();
+        if (q.length < 2) {
+            $results.addClass('mm-hidden').empty();
+            return;
+        }
+        subsiteSearchTimer = setTimeout(function () {
+            $.post(rmmigrateAdmin.ajaxUrl, {
+                action: 'rmmigrate_search_subsites',
+                nonce: rmmigrateAdmin.nonce,
+                search: q,
+                offset: 0
+            }).done(function (res) {
+                if (!res || !res.success || !res.data || !Array.isArray(res.data.sites)) {
+                    return;
+                }
+                $results.removeClass('mm-hidden').empty();
+                if (!res.data.sites.length) {
+                    $results.text(t('subsiteSearchEmpty', 'No subsites matched your search.'));
+                    return;
+                }
+                res.data.sites.forEach(function (site) {
+                    var exists = $fieldset.find('input[value="' + site.blog_id + '"]').length > 0;
+                    var $btn = $('<button type="button" class="button button-small mm-subsite-search-add"></button>')
+                        .text((exists ? '✓ ' : '+ ') + (site.label || site.blog_id))
+                        .prop('disabled', exists)
+                        .data('site', site);
+                    $results.append($btn);
+                });
+            });
+        }, 300);
+    });
+
+    $(document).on('click', '.mm-subsite-search-add', function () {
+        var site = $(this).data('site');
+        if (!site) {
+            return;
+        }
+        var $fieldset = $(this).closest('.mm-subsite-list');
+        ensureSubsiteOption($fieldset, site, true);
+        $(this).prop('disabled', true).text('✓ ' + (site.label || site.blog_id));
+    });
 })(jQuery);

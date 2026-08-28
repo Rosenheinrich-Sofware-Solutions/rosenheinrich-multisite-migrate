@@ -19,8 +19,8 @@ if (!defined('ABSPATH')) {
  */
 class Rmmigrate_Capabilities
 {
-    const PURCHASE_URL = 'https://multisitemigrate.rosenheinrich.com';
     const PRICING_BASE_URL = 'https://multisitemigrate.rosenheinrich.com';
+    const PURCHASE_URL = self::PRICING_BASE_URL;
 
     public static function app_name(): string
     {
@@ -69,6 +69,11 @@ class Rmmigrate_Capabilities
             array('de' => '/de/kontakt/', 'intl' => '/contact/', 'default' => '/contact/'),
             'rmmigrate_contact_url'
         );
+    }
+
+    public static function support_email(): string
+    {
+        return (string) apply_filters('rmmigrate_support_email', 'phillip@rosenheinrich.com');
     }
 
     public static function privacy_url(): string

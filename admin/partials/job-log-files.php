@@ -28,9 +28,9 @@ if ($rmmigrate_view_log !== '' && Rmmigrate_Activity_Log::is_allowed_log_basenam
             $rmmigrate_log_view_lines,
             $rmmigrate_log_offset
         );
-        $rmmigrate_log_lines = $rmmigrate_log_chunk['lines'] === ''
-            ? 0
-            : substr_count($rmmigrate_log_chunk['lines'], "\n") + 1;
+        $rmmigrate_log_lines = Rmmigrate_Activity_Log::count_display_lines(
+            (string) ($rmmigrate_log_chunk['lines'] ?? '')
+        );
     }
 }
 

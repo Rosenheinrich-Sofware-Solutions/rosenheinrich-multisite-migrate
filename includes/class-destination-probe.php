@@ -34,19 +34,17 @@ class Rmmigrate_Destination_Probe
             return new WP_Error('local_write', __('Could not write a test file to local storage.', 'rosenheinrich-multisite-migrate'));
         }
         if (!Rmmigrate_Filesystem::exists($path)) {
+            Rmmigrate_Filesystem::delete($path);
             return new WP_Error('local_verify', __('Test file was not found after writing.', 'rosenheinrich-multisite-migrate'));
         }
         if (!Rmmigrate_Filesystem::delete($path)) {
             return new WP_Error('local_delete', __('Test file was created but could not be deleted.', 'rosenheinrich-multisite-migrate'));
         }
+        clearstatcache(true, $path);
         if (Rmmigrate_Filesystem::exists($path)) {
             return new WP_Error('local_delete', __('Test file still exists after delete.', 'rosenheinrich-multisite-migrate'));
         }
 
-        return sprintf(
-            /* translators: %s: destination label (local storage). */
-            __('%1$s OK — test file created and deleted.', 'rosenheinrich-multisite-migrate'),
-            __('local storage', 'rosenheinrich-multisite-migrate')
-        );
+        return __('Local storage OK — test file created and deleted.', 'rosenheinrich-multisite-migrate');
     }
 }

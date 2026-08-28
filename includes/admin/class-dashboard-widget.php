@@ -60,8 +60,7 @@ class Rmmigrate_Dashboard_Widget
         }
 
         if (is_multisite()) {
-            return Rmmigrate_Access::subsite_page_visible('multisite-migrate-archives')
-                || Rmmigrate_Access::subsite_any_page_visible();
+            return Rmmigrate_Access::subsite_plugin_visible();
         }
 
         return true;
@@ -75,8 +74,14 @@ class Rmmigrate_Dashboard_Widget
     {
         unset($post);
         $is_network = is_network_admin();
-        if (is_array($widget) && isset($widget['is_network'])) {
+        if (is_array($widget) && isset($widget['args']['is_network'])) {
+            $is_network = (bool) $widget['args']['is_network'];
+        } elseif (is_array($widget) && isset($widget['is_network'])) {
             $is_network = (bool) $widget['is_network'];
+        }
+
+        if (!self::user_can_view($is_network)) {
+            return;
         }
 
         $rmmigrate_widget = Rmmigrate_Dashboard_Data::snapshot($is_network);
