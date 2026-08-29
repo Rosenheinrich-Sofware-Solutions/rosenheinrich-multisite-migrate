@@ -2,9 +2,9 @@
 Contributors: rosenheinrich
 Tags: backup, migration, wordpress-backup, restore, multisite
 Requires at least: 6.9
-Tested up to: 7.1
+Tested up to: 7.0
 Requires PHP: 7.4
-Stable tag: 1.2.0
+Stable tag: 1.2.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -236,6 +236,9 @@ Backup and restore run as background-style chunked jobs. They are designed not t
 
 == Changelog ==
 
+= 1.2.1 =
+* Bug fixes and UI improvements.
+
 = 1.2.0 =
 * Hardening, bug fixes, and performance improvements across backup, restore, and archive handling.
 
@@ -331,6 +334,9 @@ Backup and restore run as background-style chunked jobs. They are designed not t
 * Initial public release of the free edition: multisite-aware backups, restore, local import/export, search & replace, AES-256 encryption and a health dashboard.
 
 == Upgrade Notice ==
+
+= 1.2.1 =
+Bug fixes and UI improvements. Recommended update.
 
 = 1.2.0 =
 Hardening, bug fixes, and performance improvements across backup, restore, and archive handling. Recommended update.

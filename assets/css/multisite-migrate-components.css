@@ -2169,8 +2169,13 @@
     background: var(--mm-overlay);
     z-index: 100002;
     display: flex;
-    align-items: center;
+    /* flex-start + overlay scroll: tall modals (uninstall) stay reachable on mobile */
+    align-items: flex-start;
     justify-content: center;
+    overflow-x: hidden;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
     padding: max(var(--mm-space-4), env(safe-area-inset-top, 0px)) var(--mm-space-4) max(var(--mm-space-4), env(safe-area-inset-bottom, 0px));
 }
 
@@ -2181,6 +2186,8 @@
     max-width: 420px;
     width: 90%;
     box-shadow: var(--mm-shadow-lg);
+    margin-block: auto;
+    box-sizing: border-box;
 }
 
 .mm-confirm-modal p {
@@ -2266,6 +2273,52 @@
 
 .mm-uninstall-modal {
     max-width: 520px;
+    max-height: min(92vh, calc(100dvh - 1.5rem));
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    padding: var(--mm-space-5);
+}
+
+.mm-uninstall-modal__body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    margin: 0 0 4px;
+}
+
+.mm-uninstall-modal .mm-uninstall-title {
+    flex-shrink: 0;
+}
+
+.mm-uninstall-modal .mm-confirm-actions {
+    flex-shrink: 0;
+    margin-top: 0;
+    padding-top: 12px;
+    border-top: 1px solid var(--mm-border, #d8dee6);
+    background: var(--mm-surface);
+    /* Keep primary actions tappable above iOS home indicator */
+    padding-bottom: max(0px, env(safe-area-inset-bottom, 0px));
+}
+
+@media (max-width: 600px) {
+    .mm-uninstall-modal {
+        width: min(96%, 520px);
+        max-height: min(94vh, calc(100dvh - 0.75rem));
+        padding: var(--mm-space-4);
+    }
+
+    .mm-uninstall-modal .mm-confirm-actions {
+        flex-wrap: wrap;
+    }
+
+    .mm-uninstall-modal .mm-confirm-actions .button {
+        flex: 1 1 auto;
+        min-width: calc(50% - 4px);
+    }
 }
 
 /* In-plugin feedback modal */
@@ -2391,7 +2444,7 @@ body.mm-feedback-open {
 
 .mm-deactivate-survey-reasons {
     list-style: none;
-    margin: 0 0 10px;
+    margin: 0 0 16px;
     padding: 0;
 }
 
@@ -2411,28 +2464,48 @@ body.mm-feedback-open {
     margin-top: 2px;
 }
 
+.mm-deactivate-survey-details {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.mm-deactivate-survey-message-wrap {
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+}
+
 .mm-deactivate-survey-message-label {
     display: block;
     margin: 0 0 6px;
     font-weight: 500;
+    font-size: 13px;
+    color: var(--mm-text, #1e293b);
 }
 
 .mm-deactivate-survey-message {
+    display: block;
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+    margin: 0 !important;
+}
+
+.mm-deactivate-survey-contact {
     width: 100%;
     max-width: 100%;
     box-sizing: border-box;
-}
-
-.mm-deactivate-survey-details {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
 }
 
 .mm-deactivate-survey-email {
-    width: 100%;
-    max-width: 100%;
-    box-sizing: border-box;
+    display: block;
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+    margin: 0 !important;
 }
 
 .mm-deactivate-survey-contact-hint {

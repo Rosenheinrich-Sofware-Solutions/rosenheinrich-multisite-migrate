@@ -191,14 +191,7 @@
         var $card = $('.mm-setup-optin');
         var $btn = $(this);
         if (!$card.hasClass('is-done') && !finishOptInInFlight) {
-            resolveFinishOptIn({ redirecting: true }).always(function () {
-                if (!$btn.prop('disabled')) {
-                    $card.addClass('is-submitting');
-                    $btn.prop('disabled', true).attr('aria-busy', 'true');
-                }
-                completeAndGo(target);
-            });
-            return;
+            resolveFinishOptIn({ redirecting: true });
         }
         if (!$btn.prop('disabled')) {
             $card.addClass('is-submitting');

@@ -112,20 +112,25 @@
         });
 
         var $details = $('<div class="mm-deactivate-survey-details"></div>');
+        var $msgWrap = $('<div class="mm-deactivate-survey-message-wrap"></div>');
         var $msgLabel = $('<label class="mm-deactivate-survey-message-label"></label>')
             .attr('for', 'mm-deactivate-reason-message')
             .text(t('surveyDetails', 'Anything else? (optional)'));
         var $msg = $('<textarea id="mm-deactivate-reason-message" class="mm-deactivate-survey-message" rows="3" maxlength="1000"></textarea>')
             .attr('placeholder', t('surveyDetailsPlaceholder', ''));
+        $msgWrap.append($msgLabel, $msg);
+
         var $emailLabel = $('<label class="mm-deactivate-survey-message-label"></label>')
             .attr('for', 'mm-deactivate-contact-email')
             .text(t('surveyContactLabel', 'Email for follow-up (optional)'));
         var $emailHint = $('<p class="mm-deactivate-survey-contact-hint"></p>')
             .text(t('surveyContactHint', 'We may contact you if we need more details about a problem.'));
-        var $email = $('<input type="email" id="mm-deactivate-contact-email" class="mm-deactivate-survey-email" maxlength="100" autocomplete="email">');
+        var defaultEmail = (cfg && cfg.defaultContactEmail) ? cfg.defaultContactEmail : '';
+        var $email = $('<input type="email" id="mm-deactivate-contact-email" class="mm-deactivate-survey-email" maxlength="100" autocomplete="email">')
+            .val(defaultEmail);
         var $contact = $('<div class="mm-deactivate-survey-contact"></div>');
         $contact.append($emailLabel, $email, $emailHint);
-        $details.append($msgLabel, $msg, $contact);
+        $details.append($msgWrap, $contact);
         $el.append($title, $list, $details);
 
         return {
@@ -236,11 +241,13 @@
         var $confirm = $('<button type="button" class="button button-primary mm-btn-teal"></button>').text(t(confirmKey, isDelete ? 'Delete plugin' : 'Deactivate'));
 
         $actions.append($confirm, $cancel);
-        $modal.append($title, $intro);
+        var $body = $('<div class="mm-uninstall-modal__body"></div>');
+        $body.append($intro);
         if (survey) {
-            $modal.append(survey.$el);
+            $body.append(survey.$el);
         }
-        $modal.append($presets, $list, $actions);
+        $body.append($presets, $list);
+        $modal.append($title, $body, $actions);
         $overlay.append($modal);
         $('body').append($overlay);
 

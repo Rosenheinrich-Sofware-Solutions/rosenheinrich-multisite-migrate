@@ -495,7 +495,7 @@ class Rmmigrate_Setup_Wizard
         }
 
         $response = wp_remote_post($subscribe_url, array(
-            'timeout' => 12,
+            'timeout' => 4,
             'headers' => array('Content-Type' => 'application/json'),
             'body'    => wp_json_encode($fields),
         ));

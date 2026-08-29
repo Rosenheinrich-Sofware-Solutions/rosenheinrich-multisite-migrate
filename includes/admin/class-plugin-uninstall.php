@@ -93,18 +93,29 @@ class Rmmigrate_Plugin_Uninstall
 
     private static function resolve_current_user_email(): string
     {
-        if (!function_exists('wp_get_current_user')) {
-            return '';
-        }
-        try {
-            $user = wp_get_current_user();
-            if (is_object($user) && !empty($user->user_email)) {
-                return (string) $user->user_email;
+        $email = '';
+        if (function_exists('wp_get_current_user')) {
+            try {
+                $user = wp_get_current_user();
+                if (is_object($user) && !empty($user->user_email)) {
+                    $email = (string) $user->user_email;
+                }
+            } catch (\Throwable $e) {
+                // fall through
             }
-        } catch (\Throwable $e) {
-            return '';
         }
-        return '';
+        if ($email === '') {
+            $admin_email = is_multisite() && is_network_admin()
+                ? get_site_option('admin_email', '')
+                : get_option('admin_email', '');
+            if (empty($admin_email)) {
+                $admin_email = get_option('admin_email', '');
+            }
+            if (is_string($admin_email)) {
+                $email = $admin_email;
+            }
+        }
+        return sanitize_email($email);
     }
 
     /**
@@ -176,10 +187,6 @@ class Rmmigrate_Plugin_Uninstall
         $network = self::should_deactivate_network_wide($plugin);
 
         deactivate_plugins($plugin, true, $network);
-
-        if (is_plugin_active($plugin) || ($network && is_plugin_active_for_network($plugin))) {
-            wp_send_json_error(array('message' => __('Could not deactivate the plugin.', 'rosenheinrich-multisite-migrate')), 500);
-        }
 
         self::schedule_deferred_cleanup($plan);
 
@@ -382,11 +389,10 @@ class Rmmigrate_Plugin_Uninstall
             return false;
         }
 
-        if (!function_exists('is_plugin_active_for_network')) {
-            require_once ABSPATH . 'wp-admin/includes/plugin.php';
+        if (function_exists('is_plugin_active_for_network')) {
+            return is_plugin_active_for_network($plugin);
         }
 
-        // Posted network_scope is UI hint only; deactivation follows activation state.
-        return is_plugin_active_for_network($plugin);
+        return !empty($_POST['network_scope']) || (function_exists('is_network_admin') && is_network_admin());
     }
 }

@@ -255,20 +255,21 @@ final class Rmmigrate_Feedback
             wp_send_json_success(array('ok' => false, 'skipped' => 'url'));
         }
 
+        $is_deactivate = ($context === 'deactivate');
         $response = wp_remote_post($submit_url, array(
-            'timeout' => 5,
-            'headers' => array('Content-Type' => 'application/json'),
-            'body'    => wp_json_encode($payload),
+            'timeout'  => $is_deactivate ? 2 : 5,
+            'blocking' => !$is_deactivate,
+            'headers'  => array('Content-Type' => 'application/json'),
+            'body'     => wp_json_encode($payload),
         ));
 
-        $ok = !is_wp_error($response) && (int) wp_remote_retrieve_response_code($response) < 400;
-        if (!$ok) {
-            wp_send_json_error(array(
-                'message' => __('Could not send feedback. Try again later.', 'rosenheinrich-multisite-migrate'),
-            ), 502);
-        }
-
-        if ($context !== 'deactivate') {
+        if (!$is_deactivate) {
+            $ok = !is_wp_error($response) && (int) wp_remote_retrieve_response_code($response) < 400;
+            if (!$ok) {
+                wp_send_json_error(array(
+                    'message' => __('Could not send feedback. Try again later.', 'rosenheinrich-multisite-migrate'),
+                ), 502);
+            }
             self::mark_cooldown('submitted');
         }
         Rmmigrate_Telemetry::record_event('feedback_modal', array(
