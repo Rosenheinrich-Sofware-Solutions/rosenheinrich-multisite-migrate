@@ -67,7 +67,8 @@ final class Rmmigrate_Abilities
     private function mcp_meta(bool $readonly = true, ?array $write_annotations = null): array
     {
         $meta = array(
-            'mcp' => array(
+            'show_in_rest' => true,
+            'mcp'          => array(
                 'public' => true,
             ),
         );

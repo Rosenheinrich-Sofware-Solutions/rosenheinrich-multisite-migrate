@@ -188,7 +188,10 @@
 	function basicHeader(password) {
 		try {
 			var pw = (password || '').replace(/\s+/g, '');
-			var credentials = cfg.userLogin + ':' + (pw || '{application-password}');
+			if (!pw) {
+				return '<BASE64_OF_USERNAME:APPLICATION_PASSWORD>';
+			}
+			var credentials = cfg.userLogin + ':' + pw;
 			if (typeof TextEncoder !== 'undefined') {
 				var bytes = new TextEncoder().encode(credentials);
 				var binary = '';
@@ -215,7 +218,7 @@
 		var claude = $('mm-mcp-snip-claude-code');
 		if (claude) {
 			claude.textContent =
-				'claude mcp add multisite-migrate-site \\\n' +
+				'claude mcp add --scope user multisite-migrate-site \\\n' +
 				'  --transport http "' +
 				(cfg.mcpEndpoint || '') +
 				'" \\\n' +
@@ -656,7 +659,7 @@
 						if (Array.isArray(res.data)) {
 							items = res.data;
 						} else if (res.data && typeof res.data === 'object') {
-							var raw = res.data.abilities || res.data.data || res.data.items || res.data;
+							var raw = res.data.abilities || res.data.tools || res.data.data || res.data.items || res.data;
 							if (Array.isArray(raw)) {
 								items = raw;
 							} else if (raw && typeof raw === 'object') {
@@ -693,7 +696,7 @@
 								}
 							} else {
 								result.className = 'mm-mcp-test-result is-fail';
-								result.textContent = i18n('testNoAbilities', 'Endpoint reachable but no Multisite Migrate abilities found. Deactivate and reactivate the plugin.');
+								result.textContent = i18n('testNoAbilities', 'Endpoint reachable but no Multisite Migrate abilities found.');
 							}
 						}
 						updateStepper();

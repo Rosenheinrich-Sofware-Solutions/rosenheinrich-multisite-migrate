@@ -127,9 +127,9 @@ if (!defined('ABSPATH')) {
 				<div class="mm-mcp-tab-panel" id="mm-mcp-panel-claude-code" data-panel="claude-code" role="tabpanel" aria-labelledby="mm-mcp-tab-claude-code" hidden>
 					<p><?php echo esc_html__('Run this once in a terminal where the Claude Code CLI is installed.', 'rosenheinrich-multisite-migrate'); ?></p>
 					<ol class="mm-mcp-howto">
-						<li><?php echo esc_html__('Generate an Application Password in Setup, then Copy the command.', 'rosenheinrich-multisite-migrate'); ?></li>
-						<li><?php echo esc_html__('Paste into Terminal / PowerShell, replace the password placeholder, then run.', 'rosenheinrich-multisite-migrate'); ?></li>
-						<li><?php echo esc_html__('Confirm server multisite-migrate-site appears in Claude Code.', 'rosenheinrich-multisite-migrate'); ?></li>
+						<li><?php echo esc_html__('Generate an Application Password in Step 3 (the command below automatically encodes username and password into the Basic auth header).', 'rosenheinrich-multisite-migrate'); ?></li>
+						<li><?php echo esc_html__('The Authorization header requires base64 of username:application_password. Copy the command, paste into your terminal, and run.', 'rosenheinrich-multisite-migrate'); ?></li>
+						<li><?php echo esc_html__('Confirm server multisite-migrate-site appears in Claude Code (uses --scope user by default).', 'rosenheinrich-multisite-migrate'); ?></li>
 					</ol>
 					<pre class="mm-mcp-snippet" id="mm-mcp-snip-claude-code"></pre>
 					<p class="mm-mcp-step__actions">
