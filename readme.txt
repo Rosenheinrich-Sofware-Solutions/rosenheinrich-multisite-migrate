@@ -1,5 +1,5 @@
 === Rosenheinrich Multisite Migrate – Backup, Restore & AI (MCP) ===
-Contributors: rosenheinrich
+Contributors: rosenheinrich, phillipro
 Tags: backup, migration, wordpress-backup, restore, multisite
 Requires at least: 6.9
 Tested up to: 7.1
