@@ -2,7 +2,7 @@
 Contributors: rosenheinrich
 Tags: backup, migration, wordpress-backup, restore, multisite
 Requires at least: 6.9
-Tested up to: 7.0
+Tested up to: 7.1
 Requires PHP: 7.4
 Stable tag: 1.2.2
 License: GPLv2 or later
