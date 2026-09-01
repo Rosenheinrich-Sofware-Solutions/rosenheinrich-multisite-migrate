@@ -72,6 +72,38 @@ class Rmmigrate_Snap_DB
     }
 
     /**
+     * Types safe for no-PK ORDER BY (skip TEXT/BLOB/JSON — sort cost / packet limits).
+     */
+    public static function is_orderable_type(string $type): bool
+    {
+        $type = strtolower($type);
+        if ($type === '' || self::is_binary_type($type)) {
+            return false;
+        }
+        if (strpos($type, 'text') !== false || strpos($type, 'json') !== false) {
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * @param array<string,string> $col_types
+     * @return string[]
+     */
+    public static function orderable_column_names(array $col_types): array
+    {
+        $cols = array();
+        foreach ($col_types as $name => $type) {
+            if (self::is_orderable_type((string) $type)) {
+                $cols[] = (string) $name;
+            }
+        }
+
+        return $cols;
+    }
+
+    /**
      * @param mixed $value
      */
     public static function sql_value($value, string $column_type): string
@@ -93,23 +125,50 @@ class Rmmigrate_Snap_DB
     /**
      * @param array<string,mixed> $row
      * @param string[] $pk_cols
+     * @param array<string,string> $col_types
      * @return array<string,mixed>
      */
-    public static function extract_pk_offset(array $row, array $pk_cols): array
+    public static function extract_pk_offset(array $row, array $pk_cols, array $col_types = array()): array
     {
         $offset = array();
         foreach ($pk_cols as $col) {
-            $offset[$col] = $row[$col] ?? null;
+            $val = $row[$col] ?? null;
+            // Binary PKs (Wordfence IP/signature) must survive wp_json_encode in job progress.
+            if ($val !== null && self::is_binary_type((string) ($col_types[$col] ?? ''))) {
+                $offset[$col] = array('__hex' => bin2hex((string) $val));
+            } else {
+                $offset[$col] = $val;
+            }
         }
         return $offset;
     }
 
     /**
-     * @param array<string,mixed>|null $offset
+     * @param mixed $value
+     * @param array<string,string> $col_types
      */
-    public static function build_pk_where(array $pk_cols, $offset): string
+    public static function pk_value_sql_literal(string $col, $value, array $col_types = array()): string
     {
         global $wpdb;
+        if (is_array($value) && isset($value['__hex']) && is_string($value['__hex'])) {
+            $hex = preg_replace('/[^0-9a-f]/i', '', $value['__hex']);
+            if ($hex === null || $hex === '') {
+                return "''";
+            }
+            return '0x' . $hex;
+        }
+        if (self::is_binary_type((string) ($col_types[$col] ?? ''))) {
+            return self::sql_value($value, (string) $col_types[$col]);
+        }
+        return (string) $wpdb->prepare('%s', $value);
+    }
+
+    /**
+     * @param array<string,mixed>|null $offset
+     * @param array<string,string> $col_types
+     */
+    public static function build_pk_where(array $pk_cols, $offset, array $col_types = array()): string
+    {
         // Non-array / null PK values used to coerce to '' → WHERE id > '' rescans and inflates table_rows_done.
         if (!is_array($offset) || $pk_cols === array()) {
             return '';
@@ -118,18 +177,45 @@ class Rmmigrate_Snap_DB
             if (!array_key_exists($col, $offset) || $offset[$col] === null) {
                 return '';
             }
+            // Empty / odd-length __hex would become WHERE col > '' and rescan.
+            if (is_array($offset[$col]) && array_key_exists('__hex', $offset[$col])) {
+                $hex = preg_replace('/[^0-9a-f]/i', '', (string) $offset[$col]['__hex']);
+                if ($hex === null || $hex === '' || (strlen($hex) % 2) !== 0) {
+                    return '';
+                }
+            }
         }
         if (count($pk_cols) === 1) {
-            $col = self::quote_identifier($pk_cols[0]);
-            $prepared = $wpdb->prepare('%s', $offset[$pk_cols[0]]);
-            return 'WHERE ' . $col . ' > ' . $prepared;
+            $col = $pk_cols[0];
+            return 'WHERE ' . self::quote_identifier($col) . ' > ' . self::pk_value_sql_literal($col, $offset[$col], $col_types);
         }
         $tuple = array();
         foreach ($pk_cols as $col) {
-            $tuple[] = $wpdb->prepare('%s', $offset[$col]);
+            $tuple[] = self::pk_value_sql_literal($col, $offset[$col], $col_types);
         }
         $cols_sql = '(' . implode(',', array_map(array(self::class, 'quote_identifier'), $pk_cols)) . ')';
         return 'WHERE ' . $cols_sql . ' > (' . implode(',', $tuple) . ')';
+    }
+
+    /**
+     * @param mixed $value
+     */
+    public static function normalize_pk_compare_value($value): string
+    {
+        if (is_array($value) && isset($value['__hex']) && is_string($value['__hex'])) {
+            $hex = strtolower(preg_replace('/[^0-9a-f]/i', '', $value['__hex']) ?? '');
+            if ($hex !== '' && (strlen($hex) % 2) === 0) {
+                $bin = @hex2bin($hex);
+                if ($bin !== false) {
+                    return $bin;
+                }
+            }
+            return '';
+        }
+        if (is_array($value) || is_object($value)) {
+            return '';
+        }
+        return (string) $value;
     }
 
     /**
@@ -139,8 +225,8 @@ class Rmmigrate_Snap_DB
     public static function compare_pk_tuples(array $pk_cols, array $a, array $b): int
     {
         foreach ($pk_cols as $col) {
-            $va = (string) ($a[$col] ?? '');
-            $vb = (string) ($b[$col] ?? '');
+            $va = self::normalize_pk_compare_value($a[$col] ?? '');
+            $vb = self::normalize_pk_compare_value($b[$col] ?? '');
             if ($va === $vb) {
                 continue;
             }
@@ -655,7 +741,20 @@ class Rmmigrate_Snap_DB
     /**
      * @param string[] $tables
      */
-    public static function sum_table_bytes(array $tables): int
+    public static function sum_table_bytes(array $tables, bool $exclude_revisions = false): int
+    {
+        $sum = self::information_schema_table_bytes($tables);
+        if (!$exclude_revisions || $sum <= 0) {
+            return $sum;
+        }
+
+        return max(0, $sum - self::estimate_excluded_revision_bytes($tables));
+    }
+
+    /**
+     * @param string[] $tables
+     */
+    public static function information_schema_table_bytes(array $tables): int
     {
         global $wpdb;
         $tables = array_values(array_filter(array_map('strval', $tables)));
@@ -672,6 +771,57 @@ class Rmmigrate_Snap_DB
         );
 
         return max(0, (int) $sum);
+    }
+
+    /**
+     * Approximate on-disk bytes attributable to revisions / revision postmeta.
+     * Used so mysqldump size checks and progress % match exclude_revisions dumps.
+     *
+     * @param string[] $tables
+     */
+    public static function estimate_excluded_revision_bytes(array $tables): int
+    {
+        global $wpdb;
+        $prefix = (string) $wpdb->base_prefix;
+        $subtract = 0;
+
+        foreach ($tables as $table) {
+            $table = (string) $table;
+            if (!preg_match('/^' . preg_quote($prefix, '/') . '(?:\d+_)?(posts|postmeta)$/', $table, $m)) {
+                continue;
+            }
+            $table_bytes = self::information_schema_table_bytes(array($table));
+            if ($table_bytes <= 0) {
+                continue;
+            }
+            $quoted = self::quote_identifier($table);
+            $prev_suppress = $wpdb->suppress_errors(true);
+            if ($m[1] === 'posts') {
+                // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.NotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- Validated posts table identifier.
+                $total = (int) $wpdb->get_var('SELECT COUNT(*) FROM ' . $quoted);
+                // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.NotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- Validated posts table identifier.
+                $revs = $total > 0
+                    ? (int) $wpdb->get_var('SELECT COUNT(*) FROM ' . $quoted . " WHERE `post_type` = 'revision'")
+                    : 0;
+            } else {
+                $posts = preg_replace('/postmeta$/', 'posts', $table);
+                $posts_q = self::quote_identifier((string) $posts);
+                // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.NotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- Validated postmeta table identifier.
+                $total = (int) $wpdb->get_var('SELECT COUNT(*) FROM ' . $quoted);
+                // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.NotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- Validated postmeta/posts identifiers.
+                $revs = $total > 0
+                    ? (int) $wpdb->get_var(
+                        'SELECT COUNT(*) FROM ' . $quoted . ' WHERE `post_id` IN (SELECT `ID` FROM ' . $posts_q . " WHERE `post_type` = 'revision')"
+                    )
+                    : 0;
+            }
+            $wpdb->suppress_errors($prev_suppress);
+            if ($total > 0 && $revs > 0) {
+                $subtract += (int) round($table_bytes * ($revs / $total));
+            }
+        }
+
+        return max(0, $subtract);
     }
 
     // phpcs:enable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, PluginCheck.Security.DirectDB.UnescapedDBParameter

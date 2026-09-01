@@ -32,7 +32,15 @@ if (!class_exists('Rmmigrate_Bootstrap', false)) {
     return;
 }
 
+// Always register before can_run: orphaned rmmigrate_tick events reschedule
+// via wp_get_schedules(); missing key → invalid_schedule spam (WP 6.1+).
+Rmmigrate_Bootstrap::register_cron_schedules_filter();
+
 if (!Rmmigrate_Bootstrap::can_run(__FILE__)) {
+    // Inert load (path / active-list mismatch): drop orphan tick so WP stops rescheduling.
+    if (function_exists('wp_clear_scheduled_hook')) {
+        wp_clear_scheduled_hook('rmmigrate_tick');
+    }
     return;
 }
 
@@ -61,7 +69,6 @@ if (!defined('RMMIGRATE_DIR_NAME')) {
 }
 
 Rmmigrate_Bootstrap::mark_owner(Rmmigrate_Bootstrap::OWNER_FREE);
-Rmmigrate_Bootstrap::register_cron_schedules_filter();
 
 foreach (
     array(

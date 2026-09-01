@@ -224,9 +224,17 @@ class Rmmigrate_DB_Dumper
     /**
      * @param string[] $tables
      */
-    public static function estimate_database_bytes(array $tables): int
+    public static function estimate_database_bytes(array $tables, bool $exclude_revisions = false): int
     {
-        return Rmmigrate_Snap_DB::sum_table_bytes($tables);
+        return Rmmigrate_Snap_DB::sum_table_bytes($tables, $exclude_revisions);
+    }
+
+    /**
+     * @param string[] $tables
+     */
+    private function estimate_job_database_bytes(array $tables): int
+    {
+        return self::estimate_database_bytes($tables, $this->should_exclude_revisions());
     }
 
     public static function mysqldump_memory_ok(int $estimated_db_bytes): bool
@@ -492,7 +500,10 @@ class Rmmigrate_DB_Dumper
         );
 
         if ($result === 1) {
-            self::realign_sql_file_to_checkpoint($this->sql_path, $slice_start);
+            if (!self::realign_sql_file_to_checkpoint($this->sql_path, $slice_start)) {
+                Rmmigrate_Logger::log('mysqldump data: SQL realign failed after budget; falling back to PHP');
+                return $this->fallback_php_dump($tables, 'sql realign failed after data budget');
+            }
             $this->sync_sql_bytes_written();
             Rmmigrate_Runner::refresh_sql_lock($this->job->get_id());
 
@@ -558,8 +569,9 @@ class Rmmigrate_DB_Dumper
         );
 
         if ($result === 1) {
-            if ($data_start > 0) {
-                self::realign_sql_file_to_checkpoint($this->sql_path, $data_start);
+            if ($data_start > 0 && !self::realign_sql_file_to_checkpoint($this->sql_path, $data_start)) {
+                Rmmigrate_Logger::log('mysqldump bulk: SQL realign failed after budget; falling back to PHP');
+                return $this->fallback_php_dump($tables, 'sql realign failed after bulk data budget');
             }
             $this->sync_sql_bytes_written();
             Rmmigrate_Logger::log('mysqldump bulk data budget reached; switching to batched export');
@@ -666,7 +678,12 @@ class Rmmigrate_DB_Dumper
             $budget_sec
         );
         if ($result === 1) {
-            self::realign_sql_file_to_checkpoint($this->sql_path, $slice_start);
+            if (!self::realign_sql_file_to_checkpoint($this->sql_path, $slice_start)) {
+                Rmmigrate_Logger::log(
+                    sprintf('mysqldump schema: SQL realign failed for table %s; falling back to PHP', $table)
+                );
+                return $this->fallback_php_dump($tables, 'sql realign failed after schema budget');
+            }
             $this->sync_sql_bytes_written();
             Rmmigrate_Runner::refresh_sql_lock($this->job->get_id());
             Rmmigrate_Logger::log(
@@ -752,7 +769,7 @@ class Rmmigrate_DB_Dumper
             return false;
         }
         $file_size = Rmmigrate_Filesystem::filesize($this->sql_path);
-        $expected = self::estimate_database_bytes($tables);
+        $expected = $this->estimate_job_database_bytes($tables);
         if ($expected <= 0) {
             return $file_size >= 10;
         }
@@ -1236,7 +1253,7 @@ class Rmmigrate_DB_Dumper
                         )
                     );
                 }
-                $where = Rmmigrate_Snap_DB::build_pk_where($pk_cols, $pk_offset);
+                $where = Rmmigrate_Snap_DB::build_pk_where($pk_cols, $pk_offset, $col_types);
                 if ($where === '') {
                     $fh->close();
                     // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
@@ -1267,7 +1284,12 @@ class Rmmigrate_DB_Dumper
             $offset = (int) $table_rows_done;
             $rev = $this->revision_exclude_sql_clause($table);
             $rev_sql = $rev !== '' ? ' WHERE (' . $rev . ')' : '';
-            $order_cols = implode(',', array_map(array('Rmmigrate_Snap_DB', 'quote_identifier'), array_keys($col_types)));
+            // Prefer scalar/indexed cols; TEXT/BLOB in ORDER BY is expensive and can fail.
+            // No-PK + concurrent writes can still skip/dupe rows — PK tables are safer.
+            $order_cols = implode(
+                ',',
+                array_map(array('Rmmigrate_Snap_DB', 'quote_identifier'), Rmmigrate_Snap_DB::orderable_column_names($col_types))
+            );
             if ($order_cols !== '') {
                 $sql = 'SELECT * FROM ' . $quoted_table . $rev_sql . ' ORDER BY ' . $order_cols . ' ASC LIMIT ' . $offset . ', ' . (int) $batch_size;
             } else {
@@ -1356,7 +1378,7 @@ class Rmmigrate_DB_Dumper
             $rows_done++;
             $table_rows_done++;
             if ($use_pk_pagination) {
-                $pk_offset = Rmmigrate_Snap_DB::extract_pk_offset($row, $pk_cols);
+                $pk_offset = Rmmigrate_Snap_DB::extract_pk_offset($row, $pk_cols, $col_types);
                 foreach ($pk_cols as $pk_col) {
                     if ($pk_offset[$pk_col] === null) {
                         Rmmigrate_Snap_DB::free_result($result);
@@ -1549,6 +1571,8 @@ class Rmmigrate_DB_Dumper
             $phase = 'mysqldump';
         }
 
+        $exclude_revisions = $this->should_exclude_revisions();
+
         return array(
             'mode'                  => $mode,
             'phase'                 => $phase,
@@ -1558,7 +1582,8 @@ class Rmmigrate_DB_Dumper
             'rows_done'             => 0,
             'table_rows_done'       => 0,
             'sql_bytes_written'     => 0,
-            'estimated_db_bytes'    => self::estimate_database_bytes($tables),
+            'estimated_db_bytes'    => self::estimate_database_bytes($tables, $exclude_revisions),
+            'estimated_db_bytes_excludes_revisions' => $exclude_revisions ? 1 : 0,
             'insert_incomplete'     => false,
             'mysqldump_phase'       => 'schema',
             'mysqldump_table_index' => 0,
@@ -1593,8 +1618,11 @@ class Rmmigrate_DB_Dumper
             $db['phase'] = 'mysqldump';
         }
 
-        if (empty($db['estimated_db_bytes'])) {
-            $db['estimated_db_bytes'] = self::estimate_database_bytes($tables);
+        $exclude_revisions = $this->should_exclude_revisions();
+        $needs_revision_adjusted_estimate = $exclude_revisions && empty($db['estimated_db_bytes_excludes_revisions']);
+        if (empty($db['estimated_db_bytes']) || $needs_revision_adjusted_estimate) {
+            $db['estimated_db_bytes'] = self::estimate_database_bytes($tables, $exclude_revisions);
+            $db['estimated_db_bytes_excludes_revisions'] = $exclude_revisions ? 1 : 0;
         }
 
         return $db;
@@ -1634,10 +1662,19 @@ class Rmmigrate_DB_Dumper
         }
 
         if (self::compare_db_progress_slice($backup, $job_db) > 0) {
-            return array_replace_recursive($job_db, $backup);
+            $merged = array_replace_recursive($job_db, $backup);
+            // pk_offset must replace wholesale — recursive merge can leave stale composite keys.
+            if (array_key_exists('pk_offset', $backup)) {
+                $merged['pk_offset'] = $backup['pk_offset'];
+            }
+            return $merged;
         }
 
-        return array_replace_recursive($backup, $job_db);
+        $merged = array_replace_recursive($backup, $job_db);
+        if (array_key_exists('pk_offset', $job_db)) {
+            $merged['pk_offset'] = $job_db['pk_offset'];
+        }
+        return $merged;
     }
 
     /**
@@ -1772,7 +1809,13 @@ class Rmmigrate_DB_Dumper
         if ($expected_bytes <= 0) {
             return;
         }
-        self::realign_sql_file_to_checkpoint($this->sql_path, $expected_bytes);
+        if (!self::realign_sql_file_to_checkpoint($this->sql_path, $expected_bytes)) {
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+            throw Rmmigrate_Job_Exception::raise(
+                'sql_checkpoint_realign',
+                esc_html__('Database export could not realign the SQL file to the last checkpoint. Retry the backup.', 'rosenheinrich-multisite-migrate')
+            );
+        }
     }
 
     private function sync_sql_bytes_written(): void

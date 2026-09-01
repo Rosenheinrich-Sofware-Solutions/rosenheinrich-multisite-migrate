@@ -104,15 +104,20 @@ class Rmmigrate_Bootstrap
             return;
         }
         $registered = true;
-        add_filter('cron_schedules', array(__CLASS__, 'add_cron_schedules'));
+        // Late priority: a later cron_schedules callback that returns a fresh
+        // array (does not merge) would wipe keys added at the default priority.
+        add_filter('cron_schedules', array(__CLASS__, 'add_cron_schedules'), 99999);
     }
 
     /**
-     * @param array<string,array{interval:int,display:string}> $schedules
+     * @param mixed $schedules Incoming cron_schedules filter value (may be non-array).
      * @return array<string,array{interval:int,display:string}>
      */
-    public static function add_cron_schedules(array $schedules): array
+    public static function add_cron_schedules($schedules): array
     {
+        if (!is_array($schedules)) {
+            $schedules = array();
+        }
         // Do not translate here — cron_schedules can run before init (WP 6.7 JIT notice).
         $schedules['rmmigrate_5min'] = array(
             'interval' => 5 * MINUTE_IN_SECONDS,

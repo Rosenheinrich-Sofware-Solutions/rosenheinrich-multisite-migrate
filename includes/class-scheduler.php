@@ -10,6 +10,8 @@ if (!defined('ABSPATH')) {
 class Rmmigrate_Scheduler
 {
     const HOOK = 'rmmigrate_tick';
+    /** Fallback seconds between one-shot ticks (not a wp_get_schedules() key). */
+    const TICK_INTERVAL = 300;
     const BLOCKED_WARN_OPTION = 'rmmigrate_schedule_blocked_since';
     const FAIL_COUNT_OPTION = 'rmmigrate_schedule_fail_count';
     const FAIL_NOTIFY_THRESHOLD = 3;
@@ -24,6 +26,11 @@ class Rmmigrate_Scheduler
         add_action('admin_init', array(__CLASS__, 'maybe_run_due_on_admin'), 30);
     }
 
+    public static function tick_interval(): int
+    {
+        return defined('MINUTE_IN_SECONDS') ? (5 * MINUTE_IN_SECONDS) : self::TICK_INTERVAL;
+    }
+
     public static function ensure_tick_scheduled(): void
     {
         if (wp_installing()) {
@@ -34,23 +41,37 @@ class Rmmigrate_Scheduler
             Rmmigrate_Bootstrap::register_cron_schedules_filter();
         }
 
-        $schedules = wp_get_schedules();
-        if (!isset($schedules['rmmigrate_5min'])) {
-            if (wp_next_scheduled(self::HOOK)) {
-                wp_clear_scheduled_hook(self::HOOK);
+        self::arm_single_tick();
+    }
+
+    /**
+     * One-shot tick. Recurring custom keys (rmmigrate_5min) make WP 6.1+ log
+     * invalid_schedule whenever cron_schedules is missing at reschedule time.
+     */
+    private static function arm_single_tick(): void
+    {
+        $hook = self::HOOK;
+        $args = array();
+        $next = wp_next_scheduled($hook, $args);
+        if ($next) {
+            $event = wp_get_scheduled_event($hook, $args, $next);
+            $recurrence = (is_object($event) && isset($event->schedule)) ? $event->schedule : false;
+            if ($recurrence === false || $recurrence === null || $recurrence === '') {
+                return;
             }
-            return;
+            wp_unschedule_event($next, $hook, $args);
         }
 
-        if (wp_next_scheduled(self::HOOK)) {
-            return;
-        }
-
-        wp_schedule_event(time(), 'rmmigrate_5min', self::HOOK);
+        $when = ($next && (int) $next > 0) ? (int) $next : (time() + self::tick_interval());
+        wp_schedule_single_event($when, $hook, $args);
     }
 
     public static function tick(): void
     {
+        if (!wp_next_scheduled(self::HOOK)) {
+            wp_schedule_single_event(time() + self::tick_interval(), self::HOOK);
+        }
+
         update_site_option(self::LAST_TICK_OPTION, time());
 
         $settings = Rmmigrate_Schedules::normalize(Rmmigrate_Settings::get());

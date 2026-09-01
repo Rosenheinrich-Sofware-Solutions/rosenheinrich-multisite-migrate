@@ -1264,7 +1264,15 @@ class Rmmigrate_Job
      */
     public function update_progress(array $patch): void
     {
-        $this->persist_progress(array_replace_recursive($this->get_progress(), $patch));
+        $progress = array_replace_recursive($this->get_progress(), $patch);
+        // database.pk_offset must replace wholesale (composite/binary cursors).
+        if (isset($patch['database']) && is_array($patch['database']) && array_key_exists('pk_offset', $patch['database'])) {
+            if (!isset($progress['database']) || !is_array($progress['database'])) {
+                $progress['database'] = array();
+            }
+            $progress['database']['pk_offset'] = $patch['database']['pk_offset'];
+        }
+        $this->persist_progress($progress);
     }
 
     /**
@@ -1297,6 +1305,12 @@ class Rmmigrate_Job
         );
         if ($updated === false) {
             self::log_db_write_failure('persist_progress', $this->get_id());
+            // Do not advance in-memory progress when durable write failed (stale cursor risk).
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+            throw Rmmigrate_Job_Exception::raise(
+                Rmmigrate_Error_Codes::DB_CONNECTION,
+                esc_html__('Could not save backup progress. Retry the backup.', 'rosenheinrich-multisite-migrate')
+            );
         }
         $this->data['progress'] = wp_json_encode($progress);
         $this->data['updated_at'] = current_time('mysql', true);

@@ -308,12 +308,12 @@ class Rmmigrate_Multisite_Scope
     {
         global $wpdb;
 
-        $cache_key = 'mm_all_tables_' . md5((defined('DB_NAME') ? DB_NAME : '') . '|' . $wpdb->base_prefix);
+        $cache_key = 'mm_all_base_tables_' . md5((defined('DB_NAME') ? DB_NAME : '') . '|' . $wpdb->base_prefix);
         $cache_ttl = Rmmigrate_Job::get_active() !== null ? 0 : 3600;
         $all = $cache_ttl > 0 ? wp_cache_get($cache_key, 'rmmigrate') : false;
         if ($all === false) {
-            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery -- Plugin: custom plugin tables; values use prepare().
-            $all = $wpdb->get_col('SHOW TABLES');
+            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery -- Plugin: list base tables only (exclude views).
+            $all = $wpdb->get_col("SHOW FULL TABLES WHERE Table_type = 'BASE TABLE'");
             if ($cache_ttl > 0) {
                 wp_cache_set($cache_key, $all, 'rmmigrate', $cache_ttl);
             }
@@ -384,13 +384,8 @@ class Rmmigrate_Multisite_Scope
     public static function log_table_patterns(): array
     {
         $defaults = array(
-            '*wfblockediplog',
-            '*wfHits',
-            '*wfFileMods',
-            '*wfauditevents',
-            '*wflivetraffictwo',
-            '*wfKnownFileList',
-            '*wflogins',
+            // Wordfence uses {prefix}wf* / {prefix}{blog}_wf* — cover all, not a short allowlist.
+            '*_wf*',
             '*actionscheduler_*',
         );
         /**
@@ -544,8 +539,9 @@ class Rmmigrate_Multisite_Scope
                 // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery -- Plugin: custom plugin tables; values use prepare().
                 $all_tables = $wpdb->get_col(
                     $wpdb->prepare(
-                        'SHOW TABLES FROM %i',
-                        DB_NAME
+                        "SHOW FULL TABLES FROM %i WHERE Table_type = %s",
+                        DB_NAME,
+                        'BASE TABLE'
                     )
                 );
                 $sub_tables = array();
