@@ -25,13 +25,15 @@ class Rmmigrate_Ajax_Activity
         $entry = null;
         if ($entry_id !== '') {
             $entry = Rmmigrate_Activity_Log::get_entry($entry_id);
-            if ($entry === null) {
+            if ($entry !== null) {
+                if (!Rmmigrate_Activity_Log::entry_visible_to_current_user($entry)) {
+                    wp_send_json_error(array('message' => __('Permission denied.', 'rosenheinrich-multisite-migrate')), 403);
+                }
+                $job_id = (int) ($entry['job_id'] ?? 0);
+            } elseif ($job_id <= 0) {
                 wp_send_json_error(array('message' => __('Activity entry not found.', 'rosenheinrich-multisite-migrate')));
             }
-            if (!Rmmigrate_Activity_Log::entry_visible_to_current_user($entry)) {
-                wp_send_json_error(array('message' => __('Permission denied.', 'rosenheinrich-multisite-migrate')), 403);
-            }
-            $job_id = (int) ($entry['job_id'] ?? 0);
+            // Synthetic / missing JSONL row: fall through with job_id from the request.
         }
 
         if ($job_id <= 0 && $entry === null) {

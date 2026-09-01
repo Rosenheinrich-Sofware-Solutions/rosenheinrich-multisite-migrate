@@ -12,6 +12,9 @@ class Rmmigrate_Activity_Log
     /** @var array<int,Rmmigrate_Job|null> */
     private static $job_request_cache = array();
 
+    /** @var object|null Unit-test override for active-job inject (not for production use). */
+    public static $hydrate_active_job_override = null;
+
     /** @var array<string,bool> */
     private static $job_visibility_request_cache = array();
 
@@ -174,7 +177,11 @@ class Rmmigrate_Activity_Log
 
         $collected = self::collect_filtered_entries($type_filter, $date_from, $date_to, $job_id);
         $bundled = self::hydrate_active_job_entries(
-            self::bundle_entries_for_display($collected['entries'])
+            self::bundle_entries_for_display($collected['entries']),
+            $type_filter,
+            $date_from,
+            $date_to,
+            $job_id
         );
         $total = count($bundled);
         $total_pages = $total > 0 ? (int) ceil($total / $per_page) : 1;
@@ -194,22 +201,28 @@ class Rmmigrate_Activity_Log
     }
 
     /**
-     * Overlay live job progress onto bundled activity rows for in-progress backup/restore jobs.
+     * Overlay live job progress onto bundled activity rows, and inject an active
+     * backup/restore job from the jobs table when it has no JSONL row yet
+     * (e.g. activity lock drop on create).
      *
      * @param array<int,array<string,mixed>> $entries
      * @return array<int,array<string,mixed>>
      */
-    public static function hydrate_active_job_entries(array $entries): array
-    {
-        if ($entries === array()) {
-            return array();
-        }
+    public static function hydrate_active_job_entries(
+        array $entries,
+        string $type_filter = '',
+        string $date_from = '',
+        string $date_to = '',
+        int $job_id_filter = 0
+    ): array {
+        $seen_job_ids = array();
 
         foreach ($entries as $index => $entry) {
             $job_id = (int) ($entry['job_id'] ?? 0);
             if ($job_id <= 0) {
                 continue;
             }
+            $seen_job_ids[$job_id] = true;
             $type = strtolower((string) ($entry['type'] ?? ''));
             if (!in_array($type, array('backup', 'restore'), true)) {
                 continue;
@@ -233,6 +246,59 @@ class Rmmigrate_Activity_Log
             $entries[$index]['type_label'] = self::type_label($type);
         }
 
+        $type_filter = strtolower(trim($type_filter));
+        if ($date_from !== '' || $date_to !== '') {
+            return $entries;
+        }
+        if ($type_filter !== '' && !in_array($type_filter, array('backup', 'restore'), true)) {
+            return $entries;
+        }
+
+        $is_network = function_exists('is_network_admin') && is_network_admin();
+        $active = self::$hydrate_active_job_override;
+        if ($active === null) {
+            $active = apply_filters(
+                'rmmigrate_activity_hydrate_active_job',
+                Rmmigrate_Job::get_active_for_admin($is_network),
+                $is_network
+            );
+        }
+        if (!is_object($active) || !method_exists($active, 'get_id') || !method_exists($active, 'get_job_type')) {
+            return $entries;
+        }
+
+        $active_id = $active->get_id();
+        if ($active_id <= 0 || isset($seen_job_ids[$active_id])) {
+            return $entries;
+        }
+        if ($job_id_filter > 0 && $active_id !== $job_id_filter) {
+            return $entries;
+        }
+
+        $job_type = strtolower((string) $active->get_job_type());
+        if (!in_array($job_type, array('backup', 'restore'), true)) {
+            return $entries;
+        }
+        if ($type_filter !== '' && $type_filter !== $job_type) {
+            return $entries;
+        }
+
+        $created = (string) ($active->data['created_at'] ?? '');
+        $created_ts = $created !== '' ? strtotime($created . ' GMT') : false;
+        $synthetic = array(
+            'entry_id'     => 'active-job-' . $active_id,
+            'time'         => $created_ts ? gmdate('c', $created_ts) : gmdate('c'),
+            'type'         => $job_type,
+            'status'       => 'running',
+            'message'      => trim($active->get_display_status() . ' ' . $active->get_progress_message()),
+            'job_id'       => $active_id,
+            'user_id'      => 0,
+            'context'      => array('synthetic_active_job' => true),
+            'status_label' => self::status_label('running'),
+            'type_label'   => self::type_label($job_type),
+        );
+
+        array_unshift($entries, $synthetic);
         return $entries;
     }
 
