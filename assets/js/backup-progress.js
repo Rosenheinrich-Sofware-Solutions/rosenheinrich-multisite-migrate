@@ -830,6 +830,9 @@
     });
 
     $('#multisite-migrate-start').on('click', function () {
+        if (running) {
+            return;
+        }
         if (!validateScope()) {
             return;
         }

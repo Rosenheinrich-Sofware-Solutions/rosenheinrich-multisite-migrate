@@ -1220,8 +1220,37 @@ class Rmmigrate_DB_Dumper
 
         if ($use_pk_pagination) {
             $where = '';
+            // Scalar/corrupt pk_offset must not build WHERE id > '' (rescans + inflates counters).
             if ($pk_offset !== null && $pk_offset !== '') {
+                if (!is_array($pk_offset) || $pk_offset === array()) {
+                    $fh->close();
+                    // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+                    throw Rmmigrate_Job_Exception::raise(
+                        'pk_cursor_invalid',
+                        esc_html(
+                            sprintf(
+                                /* translators: %s: database table name */
+                                __('Database export lost primary-key position for table %s. Retry the backup.', 'rosenheinrich-multisite-migrate'),
+                                $table
+                            )
+                        )
+                    );
+                }
                 $where = Rmmigrate_Snap_DB::build_pk_where($pk_cols, $pk_offset);
+                if ($where === '') {
+                    $fh->close();
+                    // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+                    throw Rmmigrate_Job_Exception::raise(
+                        'pk_cursor_invalid',
+                        esc_html(
+                            sprintf(
+                                /* translators: %s: database table name */
+                                __('Database export lost primary-key position for table %s. Retry the backup.', 'rosenheinrich-multisite-migrate'),
+                                $table
+                            )
+                        )
+                    );
+                }
             }
             $order_cols = implode(',', array_map(array('Rmmigrate_Snap_DB', 'quote_identifier'), $pk_cols));
             $rev = $this->revision_exclude_sql_clause($table);
@@ -1328,6 +1357,23 @@ class Rmmigrate_DB_Dumper
             $table_rows_done++;
             if ($use_pk_pagination) {
                 $pk_offset = Rmmigrate_Snap_DB::extract_pk_offset($row, $pk_cols);
+                foreach ($pk_cols as $pk_col) {
+                    if ($pk_offset[$pk_col] === null) {
+                        Rmmigrate_Snap_DB::free_result($result);
+                        $fh->close();
+                        // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+                        throw Rmmigrate_Job_Exception::raise(
+                            'pk_cursor_invalid',
+                            esc_html(
+                                sprintf(
+                                    /* translators: %s: database table name */
+                                    __('Database export lost primary-key position for table %s. Retry the backup.', 'rosenheinrich-multisite-migrate'),
+                                    $table
+                                )
+                            )
+                        );
+                    }
+                }
             } else {
                 $pk_offset = null;
             }

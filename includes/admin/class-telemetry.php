@@ -519,7 +519,9 @@ final class Rmmigrate_Telemetry
         self::record_event('operation_error', array(
             'operation'     => $operation,
             'outcome'       => 'failed',
-            'error_code'    => self::classify_error_category($clean_message),
+            'error_code'    => ($service_code !== '' && $service_code !== 'unknown')
+                ? $service_code
+                : self::classify_error_category($clean_message),
             'error_message' => $clean_message,
             'error_phase'   => $phase,
             'service_code'  => $service_code,
@@ -922,16 +924,16 @@ final class Rmmigrate_Telemetry
             'scope'        => sanitize_key((string) ($job->data['scope'] ?? '')),
             'triggered_by' => sanitize_key((string) ($job->data['triggered_by'] ?? '')),
             'destination'  => sanitize_key($job->get_destination()),
-            'job_type'     => sanitize_key($job->get_display_job_type()),
+            'job_type'     => sanitize_key($job->get_job_type()),
         );
+        $backup_profile = sanitize_key((string) ($job->data['backup_profile'] ?? ''));
+        if ($backup_profile !== '') {
+            $props['backup_profile'] = $backup_profile;
+        }
         if ($status === Rmmigrate_Job::STATUS_COMPLETE) {
             $props['outcome'] = $clean_message !== '' ? 'warning' : 'success';
         } elseif ($status === Rmmigrate_Job::STATUS_ERROR) {
             $props['outcome'] = 'failed';
-        }
-        if ($clean_message !== '') {
-            $props['error_code']    = self::classify_error_category($clean_message);
-            $props['error_message'] = $clean_message;
         }
         $service_code = sanitize_key((string) ($progress['service_code'] ?? ''));
         if ($service_code === '' && $clean_message !== '') {
@@ -939,6 +941,12 @@ final class Rmmigrate_Telemetry
         }
         if ($service_code !== '') {
             $props['service_code'] = $service_code;
+        }
+        if ($clean_message !== '') {
+            $props['error_code'] = ($service_code !== '' && $service_code !== 'unknown')
+                ? $service_code
+                : self::classify_error_category($clean_message);
+            $props['error_message'] = $clean_message;
         }
         $phase = sanitize_key((string) ($progress['step'] ?? ''));
         if ($phase === '' && isset($progress['phase'])) {

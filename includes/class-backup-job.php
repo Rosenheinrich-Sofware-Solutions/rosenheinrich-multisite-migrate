@@ -156,6 +156,7 @@ class Rmmigrate_Job
                 esc_html(__('Failed to create backup job.', 'rosenheinrich-multisite-migrate')),
                 array(), sanitize_key(Rmmigrate_Error_Codes::JOB_CREATE_FAILED));
         }
+        self::assert_sole_active_after_insert($job);
 
         $triggered_by = (string) ($args['triggered_by'] ?? 'manual');
         $message = sprintf(
@@ -166,7 +167,7 @@ class Rmmigrate_Job
             $job->get_backup_profile()
         );
         Rmmigrate_Logger::log_job($job->get_id(), $message);
-        Rmmigrate_Activity_Log::record('backup', $message, 'info', array(
+        Rmmigrate_Activity_Log::record('backup', $message, 'running', array(
             'job_id'  => $job->get_id(),
             'context' => array(
                 'triggered_by'   => $triggered_by,
@@ -386,6 +387,7 @@ class Rmmigrate_Job
                 esc_html(__('Failed to create restore job.', 'rosenheinrich-multisite-migrate')),
                 array(), sanitize_key(Rmmigrate_Error_Codes::JOB_CREATE_FAILED));
         }
+        self::assert_sole_active_after_insert($job);
 
         $message = sprintf(
             /* translators: 1: restore job ID, 2: source backup ID, 3: restore mode */
@@ -404,7 +406,7 @@ class Rmmigrate_Job
         if ($safety_job_id > 0) {
             $activity_context['safety_job_id'] = $safety_job_id;
         }
-        Rmmigrate_Activity_Log::record('restore', $message, 'info', array(
+        Rmmigrate_Activity_Log::record('restore', $message, 'running', array(
             'job_id'  => $job->get_id(),
             'context' => $activity_context,
         ));
@@ -438,14 +440,51 @@ class Rmmigrate_Job
     }
 
     /**
+     * Abort a freshly inserted active row when another active job already exists.
+     */
+    private static function assert_sole_active_after_insert(self $job): void
+    {
+        global $wpdb;
+        foreach (Rmmigrate_Snap_DB::jobs_get_active_ids() as $active_id) {
+            if ($active_id === $job->get_id()) {
+                continue;
+            }
+            $wpdb->delete(self::table_name(), array('id' => $job->get_id()), array('%d'));
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Structured service exception payload.
+            throw new Rmmigrate_Service_Exception(
+                esc_html(__('A backup or restore is already in progress.', 'rosenheinrich-multisite-migrate')),
+                array(), sanitize_key(Rmmigrate_Error_Codes::ACTIVE_JOB_CONFLICT));
+        }
+    }
+
+    /**
      * @template T
      * @param callable():T $callback
      * @return T
      */
     private static function with_create_lock(callable $callback)
     {
+        global $wpdb;
+        $sql_name = 'rmmigrate_job_create';
+        $sql_held = false;
+        if (is_object($wpdb) && method_exists($wpdb, 'get_var')) {
+            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Named MySQL advisory lock for create mutex across NFS hosts.
+            $got = $wpdb->get_var($wpdb->prepare('SELECT GET_LOCK(%s, %d)', $sql_name, 2));
+            if ($got !== null && (string) $got !== '1') {
+                // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Structured service exception payload.
+                throw new Rmmigrate_Service_Exception(
+                    esc_html(__('A backup or restore is already in progress.', 'rosenheinrich-multisite-migrate')),
+                    array(), sanitize_key(Rmmigrate_Error_Codes::ACTIVE_JOB_CONFLICT));
+            }
+            $sql_held = ($got !== null && (string) $got === '1');
+        }
+
         $lock = self::acquire_create_lock();
         if ($lock === false) {
+            if ($sql_held) {
+                // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Release advisory create lock after file flock failure.
+                $wpdb->get_var($wpdb->prepare('SELECT RELEASE_LOCK(%s)', $sql_name));
+            }
             // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Structured service exception payload.
             throw new Rmmigrate_Service_Exception(
                 esc_html(__('A backup or restore is already in progress.', 'rosenheinrich-multisite-migrate')),
@@ -456,6 +495,10 @@ class Rmmigrate_Job
         } finally {
             Rmmigrate_Filesystem::release_lock($lock);
             Rmmigrate_Filesystem::fclose_raw($lock);
+            if ($sql_held) {
+                // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Release advisory create lock after job create.
+                $wpdb->get_var($wpdb->prepare('SELECT RELEASE_LOCK(%s)', $sql_name));
+            }
         }
     }
 
@@ -534,29 +577,33 @@ class Rmmigrate_Job
 
     /**
      * Mark stuck active jobs as failed when the worker has been silent past the threshold.
+     * Walks every active row so a newer job cannot hide an older stale duplicate.
      */
     public static function recover_stale_active(): ?self
     {
-        $job = self::get_active();
-        if ($job === null || !self::is_stale($job)) {
-            return null;
-        }
-
+        $last = null;
         $message = __('Worker stopped responding. The job was marked as failed. You can start a new backup or restore.', 'rosenheinrich-multisite-migrate');
-        Rmmigrate_Logger::log_job($job->get_id(), $message);
-        $job->set_status(self::STATUS_ERROR, $message, 'stale_worker');
-        Rmmigrate_Runner::force_release_lock($job->get_id());
-        if ($job->is_restore()) {
-            Rmmigrate_Restore_Runner::disable_maintenance();
+        foreach (Rmmigrate_Snap_DB::jobs_get_active_ids() as $id) {
+            $job = self::get($id);
+            if ($job === null || !self::is_stale($job)) {
+                continue;
+            }
+            Rmmigrate_Logger::log_job($job->get_id(), $message);
+            $job->set_status(self::STATUS_ERROR, $message, 'stale_worker');
+            Rmmigrate_Runner::force_release_lock($job->get_id());
+            if ($job->is_restore()) {
+                Rmmigrate_Restore_Runner::disable_maintenance();
+            }
+            Rmmigrate_Activity_Log::record(
+                $job->is_restore() ? 'restore' : 'backup',
+                $message,
+                'error',
+                array('job_id' => $job->get_id(), 'context' => array('recovered' => 'stale_worker'))
+            );
+            $last = $job;
         }
-        Rmmigrate_Activity_Log::record(
-            $job->is_restore() ? 'restore' : 'backup',
-            $message,
-            'error',
-            array('job_id' => $job->get_id(), 'context' => array('recovered' => 'stale_worker'))
-        );
 
-        return $job;
+        return $last;
     }
 
     /**
@@ -1038,7 +1085,7 @@ class Rmmigrate_Job
                 }
             }
         }
-        if ($status === self::STATUS_CANCELLED) {
+        if ($status === self::STATUS_ERROR || $status === self::STATUS_CANCELLED) {
             $fields['completed_at'] = current_time('mysql', true);
             $formats[] = '%s';
         }
@@ -1413,7 +1460,18 @@ class Rmmigrate_Job
                         $total
                     );
                 }
-                $idx = min((int) ($db['mysqldump_table_index'] ?? 0) + 1, $total);
+                $md_index = (int) ($db['mysqldump_table_index'] ?? 0);
+                $idx = min($md_index + 1, $total);
+                $table_name = (is_array($tables) && isset($tables[$md_index])) ? (string) $tables[$md_index] : '';
+                if ($table_name !== '') {
+                    return sprintf(
+                        /* translators: 1: current table number, 2: total tables, 3: current table name */
+                        __('Saving database content — table %1$d of %2$d (%3$s)…', 'rosenheinrich-multisite-migrate'),
+                        $idx,
+                        $total,
+                        $table_name
+                    );
+                }
                 return sprintf(
                     /* translators: 1: current table number, 2: total tables */
                     __('Saving database content — table %1$d of %2$d…', 'rosenheinrich-multisite-migrate'),
@@ -1422,10 +1480,23 @@ class Rmmigrate_Job
                 );
             }
             if ($phase === 'inserts' && $total > 0) {
-                $idx = min((int) ($db['table_index'] ?? 0) + 1, $total);
+                $table_index_zero = (int) ($db['table_index'] ?? 0);
+                $idx = min($table_index_zero + 1, $total);
+                $table_name = (is_array($tables) && isset($tables[$table_index_zero])) ? (string) $tables[$table_index_zero] : '';
                 $table_rows = (int) ($db['table_rows_done'] ?? 0);
                 $total_rows = (int) ($db['rows_done'] ?? 0);
                 if ($total_rows > 0) {
+                    if ($table_rows > 0 && $table_name !== '') {
+                        return sprintf(
+                            /* translators: 1: current table number, 2: total tables, 3: current table name, 4: rows in current table, 5: cumulative rows exported */
+                            __('Saving your site content — table %1$d of %2$d (%3$s: %4$s rows in this table, %5$s exported so far)…', 'rosenheinrich-multisite-migrate'),
+                            $idx,
+                            $total,
+                            $table_name,
+                            number_format_i18n($table_rows),
+                            number_format_i18n($total_rows)
+                        );
+                    }
                     if ($table_rows > 0) {
                         return sprintf(
                             /* translators: 1: current table number, 2: total tables, 3: rows in current table, 4: cumulative rows exported */
@@ -1436,12 +1507,31 @@ class Rmmigrate_Job
                             number_format_i18n($total_rows)
                         );
                     }
+                    if ($table_name !== '') {
+                        return sprintf(
+                            /* translators: 1: current table number, 2: total tables, 3: current table name, 4: cumulative rows exported */
+                            __('Saving your site content — table %1$d of %2$d (%3$s: %4$s rows exported so far)…', 'rosenheinrich-multisite-migrate'),
+                            $idx,
+                            $total,
+                            $table_name,
+                            number_format_i18n($total_rows)
+                        );
+                    }
                     return sprintf(
                         /* translators: 1: current table number, 2: total tables, 3: cumulative rows exported */
                         __('Saving your site content — table %1$d of %2$d (%3$s rows exported so far)…', 'rosenheinrich-multisite-migrate'),
                         $idx,
                         $total,
                         number_format_i18n($total_rows)
+                    );
+                }
+                if ($table_name !== '') {
+                    return sprintf(
+                        /* translators: 1: current table number, 2: total tables, 3: current table name */
+                        __('Saving your site content — table %1$d of %2$d (%3$s)…', 'rosenheinrich-multisite-migrate'),
+                        $idx,
+                        $total,
+                        $table_name
                     );
                 }
                 return sprintf(

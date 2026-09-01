@@ -85,6 +85,8 @@ class Rmmigrate_Ajax_Backup
             self::backup_start_error(__('You do not have permission to create backups.', 'rosenheinrich-multisite-migrate'), array(), 403);
         }
 
+        Rmmigrate_Job::recover_stale_active();
+
         $input = array(
             'scope'                      => Rmmigrate_Request_Input::post_text('scope', Rmmigrate_Multisite_Scope::SCOPE_NETWORK),
             'excluded_blogs'             => Rmmigrate_Request_Input::post_int_array('excluded_blogs'),
@@ -108,7 +110,7 @@ class Rmmigrate_Ajax_Backup
             $ctx = $e->get_context();
             self::backup_start_error(
                 $e->getMessage(),
-                array_merge(array('phase' => 'start'), $ctx),
+                array_merge(array('phase' => 'start', 'service_code' => $e->get_code_key()), $ctx),
                 isset($ctx['capability']) ? 403 : null
             );
         } catch (Throwable $e) {

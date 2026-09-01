@@ -1,6 +1,26 @@
 (function ($) {
     'use strict';
 
+    function adminConfig() {
+        return window.rmmigrateAdmin || {};
+    }
+
+    function adminUI() {
+        return window.rmmigrateAdminUI || null;
+    }
+
+    function defaultDetailAction() {
+        return 'rmmigrate_activity_detail';
+    }
+
+    function defaultListAction() {
+        return 'rmmigrate_activity_list';
+    }
+
+    function defaultLogChunkAction() {
+        return 'rmmigrate_log_chunk';
+    }
+
     function escHtml(text) {
         return $('<div/>').text(text || '').html();
     }
@@ -16,6 +36,15 @@
             return 'mm-status-ok';
         }
         return 'mm-status-idle';
+    }
+
+    function statusPillClass(status) {
+        return 'mm-status-pill ' + statusClass(status);
+    }
+
+    function actionName(key, fallback) {
+        var admin = adminConfig();
+        return admin[key] || fallback;
     }
 
     function metaPair(label, valueHtml) {
@@ -51,7 +80,8 @@
     function renderDetail(data) {
         var entry = data.entry || {};
         var job = data.job;
-        var i18n = rmmigrateAdmin.i18n || {};
+        var admin = adminConfig();
+        var i18n = admin.i18n || {};
         var html = '';
         var typeLabel = entry.type_label || entry.type || '';
         var statusLabel = entry.status_label || entry.status || '';
@@ -210,13 +240,144 @@
         return html;
     }
 
+    function columnLabel(selector, fallback) {
+        var text = $('.mm-activity-table thead ' + selector).first().text();
+        return (text && text.trim()) || fallback;
+    }
+
+    function renderActivityRow(entry) {
+        var admin = adminConfig();
+        var i18n = admin.i18n || {};
+        var entryId = entry.entry_id || '';
+        var status = entry.status || 'info';
+        var typeLabel = entry.type_label || entry.type || '';
+        var statusLabel = entry.status_label || status;
+        var jobId = parseInt(entry.job_id, 10) || 0;
+        var titleTemplate = i18n.activityJobTitle || '%1$s job #%2$d';
+        var detailTitle = jobId > 0
+            ? titleTemplate.replace('%1$s', typeLabel).replace('%2$d', String(jobId))
+            : typeLabel;
+        var message = entry.message || '';
+        var bundledCount = parseInt(entry.bundled_count, 10) || 0;
+        var timeLabel = columnLabel('.column-date', 'Time');
+        var typeCol = columnLabel('.column-type', i18n.type || 'Type');
+        var statusCol = columnLabel('.column-status', i18n.status || 'Status');
+        var messageCol = columnLabel('.column-message', 'Message');
+        var actionsCol = columnLabel('.column-actions', 'Actions');
+        var html = '<tr data-entry-id="' + escHtml(entryId) + '">';
+        html += '<td class="column-date mm-activity-time" data-label="' + escHtml(timeLabel) + '"><code>' + escHtml(entry.time_display || entry.time || '') + '</code></td>';
+        html += '<td class="column-type" data-label="' + escHtml(typeCol) + '"><span class="mm-status-chip mm-activity-type">' + escHtml(typeLabel) + '</span></td>';
+        html += '<td class="column-status" data-label="' + escHtml(statusCol) + '"><span class="' + escHtml(statusPillClass(status)) + '">' + escHtml(statusLabel) + '</span></td>';
+        html += '<td class="column-message mm-activity-message" data-label="' + escHtml(messageCol) + '" title="' + escHtml(message) + '">' + escHtml(message);
+        if (bundledCount > 1) {
+            html += ' <span class="mm-activity-bundled-hint">' + escHtml((i18n.bundledEventsHint || '(%d events — open Details)').replace('%d', String(bundledCount))) + '</span>';
+        }
+        html += '</td>';
+        html += '<td class="column-actions mm-row-actions" data-label="' + escHtml(actionsCol) + '">';
+        html += '<button type="button" class="button button-small button-primary mm-btn-teal mm-activity-detail-btn" data-entry-id="' + escHtml(entryId) + '" data-job-id="' + escHtml(String(jobId)) + '" data-title="' + escHtml(detailTitle) + '">' + escHtml(i18n.details || 'Details') + '</button>';
+        html += '</td></tr>';
+        return html;
+    }
+
+    function hasRunningEntries(entries) {
+        if (!Array.isArray(entries)) {
+            return false;
+        }
+        return entries.some(function (entry) {
+            var status = String((entry && entry.status) || '').toLowerCase();
+            return status === 'running' || status === 'progress' || status === 'active';
+        });
+    }
+
+    function tableHasRunningRows() {
+        var found = false;
+        $('.mm-activity-table tbody .mm-status-pill').each(function () {
+            if ($(this).hasClass('mm-status-warn') && /in progress/i.test($(this).text())) {
+                found = true;
+                return false;
+            }
+            return true;
+        });
+        return found;
+    }
+
+    var pollTimer = null;
+    var pollInFlight = false;
+
+    function stopActivityPoll() {
+        if (pollTimer) {
+            clearTimeout(pollTimer);
+            pollTimer = null;
+        }
+    }
+
+    function scheduleActivityPoll(delay) {
+        stopActivityPoll();
+        pollTimer = setTimeout(pollActivityList, typeof delay === 'number' ? delay : 1500);
+    }
+
+    function readFilterState() {
+        var $form = $('.mm-activity-filters').first();
+        var page = 1;
+        var pageMatch = window.location.search.match(/[?&]paged=(\d+)/);
+        if (pageMatch) {
+            page = Math.max(1, parseInt(pageMatch[1], 10) || 1);
+        }
+        return {
+            type: $form.find('[name="type"]').val() || '',
+            date_from: $form.find('[name="date_from"]').val() || '',
+            date_to: $form.find('[name="date_to"]').val() || '',
+            page: page,
+            per_page: $('.mm-activity-table tbody tr').length || 25
+        };
+    }
+
+    function pollActivityList() {
+        var admin = adminConfig();
+        if (!admin.ajaxUrl || !$('.mm-activity-table tbody').length) {
+            return;
+        }
+        if (pollInFlight) {
+            scheduleActivityPoll(1500);
+            return;
+        }
+        pollInFlight = true;
+        var filters = readFilterState();
+        $.post(admin.ajaxUrl, {
+            action: actionName('activityListAction', defaultListAction()),
+            nonce: admin.nonce,
+            type: filters.type,
+            date_from: filters.date_from,
+            date_to: filters.date_to,
+            page: filters.page,
+            per_page: filters.per_page
+        }).done(function (resp) {
+            if (!resp || !resp.success || !resp.data || !Array.isArray(resp.data.entries)) {
+                return;
+            }
+            var rows = resp.data.entries.map(renderActivityRow).join('');
+            $('.mm-activity-table tbody').html(rows);
+            if (hasRunningEntries(resp.data.entries)) {
+                scheduleActivityPoll(1500);
+            } else {
+                stopActivityPoll();
+            }
+        }).always(function () {
+            pollInFlight = false;
+        }).fail(function () {
+            scheduleActivityPoll(3000);
+        });
+    }
+
     var releaseDetailA11y = null;
 
     function openDetail(entryId, title, jobId) {
         var $dialog = $('#mm-activity-detail-dialog');
-        var i18n = (typeof rmmigrateAdmin !== 'undefined' && rmmigrateAdmin.i18n) ? rmmigrateAdmin.i18n : {};
+        var admin = adminConfig();
+        var i18n = admin.i18n || {};
+        var ui = adminUI();
         $('#mm-activity-detail-title').text(title || i18n.activityDetails || 'Activity details');
-        $('#mm-activity-detail-body').html('<p class="description">' + escHtml(rmmigrateAdmin.loadingText) + '</p>');
+        $('#mm-activity-detail-body').html('<p class="description">' + escHtml(admin.loadingText || 'Loading…') + '</p>');
         $dialog.removeClass('mm-hidden');
         var $modal = $dialog.find('.mm-restore-modal').first();
         if (!$modal.length) {
@@ -226,8 +387,8 @@
             releaseDetailA11y();
             releaseDetailA11y = null;
         }
-        if (window.rmmigrateAdminUI && typeof rmmigrateAdminUI.bindOverlayA11y === 'function') {
-            releaseDetailA11y = rmmigrateAdminUI.bindOverlayA11y({
+        if (ui && typeof ui.bindOverlayA11y === 'function') {
+            releaseDetailA11y = ui.bindOverlayA11y({
                 $container: $modal,
                 $initialFocus: $dialog.find('.mm-activity-detail-close').first(),
                 ns: 'mmActivityDetail',
@@ -236,16 +397,16 @@
         }
 
         function refreshDetailTrap() {
-            if (window.rmmigrateAdminUI && typeof rmmigrateAdminUI.refreshTrap === 'function') {
-                rmmigrateAdminUI.refreshTrap(releaseDetailA11y);
+            if (ui && typeof ui.refreshTrap === 'function') {
+                ui.refreshTrap(releaseDetailA11y);
             }
         }
 
         var requestFailedMsg = i18n.requestFailed || 'Request failed.';
 
-        $.post(rmmigrateAdmin.ajaxUrl, {
-            action: 'rmmigrate_activity_detail',
-            nonce: rmmigrateAdmin.nonce,
+        $.post(admin.ajaxUrl, {
+            action: actionName('activityDetailAction', defaultDetailAction()),
+            nonce: admin.nonce,
             entry_id: entryId || '',
             job_id: jobId || 0
         }).done(function (resp) {
@@ -282,14 +443,15 @@
     });
 
     function loadLogChunk($wrap, log, offset, lines) {
+        var admin = adminConfig();
         var $viewer = $wrap.find('.mm-log-viewer');
         var $toolbar = $wrap.find('.mm-log-viewer-toolbar');
-        var i18n = (rmmigrateAdmin && rmmigrateAdmin.i18n) || {};
+        var i18n = admin.i18n || {};
         var requestFailedMsg = i18n.requestFailed || 'Request failed.';
-        $viewer.text(rmmigrateAdmin.loadingText || 'Loading…');
-        $.post(rmmigrateAdmin.ajaxUrl, {
-            action: 'rmmigrate_log_chunk',
-            nonce: rmmigrateAdmin.nonce,
+        $viewer.text(admin.loadingText || 'Loading…');
+        $.post(admin.ajaxUrl, {
+            action: actionName('logChunkAction', defaultLogChunkAction()),
+            nonce: admin.nonce,
             log: log,
             offset: offset,
             lines: lines
@@ -342,5 +504,11 @@
         e.preventDefault();
         var $wrap = $(this).closest('.mm-log-viewer-wrap');
         loadLogChunk($wrap, $(this).data('log'), 0, parseInt($wrap.data('lines'), 10) || 200);
+    });
+
+    $(function () {
+        if ($('.mm-activity-table tbody').length && tableHasRunningRows()) {
+            scheduleActivityPoll(1500);
+        }
     });
 }(jQuery));

@@ -103,9 +103,14 @@ class Rmmigrate_User_Error_Messages
                 'action'  => __('Use Settings → Database → mysqldump, raise memory_limit, or exclude large tables.', 'rosenheinrich-multisite-migrate'),
             );
         }
+        if (strpos($lower, 'exceeded maximum time limit') !== false) {
+            return array(
+                'message' => $text,
+                'action'  => __('Raise Settings → Engine max build time, use mysqldump for large databases, or exclude large tables, then retry.', 'rosenheinrich-multisite-migrate'),
+            );
+        }
         if (strpos($lower, 'maximum execution time') !== false
-            || strpos($lower, 'max_execution_time') !== false
-            || strpos($lower, 'exceeded maximum time limit') !== false) {
+            || strpos($lower, 'max_execution_time') !== false) {
             return array(
                 'message' => __('PHP time limit hit mid-slice.', 'rosenheinrich-multisite-migrate'),
                 'action'  => __('Raise max_execution_time or open Health, then retry.', 'rosenheinrich-multisite-migrate'),

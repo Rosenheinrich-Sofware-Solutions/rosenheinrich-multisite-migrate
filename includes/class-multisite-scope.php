@@ -387,6 +387,10 @@ class Rmmigrate_Multisite_Scope
             '*wfblockediplog',
             '*wfHits',
             '*wfFileMods',
+            '*wfauditevents',
+            '*wflivetraffictwo',
+            '*wfKnownFileList',
+            '*wflogins',
             '*actionscheduler_*',
         );
         /**

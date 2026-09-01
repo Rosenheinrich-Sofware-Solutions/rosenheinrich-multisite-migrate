@@ -393,6 +393,7 @@ class Rmmigrate_Plugin_Uninstall
             return is_plugin_active_for_network($plugin);
         }
 
-        return !empty($_POST['network_scope']) || (function_exists('is_network_admin') && is_network_admin());
+        return Rmmigrate_Request_Input::post_bool('network_scope')
+            || (function_exists('is_network_admin') && is_network_admin());
     }
 }

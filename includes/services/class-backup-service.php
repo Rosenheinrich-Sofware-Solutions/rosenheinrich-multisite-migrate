@@ -12,6 +12,8 @@ final class Rmmigrate_Backup_Service
      */
     public static function start_backup(array $input): array
     {
+        Rmmigrate_Job::recover_stale_active();
+
         $triggered_by = (string) ($input['triggered_by'] ?? 'manual');
         $is_cron = ($triggered_by === 'cron');
 

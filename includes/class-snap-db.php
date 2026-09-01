@@ -110,17 +110,23 @@ class Rmmigrate_Snap_DB
     public static function build_pk_where(array $pk_cols, $offset): string
     {
         global $wpdb;
-        if ($offset === null || $pk_cols === array()) {
+        // Non-array / null PK values used to coerce to '' → WHERE id > '' rescans and inflates table_rows_done.
+        if (!is_array($offset) || $pk_cols === array()) {
             return '';
+        }
+        foreach ($pk_cols as $col) {
+            if (!array_key_exists($col, $offset) || $offset[$col] === null) {
+                return '';
+            }
         }
         if (count($pk_cols) === 1) {
             $col = self::quote_identifier($pk_cols[0]);
-            $prepared = $wpdb->prepare('%s', $offset[$pk_cols[0]] ?? '');
+            $prepared = $wpdb->prepare('%s', $offset[$pk_cols[0]]);
             return 'WHERE ' . $col . ' > ' . $prepared;
         }
         $tuple = array();
         foreach ($pk_cols as $col) {
-            $tuple[] = $wpdb->prepare('%s', $offset[$col] ?? '');
+            $tuple[] = $wpdb->prepare('%s', $offset[$col]);
         }
         $cols_sql = '(' . implode(',', array_map(array(self::class, 'quote_identifier'), $pk_cols)) . ')';
         return 'WHERE ' . $cols_sql . ' > (' . implode(',', $tuple) . ')';
@@ -263,21 +269,41 @@ class Rmmigrate_Snap_DB
 
     public static function jobs_get_active_id(): ?int
     {
-        global $wpdb;
-        if (!is_object($wpdb) || !method_exists($wpdb, 'get_var')) {
+        $ids = self::jobs_get_active_ids();
+        if ($ids === array()) {
             return null;
+        }
+
+        return (int) max($ids);
+    }
+
+    /**
+     * All non-terminal job IDs (status 0–99), ascending.
+     *
+     * @return list<int>
+     */
+    public static function jobs_get_active_ids(): array
+    {
+        global $wpdb;
+        if (!is_object($wpdb) || !method_exists($wpdb, 'get_col')) {
+            return array();
         }
         $table = self::jobs_table_sql();
         // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- Plugin jobs table; identifier via quote_identifier(); values use prepare().
-        $id = $wpdb->get_var(
+        $rows = $wpdb->get_col(
             $wpdb->prepare(
-                'SELECT id FROM ' . $table . ' WHERE status >= %d AND status < %d ORDER BY id DESC LIMIT 1',
+                'SELECT id FROM ' . $table . ' WHERE status >= %d AND status < %d ORDER BY id ASC',
                 0,
                 100
             )
         );
+        if (!is_array($rows)) {
+            return array();
+        }
 
-        return ($id === null || $id === '') ? null : (int) $id;
+        return array_values(array_filter(array_map('intval', $rows), static function (int $id): bool {
+            return $id > 0;
+        }));
     }
 
     public static function jobs_get_active_id_for_blog(int $blog_id, string $scope): ?int

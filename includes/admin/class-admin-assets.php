@@ -300,6 +300,9 @@ class Rmmigrate_Admin_Assets
             'nonce'               => wp_create_nonce('rmmigrate_admin'),
             'siteUrl'             => home_url('/'),
             'setupDismissAction'  => 'rmmigrate_setup_wizard_dismiss_banner',
+            'activityDetailAction'=> 'rmmigrate_activity_detail',
+            'activityListAction'  => 'rmmigrate_activity_list',
+            'logChunkAction'      => 'rmmigrate_log_chunk',
             'isNetwork'       => $is_network,
             'scope'           => is_multisite() ? Rmmigrate_Multisite_Scope::SCOPE_SUBSITE : Rmmigrate_Multisite_Scope::SCOPE_NETWORK,
             'scopeSubsiteLabel' => $scope_subsite_label,
@@ -352,6 +355,11 @@ class Rmmigrate_Admin_Assets
                 'saveFailed'          => __('Save failed', 'rosenheinrich-multisite-migrate'),
                 'setupComplete'       => __('Setup complete', 'rosenheinrich-multisite-migrate'),
                 'activityDetails'     => __('Activity details', 'rosenheinrich-multisite-migrate'),
+                'details'             => __('Details', 'rosenheinrich-multisite-migrate'),
+                /* translators: %d: number of process events bundled into this row */
+                'bundledEventsHint'   => __('(%d events — open Details)', 'rosenheinrich-multisite-migrate'),
+                /* translators: 1: event type label, 2: job id */
+                'activityJobTitle'    => __('%1$s job #%2$d', 'rosenheinrich-multisite-migrate'),
                 'eventSummary'        => __('Event summary', 'rosenheinrich-multisite-migrate'),
                 'file'                => __('File', 'rosenheinrich-multisite-migrate'),
                 'uploadId'            => __('Upload ID', 'rosenheinrich-multisite-migrate'),

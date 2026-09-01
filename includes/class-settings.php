@@ -18,7 +18,7 @@ class Rmmigrate_Settings
             'db_mode'                   => 'auto',
             'db_insert_query_limit'     => 131072,
             'sql_import_chunk_bytes'    => 1048576,
-        'exclude_log_tables'        => false,
+        'exclude_log_tables'        => true,
         'exclude_revisions'         => false,
         'default_exclude_tables'    => array(),
             'archive_mode'              => 'daf',

@@ -173,7 +173,9 @@ class Rmmigrate_Activity_Log
         $page = max(1, $page);
 
         $collected = self::collect_filtered_entries($type_filter, $date_from, $date_to, $job_id);
-        $bundled = self::bundle_entries_for_display($collected['entries']);
+        $bundled = self::hydrate_active_job_entries(
+            self::bundle_entries_for_display($collected['entries'])
+        );
         $total = count($bundled);
         $total_pages = $total > 0 ? (int) ceil($total / $per_page) : 1;
         if ($page > $total_pages) {
@@ -189,6 +191,49 @@ class Rmmigrate_Activity_Log
             'total_pages'      => $total_pages,
             'total_estimated'  => $collected['estimated'],
         );
+    }
+
+    /**
+     * Overlay live job progress onto bundled activity rows for in-progress backup/restore jobs.
+     *
+     * @param array<int,array<string,mixed>> $entries
+     * @return array<int,array<string,mixed>>
+     */
+    public static function hydrate_active_job_entries(array $entries): array
+    {
+        if ($entries === array()) {
+            return array();
+        }
+
+        foreach ($entries as $index => $entry) {
+            $job_id = (int) ($entry['job_id'] ?? 0);
+            if ($job_id <= 0) {
+                continue;
+            }
+            $type = strtolower((string) ($entry['type'] ?? ''));
+            if (!in_array($type, array('backup', 'restore'), true)) {
+                continue;
+            }
+
+            $job = self::get_request_cached_job($job_id);
+            if ($job === null) {
+                continue;
+            }
+
+            $status = $job->get_status();
+            if ($status < 0 || $status >= 100) {
+                continue;
+            }
+
+            $entries[$index]['status'] = 'running';
+            $entries[$index]['message'] = trim(
+                $job->get_display_status() . ' ' . $job->get_progress_message()
+            );
+            $entries[$index]['status_label'] = self::status_label('running');
+            $entries[$index]['type_label'] = self::type_label($type);
+        }
+
+        return $entries;
     }
 
     /**
@@ -456,6 +501,7 @@ class Rmmigrate_Activity_Log
             'error'   => 100,
             'warning' => 80,
             'success' => 70,
+            'running' => 40,
             'info'    => 10,
         );
         $score = $scores[$status] ?? 10;

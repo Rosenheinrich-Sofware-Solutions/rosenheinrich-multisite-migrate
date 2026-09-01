@@ -89,6 +89,28 @@ class Rmmigrate_Runner
             return self::waiting_worker_response($job, $job_id);
         }
 
+        foreach (Rmmigrate_Snap_DB::jobs_get_active_ids() as $other_id) {
+            if ($other_id >= $job_id) {
+                continue;
+            }
+            $message = __('A backup or restore is already in progress.', 'rosenheinrich-multisite-migrate');
+            $job->set_status(
+                Rmmigrate_Job::STATUS_ERROR,
+                sanitize_text_field($message),
+                Rmmigrate_Error_Codes::ACTIVE_JOB_CONFLICT
+            );
+            self::release_job_lock($job_id);
+            $public = sanitize_text_field($message);
+            if (class_exists('Rmmigrate_User_Error_Messages', false)) {
+                $public = Rmmigrate_User_Error_Messages::for_admin_banner(array(
+                    'message'  => sanitize_text_field($message),
+                    'code'     => Rmmigrate_Error_Codes::ACTIVE_JOB_CONFLICT,
+                    'job_type' => $job->is_restore() ? 'restore' : 'backup',
+                ));
+            }
+            return array('done' => true, 'status' => -1, 'percent' => 0, 'message' => $public, 'error' => $public);
+        }
+
         delete_transient(self::WAIT_BACKOFF_PREFIX . $job_id);
 
         // Rate-limit only real slice starts (after lock), not lock-wait responses.
@@ -288,6 +310,19 @@ class Rmmigrate_Runner
             return;
         }
 
+        $fingerprint = self::build_progress_fingerprint($progress);
+        $prev_fp = (string) ($progress['progress_fingerprint'] ?? '');
+        $last_progress_at = (int) ($progress['last_progress_at'] ?? 0);
+        if ($fingerprint !== '' && $fingerprint !== $prev_fp) {
+            $last_progress_at = time();
+            $job->update_progress(array(
+                'progress_fingerprint' => $fingerprint,
+                'last_progress_at'     => $last_progress_at,
+            ));
+        } elseif ($last_progress_at <= 0) {
+            $last_progress_at = $started;
+        }
+
         $elapsed = time() - $started;
         $progress = $job->get_progress();
         $scanning = ($job->get_status() === Rmmigrate_Job::STATUS_ARCHIVING)
@@ -296,13 +331,49 @@ class Rmmigrate_Runner
         if ($scanning) {
             $max = (int) ($max * 1.5);
         }
-
-        if ($elapsed > $max) {
+        $hard_cap = max($max * 4, 8 * HOUR_IN_SECONDS);
+        if ($elapsed > $hard_cap) {
             // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
             throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::TIME_LIMIT),
                 esc_html(__('Backup build exceeded maximum time limit.', 'rosenheinrich-multisite-migrate'))
             );
         }
+        if ($elapsed <= $max) {
+            return;
+        }
+
+        $settings = Rmmigrate_Settings::get();
+        $stale_min = (int) ($settings['stale_job_minutes'] ?? 30);
+        $grace = max(5, min(10, $stale_min)) * MINUTE_IN_SECONDS;
+        if ((time() - $last_progress_at) <= $grace) {
+            return;
+        }
+
+        // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+        throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::TIME_LIMIT),
+            esc_html(__('Backup build exceeded maximum time limit.', 'rosenheinrich-multisite-migrate'))
+        );
+    }
+
+    /**
+     * Compact fingerprint of dump/archive counters so wall-clock limits can skip while work advances.
+     *
+     * @param array<string,mixed> $progress
+     */
+    private static function build_progress_fingerprint(array $progress): string
+    {
+        $db = is_array($progress['database'] ?? null) ? $progress['database'] : array();
+        $archive = is_array($progress['archive'] ?? null) ? $progress['archive'] : array();
+
+        return implode('|', array(
+            (string) ($progress['step'] ?? ''),
+            (string) ($db['sql_bytes_written'] ?? ''),
+            (string) ($db['table_index'] ?? ''),
+            (string) ($db['mysqldump_table_index'] ?? ''),
+            (string) ($db['rows_done'] ?? ''),
+            (string) ($archive['file_index'] ?? ''),
+            (string) ($archive['bytes_written'] ?? ''),
+        ));
     }
 
     /**
