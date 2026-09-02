@@ -267,6 +267,8 @@ final class Rmmigrate_Restore_Service
      */
     public static function start_restore(array $params = array()): array
     {
+        Rmmigrate_Job::recover_stale_active();
+
         $params = Rmmigrate_Access::subsite_restore_params($params);
         $source_id = (int) ($params['source_job_id'] ?? 0);
         $mode = (string) ($params['restore_mode'] ?? Rmmigrate_Job::RESTORE_MODE_BOTH);

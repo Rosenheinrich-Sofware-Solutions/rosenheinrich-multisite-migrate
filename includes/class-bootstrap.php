@@ -36,6 +36,15 @@ class Rmmigrate_Bootstrap
     }
 
     /**
+     * Whether AI Agents (MCP) / Abilities API can run on this WordPress.
+     * Requires WordPress 6.9+ (`wp_register_ability`). Backup/restore work from 6.2.
+     */
+    public static function mcp_supported(): bool
+    {
+        return function_exists('wp_register_ability');
+    }
+
+    /**
      * @param string $plugin Plugin basename relative to wp-content/plugins.
      */
     private static function plugin_file_exists(string $plugin): bool

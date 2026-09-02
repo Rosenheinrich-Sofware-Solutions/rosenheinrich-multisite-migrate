@@ -17,6 +17,8 @@ if (!defined('ABSPATH')) {
  */
 final class Rmmigrate_Pro_Hints
 {
+    use Rmmigrate_Ajax_Base;
+
     const USER_META_KEY = 'rmmigrate_pro_hints_dismissed';
 
     public static function register(): void
@@ -66,17 +68,37 @@ final class Rmmigrate_Pro_Hints
     public static function ajax_dismiss(): void
     {
         if (!self::user_can_see()) {
-            wp_send_json_error(array('message' => __('Permission denied.', 'rosenheinrich-multisite-migrate')), 403);
+            self::send_ajax_error(
+                __('Permission denied.', 'rosenheinrich-multisite-migrate'),
+                403,
+                'system',
+                0,
+                array('phase' => 'pro_hint'),
+                'warning'
+            );
         }
 
         $nonce = Rmmigrate_Request_Input::post_text('nonce');
         if (!wp_verify_nonce($nonce, 'rmmigrate_admin')) {
-            wp_send_json_error(array('message' => __('Invalid nonce.', 'rosenheinrich-multisite-migrate')), 403);
+            self::send_ajax_error(
+                __('Invalid nonce.', 'rosenheinrich-multisite-migrate'),
+                403,
+                'system',
+                0,
+                array('phase' => 'pro_hint'),
+                'warning'
+            );
         }
 
         $slug = sanitize_key(Rmmigrate_Request_Input::post_text('slug'));
         if ($slug === '') {
-            wp_send_json_error(array('message' => __('Invalid hint.', 'rosenheinrich-multisite-migrate')), 400);
+            self::send_ajax_error(
+                __('Invalid hint.', 'rosenheinrich-multisite-migrate'),
+                400,
+                'system',
+                0,
+                array('phase' => 'pro_hint')
+            );
         }
 
         self::mark_dismissed($slug);

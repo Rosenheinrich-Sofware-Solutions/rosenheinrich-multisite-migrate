@@ -11,6 +11,8 @@ if (!defined('ABSPATH')) {
  */
 final class Rmmigrate_Telemetry
 {
+    use Rmmigrate_Ajax_Base;
+
     const OPTION_KEY           = 'rmmigrate_telemetry';
     const QUEUE_OPTION         = 'rmmigrate_telemetry_queue';
     const FLUSH_CRON_HOOK        = 'rmmigrate_telemetry_flush';
@@ -185,11 +187,25 @@ final class Rmmigrate_Telemetry
     {
         $capability = is_multisite() ? 'manage_network' : 'manage_options';
         if (!current_user_can($capability)) {
-            wp_send_json_error(array('message' => __('Permission denied.', 'rosenheinrich-multisite-migrate')), 403);
+            self::send_ajax_error(
+                __('Permission denied.', 'rosenheinrich-multisite-migrate'),
+                403,
+                'system',
+                0,
+                array('phase' => 'telemetry_consent'),
+                'warning'
+            );
         }
         $nonce = Rmmigrate_Request_Input::post_text('nonce');
         if (!wp_verify_nonce($nonce, 'rmmigrate_admin')) {
-            wp_send_json_error(array('message' => __('Invalid nonce.', 'rosenheinrich-multisite-migrate')), 403);
+            self::send_ajax_error(
+                __('Invalid nonce.', 'rosenheinrich-multisite-migrate'),
+                403,
+                'system',
+                0,
+                array('phase' => 'telemetry_consent'),
+                'warning'
+            );
         }
 
         $grant = Rmmigrate_Request_Input::post_text('grant');

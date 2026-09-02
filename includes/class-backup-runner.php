@@ -24,6 +24,11 @@ class Rmmigrate_Runner
     /** Consecutive mid-slice PHP max_execution_time fatals before failing the job. */
     const MAX_PHP_EXECUTION_TIMEOUTS = 5;
 
+    public static function lease_ttl_seconds(): int
+    {
+        return self::LEASE_TTL;
+    }
+
     /** @var array<int,Rmmigrate_Filesystem_Stream> */
     private static $job_lock_handles = array();
 

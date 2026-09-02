@@ -115,6 +115,7 @@
         }).fail(function (xhr) {
             $btn.prop('disabled', false);
             if (window.rmmigrateAdminUI) {
+                rmmigrateAdminUI.reportTransportFail('rmmigrate_dismiss_last_error', xhr, 'dismiss');
                 rmmigrateAdminUI.toast(rmmigrateAdminUI.ajaxErrorMessage(xhr), 'error');
             }
         });
@@ -163,6 +164,8 @@
         });
     }
 
+    var reviewNudgePostInFlight = false;
+
     function reviewNudgePost(action, feedback, done) {
         var cfg = mmAdminAjaxConfig();
         if (!cfg || !cfg.ajaxUrl || !cfg.nonce) {
@@ -171,6 +174,10 @@
             }
             return;
         }
+        if (reviewNudgePostInFlight) {
+            return;
+        }
+        reviewNudgePostInFlight = true;
         $.post(cfg.ajaxUrl, {
             action: action,
             nonce: cfg.nonce,
@@ -179,10 +186,15 @@
             if (typeof done === 'function') {
                 done(res && res.success ? res : null);
             }
-        }).fail(function () {
+        }).fail(function (xhr) {
+            if (window.rmmigrateAdminUI && rmmigrateAdminUI.reportTransportFail) {
+                rmmigrateAdminUI.reportTransportFail(action, xhr, 'nudge');
+            }
             if (typeof done === 'function') {
                 done(null);
             }
+        }).always(function () {
+            reviewNudgePostInFlight = false;
         });
     }
 
@@ -218,23 +230,30 @@
     });
 
     $(document).on('click', '.mm-pro-hint__dismiss', function () {
-        var $hint = $(this).closest('.mm-pro-hint');
-        var slug = $(this).data('slug');
+        var $btn = $(this);
+        var $hint = $btn.closest('.mm-pro-hint');
+        var slug = $btn.data('slug');
         var cfg = mmAdminAjaxConfig();
         if (!cfg || !cfg.ajaxUrl || !cfg.nonce) {
             return;
         }
-        $.post(cfg.ajaxUrl, {
-            action: 'rmmigrate_pro_hint_dismiss',
-            nonce: cfg.nonce,
-            slug: slug
-        }).done(function (res) {
-            if (res && res.success) {
-                $hint.fadeOut(200, function () {
-                    $(this).remove();
-                });
-            }
-        });
+        if (!window.rmmigrateAdminUI || !rmmigrateAdminUI.withBusy($btn, function (release) {
+            $.post(cfg.ajaxUrl, {
+                action: 'rmmigrate_pro_hint_dismiss',
+                nonce: cfg.nonce,
+                slug: slug
+            }).done(function (res) {
+                if (res && res.success) {
+                    $hint.fadeOut(200, function () {
+                        $(this).remove();
+                    });
+                }
+            }).fail(function (xhr) {
+                rmmigrateAdminUI.reportTransportFail('rmmigrate_pro_hint_dismiss', xhr, 'dismiss');
+            }).always(release);
+        })) {
+            return;
+        }
     });
 
     function mmAdminAjaxConfig() {
@@ -294,6 +313,7 @@
         }).fail(function (xhr) {
             $btn.prop('disabled', false);
             if (window.rmmigrateAdminUI) {
+                rmmigrateAdminUI.reportTransportFail(dismissCfg.action, xhr, 'dismiss');
                 rmmigrateAdminUI.toast(rmmigrateAdminUI.ajaxErrorMessage(xhr), 'error');
             }
         });

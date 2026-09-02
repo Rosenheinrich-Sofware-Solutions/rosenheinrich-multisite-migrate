@@ -22,11 +22,15 @@ if ($rmmigrate_msg === '') {
 } elseif ($rmmigrate_pct > 0 && $rmmigrate_pct < 100) {
 	$rmmigrate_msg .= ' (' . $rmmigrate_pct . '%)';
 }
+$rmmigrate_worker_stale_hint = Rmmigrate_Job::should_warn_worker_stale($rmmigrate_active_job);
 ?>
-<div id="mm-active-job-banner" class="mm-form-section mm-active-job-banner" data-job-id="<?php echo esc_attr((string) $rmmigrate_active_job->get_id()); ?>" data-job-type="<?php echo esc_attr($rmmigrate_job_type); ?>">
+<div id="mm-active-job-banner" class="mm-form-section mm-active-job-banner<?php echo $rmmigrate_worker_stale_hint ? ' mm-active-job-banner--worker-stale' : ''; ?>" data-job-id="<?php echo esc_attr((string) $rmmigrate_active_job->get_id()); ?>" data-job-type="<?php echo esc_attr($rmmigrate_job_type); ?>">
     <h2 id="mm-active-job-title"><?php echo esc_html($rmmigrate_title); ?></h2>
     <div class="mm-progress-bar"><div class="mm-progress-fill" id="mm-active-job-fill" style="width:<?php echo esc_attr((string) $rmmigrate_pct); ?>%"></div></div>
     <p class="mm-active-job-text" id="mm-active-job-text"><?php echo esc_html($rmmigrate_msg); ?></p>
+    <?php if ($rmmigrate_worker_stale_hint) : ?>
+    <p id="mm-active-job-worker-stale-hint" class="mm-active-job-worker-stale-hint mm-status-warn" role="status"><?php esc_html_e('No recent worker activity. If progress stays frozen, refresh the page, cancel the job, or wait — stale jobs are cleared automatically.', 'rosenheinrich-multisite-migrate'); ?></p>
+    <?php endif; ?>
     <p class="mm-active-job-actions">
         <?php if ($rmmigrate_job_type === Rmmigrate_Job::JOB_TYPE_BACKUP) : ?>
             <button type="button" class="button" id="multisite-migrate-cancel"><?php esc_html_e('Cancel backup', 'rosenheinrich-multisite-migrate'); ?></button>

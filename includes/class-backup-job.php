@@ -576,6 +576,31 @@ class Rmmigrate_Job
     }
 
     /**
+     * Active job with no fresh worker lease long enough to surface a UI warning (before full stale recovery).
+     */
+    public static function should_warn_worker_stale(self $job): bool
+    {
+        $status = $job->get_status();
+        if ($status < 0 || $status >= 100) {
+            return false;
+        }
+        if (Rmmigrate_Runner::lease_is_fresh($job->get_id())) {
+            return false;
+        }
+
+        $updated_raw = (string) ($job->data['updated_at'] ?? '');
+        if ($updated_raw === '') {
+            return true;
+        }
+        $updated = strtotime($updated_raw . ' UTC');
+        if ($updated === false) {
+            return true;
+        }
+
+        return (time() - $updated) >= Rmmigrate_Runner::lease_ttl_seconds();
+    }
+
+    /**
      * Mark stuck active jobs as failed when the worker has been silent past the threshold.
      * Walks every active row so a newer job cannot hide an older stale duplicate.
      */

@@ -171,10 +171,11 @@ final class Rmmigrate_Backup_Service
         Rmmigrate_Job_Preflight::assert_can_view_job($job);
         $active = $job->get_status() >= 0 && $job->get_status() < 100;
         $payload = array(
-            'active'      => $active,
-            'is_stale'    => $active && Rmmigrate_Job::is_stale($job),
-            'lease_fresh' => Rmmigrate_Runner::lease_is_fresh($job->get_id()),
-            'job_id'      => $job->get_id(),
+            'active'            => $active,
+            'is_stale'          => $active && Rmmigrate_Job::is_stale($job),
+            'lease_fresh'       => Rmmigrate_Runner::lease_is_fresh($job->get_id()),
+            'worker_stale_hint' => $active && Rmmigrate_Job::should_warn_worker_stale($job),
+            'job_id'            => $job->get_id(),
             'job_type'    => $job->get_job_type(),
             'status'      => $job->get_status(),
             'percent'     => $job->get_percent(),

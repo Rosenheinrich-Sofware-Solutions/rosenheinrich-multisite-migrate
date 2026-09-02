@@ -53,7 +53,10 @@
                     : t('telemetryDisabled', 'Telemetry disabled.'),
                 'ok'
             );
-        }).fail(function () {
+        }).fail(function (xhr) {
+            if (rmmigrateAdminUI.reportTransportFail) {
+                rmmigrateAdminUI.reportTransportFail('rmmigrate_telemetry_consent', xhr, 'settings');
+            }
             $input.prop('checked', !grant);
             setStatus(t('requestFailed', 'Request failed'), 'error');
         }).always(function () {

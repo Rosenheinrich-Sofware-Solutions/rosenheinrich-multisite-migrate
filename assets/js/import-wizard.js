@@ -45,7 +45,12 @@
         return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
     }
 
+    var importInFlight = false;
+
     function uploadLocalFile(file) {
+        if (importInFlight) {
+            return;
+        }
         var status = $('#mm-import-local-status');
         var progressWrap = $('#mm-import-chunk-progress');
         var dropzone = $('#mm-import-dropzone');
@@ -62,6 +67,7 @@
             return;
         }
 
+        importInFlight = true;
         // Hide upload dropzone box & lead text while upload is active
         dropzone.addClass('mm-hidden');
         leadText.addClass('mm-hidden');
@@ -128,6 +134,7 @@
         }
 
         function restoreUploadUI() {
+            importInFlight = false;
             stopVerifyInterval();
             $(window).off('beforeunload.mmImport');
             $('#mm-import-sticky-progress').remove();
@@ -279,7 +286,16 @@
 
                 restoreUploadUI();
                 status.text(t('importFailed', 'Import failed'));
-                rmmigrateAdminUI.toast(t('importFailed', 'Import failed'), 'error');
+                var chunkFailMsg = t('importFailed', 'Import failed');
+                if (rmmigrateAdminUI.reportAjaxFailure) {
+                    rmmigrateAdminUI.reportAjaxFailure({
+                        action: 'rmmigrate_import_local_chunk',
+                        message: chunkFailMsg,
+                        phase: 'transport',
+                        httpStatus: xhr && xhr.status ? xhr.status : 0
+                    });
+                }
+                rmmigrateAdminUI.toast(chunkFailMsg, 'error');
             });
         }
 
@@ -372,6 +388,14 @@
                     ? rmmigrateAdminUI.ajaxErrorMessage(xhr, t('importFailed', 'Import failed'))
                     : t('importFailed', 'Import failed');
                 status.text(failMsg);
+                if (rmmigrateAdminUI.reportAjaxFailure) {
+                    rmmigrateAdminUI.reportAjaxFailure({
+                        action: 'rmmigrate_import_local',
+                        message: failMsg,
+                        phase: 'transport',
+                        httpStatus: xhr && xhr.status ? xhr.status : 0
+                    });
+                }
                 rmmigrateAdminUI.toast(failMsg, 'error');
             });
             return;

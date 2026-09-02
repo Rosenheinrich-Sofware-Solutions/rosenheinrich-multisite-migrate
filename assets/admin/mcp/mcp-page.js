@@ -232,20 +232,38 @@
 		var done = 0;
 		var total = 4;
 
-		if (cfg.abilitiesApiAvailable) {
-			setStepState(1, 'done', i18n('stepOk', 'OK'));
-			done++;
-			var d1 = $('mm-mcp-step-1-desc');
-			if (d1) {
-				var regTemplate = i18n('abilitiesRegistered', '%d Multisite Migrate abilities registered.');
-				d1.textContent = regTemplate.replace('%d', String((cfg.registeredAbilities || []).length));
-			}
-		} else {
+		if (!cfg.abilitiesApiAvailable) {
 			setStepState(1, 'blocked', i18n('stepWp69Short', 'WP 6.9+'));
 			var d1b = $('mm-mcp-step-1-desc');
 			if (d1b) {
 				d1b.textContent = i18n('wp69', 'Requires WordPress 6.9+ (Abilities API).');
 			}
+			setStepState(2, 'blocked', i18n('stepWp69Short', 'WP 6.9+'));
+			setStepState(3, 'blocked', i18n('stepWp69Short', 'WP 6.9+'));
+			setStepState(4, 'blocked', i18n('stepWp69Short', 'WP 6.9+'));
+
+			['mm-mcp-install-adapter', 'mm-mcp-generate-app-pw', 'mm-mcp-test-connection', 'mm-mcp-generate-oauth'].forEach(function (id) {
+				var btn = $(id);
+				if (btn) {
+					btn.disabled = true;
+					btn.classList.add('button-disabled');
+				}
+			});
+
+			var statusBlocked = $('mm-mcp-stepper-status');
+			if (statusBlocked) {
+				var stepsTemplateBlocked = i18n('stepsComplete', '%1$d of %2$d steps complete');
+				statusBlocked.textContent = stepsTemplateBlocked.replace('%1$d', '0').replace('%2$d', String(total));
+			}
+			return;
+		}
+
+		setStepState(1, 'done', i18n('stepOk', 'OK'));
+		done++;
+		var d1 = $('mm-mcp-step-1-desc');
+		if (d1) {
+			var regTemplate = i18n('abilitiesRegistered', '%d Multisite Migrate abilities registered.');
+			d1.textContent = regTemplate.replace('%d', String((cfg.registeredAbilities || []).length));
 		}
 
 		if (cfg.mcpAdapterActive) {

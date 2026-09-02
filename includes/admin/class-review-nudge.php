@@ -9,6 +9,8 @@ if (!defined('ABSPATH')) {
  */
 final class Rmmigrate_Review_Nudge
 {
+    use Rmmigrate_Ajax_Base;
+
     const USER_META_KEY = 'rmmigrate_review_nudge';
     const COOLDOWN_META_KEY = 'rmmigrate_review_nudge_cooldown_until';
     const ACTIVATED_OPTION = 'rmmigrate_first_activated_at';
@@ -103,7 +105,13 @@ final class Rmmigrate_Review_Nudge
             wp_send_json_success();
         }
 
-        wp_send_json_error(array('message' => __('Invalid feedback.', 'rosenheinrich-multisite-migrate')), 400);
+        self::send_ajax_error(
+            __('Invalid feedback.', 'rosenheinrich-multisite-migrate'),
+            400,
+            'system',
+            0,
+            array('phase' => 'review_nudge')
+        );
     }
 
     public static function ensure_first_activated_timestamp(): void
@@ -138,12 +146,26 @@ final class Rmmigrate_Review_Nudge
     private static function verify_ajax(): void
     {
         if (!self::user_can_see()) {
-            wp_send_json_error(array('message' => __('Permission denied.', 'rosenheinrich-multisite-migrate')), 403);
+            self::send_ajax_error(
+                __('Permission denied.', 'rosenheinrich-multisite-migrate'),
+                403,
+                'system',
+                0,
+                array('phase' => 'review_nudge'),
+                'warning'
+            );
         }
 
         $nonce = Rmmigrate_Request_Input::post_text('nonce');
         if (!wp_verify_nonce($nonce, 'rmmigrate_admin')) {
-            wp_send_json_error(array('message' => __('Invalid nonce.', 'rosenheinrich-multisite-migrate')), 403);
+            self::send_ajax_error(
+                __('Invalid nonce.', 'rosenheinrich-multisite-migrate'),
+                403,
+                'system',
+                0,
+                array('phase' => 'review_nudge'),
+                'warning'
+            );
         }
     }
 

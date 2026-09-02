@@ -325,6 +325,9 @@
         lastDisplayedPercent = Math.max(lastDisplayedPercent, pct);
         var msg = data.message || opts.fallbackMessage || '';
         updateProgress(pct, msg);
+        if (rmmigrateAdminUI.syncWorkerStaleBanner) {
+            rmmigrateAdminUI.syncWorkerStaleBanner(data);
+        }
         return true;
     }
 
@@ -354,9 +357,10 @@
     function redirectToJobProgress(id) {
         try {
             var url = new URL(window.location.href);
+            url.searchParams.delete('mm_verify');
             url.searchParams.set('job_id', String(id));
             url.searchParams.delete('create');
-            window.location.href = url.pathname + url.search + url.hash;
+            window.location.assign(url.pathname + url.search + url.hash);
         } catch (e) {
             window.location.reload();
         }
@@ -514,7 +518,7 @@
         return (rmmigrateAdmin.kickoffMode || 'auto') === 'browser';
     }
 
-    function finishJobUi(ok, message) {
+    function finishJobUi(ok, message, reportOpts) {
         running = false;
         waitingForLock = false;
         clearStatusTimer();
@@ -541,6 +545,16 @@
             return;
         }
         var msg = message || t('backupFailed', 'Backup failed');
+        reportOpts = reportOpts || {};
+        if (reportOpts.report && rmmigrateAdminUI && typeof rmmigrateAdminUI.reportAjaxFailure === 'function') {
+            rmmigrateAdminUI.reportAjaxFailure({
+                action: reportOpts.action || 'rmmigrate_worker',
+                message: msg,
+                jobId: jobId || parseInt($('#mm-active-job-banner').data('job-id') || 0, 10) || 0,
+                httpStatus: reportOpts.httpStatus || 0,
+                phase: reportOpts.phase || 'worker'
+            });
+        }
         rmmigrateAdminUI.toast(msg, 'error');
         $('#mm-active-job-text').text(msg).css('color', '#d63638');
         $('#mm-active-job-fill').css('background-color', '#d63638');
@@ -691,7 +705,11 @@
             }
             if (!response.success) {
                 workerFailCount = 0;
-                finishJobUi(false, response.data && response.data.message ? response.data.message : t('error', 'Error'));
+                finishJobUi(false, response.data && response.data.message ? response.data.message : t('error', 'Error'), {
+                    report: true,
+                    action: 'rmmigrate_worker',
+                    phase: 'worker'
+                });
                 return;
             }
             workerFailCount = 0;
@@ -720,7 +738,12 @@
             }
             workerFailCount++;
             if (workerFailCount >= maxWorkerFails) {
-                finishJobUi(false, workerStoppedMessage(xhr));
+                finishJobUi(false, workerStoppedMessage(xhr), {
+                    report: true,
+                    action: 'rmmigrate_worker',
+                    httpStatus: xhr && xhr.status ? xhr.status : 0,
+                    phase: 'transport'
+                });
                 return;
             }
             clearStatusTimer();
@@ -859,23 +882,35 @@
             if (!response.success) {
                 running = false;
                 $btn.prop('disabled', false);
-                rmmigrateAdminUI.toast(response.data && response.data.message ? response.data.message : t('failedToStartBackup', 'Failed to start backup'), 'error');
+                var startFailMsg = response.data && response.data.message ? response.data.message : t('failedToStartBackup', 'Failed to start backup');
+                if (rmmigrateAdminUI.reportJsonFail) {
+                    rmmigrateAdminUI.reportJsonFail('rmmigrate_start', startFailMsg, 'start');
+                }
+                rmmigrateAdminUI.toast(startFailMsg, 'error');
                 return;
             }
             closeCreateWizard();
-            redirectToJobProgress(response.data.job_id);
+            var newJobId = parseInt(response.data.job_id, 10) || null;
+            resumeBackupProgress(newJobId);
+            redirectToJobProgress(newJobId);
         }).fail(function (xhr) {
             running = false;
             $btn.prop('disabled', false);
-            var msg = t('requestFailed', 'Request failed');
-            if (xhr.responseJSON && xhr.responseJSON.data && xhr.responseJSON.data.message) {
-                msg = xhr.responseJSON.data.message;
+            var msg = rmmigrateAdminUI.ajaxErrorMessage(xhr, t('requestFailed', 'Request failed'));
+            if (rmmigrateAdminUI.reportAjaxFailure) {
+                rmmigrateAdminUI.reportAjaxFailure({
+                    action: 'rmmigrate_start',
+                    message: msg,
+                    httpStatus: xhr && xhr.status ? xhr.status : 0,
+                    phase: 'start'
+                });
             }
             rmmigrateAdminUI.toast(msg, 'error');
         });
     });
 
     $(document).on('click', '#multisite-migrate-cancel', function () {
+        var $btn = $(this);
         if ($('#mm-active-job-banner').hasClass('mm-finished-job')) {
             reloadWithoutJobId();
             return;
@@ -886,15 +921,20 @@
         if (!jobId) {
             return;
         }
-        running = false;
-        clearStatusTimer();
-        $.post(rmmigrateAdmin.ajaxUrl, {
-            action: 'rmmigrate_cancel',
-            job_id: jobId,
-            nonce: rmmigrateAdmin.nonce
-        }).always(function () {
-            reloadWithoutJobId();
-        });
+        if (!rmmigrateAdminUI.withBusy($btn, function (release) {
+            running = false;
+            clearStatusTimer();
+            $.post(rmmigrateAdmin.ajaxUrl, {
+                action: 'rmmigrate_cancel',
+                job_id: jobId,
+                nonce: rmmigrateAdmin.nonce
+            }).always(function () {
+                release();
+                reloadWithoutJobId();
+            });
+        }, { keepDisabled: true })) {
+            return;
+        }
     });
 
     $('input[name="mm_scope"]').on('change', function () {
@@ -910,29 +950,37 @@
     $('.mm-delete-backup').on('click', function () {
         var id = $(this).data('job-id');
         var $row = $(this).closest('tr');
-        rmmigrateAdminUI.confirm(rmmigrateAdmin.confirmDelete || 'Delete this backup?', function () {
-            rmmigrateAdminUI.toast(rmmigrateAdmin.deletingBackup || t('deletingBackup', 'Deleting…'), 'info');
-            $row.addClass('mm-row-deleting').fadeOut(150);
-            $.post(rmmigrateAdmin.ajaxUrl, {
-                action: 'rmmigrate_delete',
-                job_id: id,
-                nonce: rmmigrateAdmin.nonce
-            }).done(function (response) {
-                if (!response.success) {
+        var $btn = $(this);
+        if (!rmmigrateAdminUI.withBusy($btn, function (release) {
+            rmmigrateAdminUI.confirm(rmmigrateAdmin.confirmDelete || 'Delete this backup?', function () {
+                rmmigrateAdminUI.toast(rmmigrateAdmin.deletingBackup || t('deletingBackup', 'Deleting…'), 'info');
+                $row.addClass('mm-row-deleting').fadeOut(150);
+                $.post(rmmigrateAdmin.ajaxUrl, {
+                    action: 'rmmigrate_delete',
+                    job_id: id,
+                    nonce: rmmigrateAdmin.nonce
+                }).done(function (response) {
+                    if (!response.success) {
+                        $row.stop(true, true).show().removeClass('mm-row-deleting');
+                        rmmigrateAdminUI.toast(response.data && response.data.message ? response.data.message : t('error', 'Error'), 'error');
+                        release();
+                        return;
+                    }
+                    var msg = (response.data && response.data.message)
+                        ? response.data.message
+                        : (rmmigrateAdmin.deletingBackup || t('deletingBackup', 'Deleting…'));
+                    rmmigrateAdminUI.toast(msg, 'success');
+                    window.location.reload();
+                }).fail(function (xhr) {
+                    rmmigrateAdminUI.reportTransportFail('rmmigrate_delete', xhr, 'delete', id);
                     $row.stop(true, true).show().removeClass('mm-row-deleting');
-                    rmmigrateAdminUI.toast(response.data && response.data.message ? response.data.message : t('error', 'Error'), 'error');
-                    return;
-                }
-                var msg = (response.data && response.data.message)
-                    ? response.data.message
-                    : (rmmigrateAdmin.deletingBackup || t('deletingBackup', 'Deleting…'));
-                rmmigrateAdminUI.toast(msg, 'success');
-                window.location.reload();
-            }).fail(function () {
-                $row.stop(true, true).show().removeClass('mm-row-deleting');
-                rmmigrateAdminUI.toast(t('requestFailed', 'Request failed'), 'error');
-            });
-        });
+                    rmmigrateAdminUI.toast(rmmigrateAdminUI.ajaxErrorMessage(xhr, t('requestFailed', 'Request failed')), 'error');
+                    release();
+                });
+            }, release);
+        })) {
+            return;
+        }
     });
 
     function selectedBackupIds() {
@@ -962,6 +1010,7 @@
     });
 
     $('#mm-bulk-delete-backups').on('click', function () {
+        var $btn = $(this);
         var ids = selectedBackupIds();
         if (!ids.length) {
             return;
@@ -970,45 +1019,53 @@
         if (ids.length > 1) {
             confirmMsg = confirmMsg + ' (' + ids.length + ')';
         }
-        rmmigrateAdminUI.confirm(confirmMsg, function () {
-            $('#mm-bulk-delete-backups').prop('disabled', true);
-            rmmigrateAdminUI.toast(rmmigrateAdmin.deletingBackup || t('deletingBackup', 'Deleting…'), 'info');
-            ids.forEach(function (bulkJobId) {
-                $('.mm-backup-select[value="' + bulkJobId + '"]').closest('tr').addClass('mm-row-deleting').fadeOut(150);
-            });
-            $.post(rmmigrateAdmin.ajaxUrl, {
-                action: 'rmmigrate_delete_bulk',
-                job_ids: ids,
-                nonce: rmmigrateAdmin.nonce
-            }).done(function (response) {
-                if (!response.success) {
+        if (!rmmigrateAdminUI.withBusy($btn, function (release) {
+            rmmigrateAdminUI.confirm(confirmMsg, function () {
+                rmmigrateAdminUI.toast(rmmigrateAdmin.deletingBackup || t('deletingBackup', 'Deleting…'), 'info');
+                ids.forEach(function (bulkJobId) {
+                    $('.mm-backup-select[value="' + bulkJobId + '"]').closest('tr').addClass('mm-row-deleting').fadeOut(150);
+                });
+                $.post(rmmigrateAdmin.ajaxUrl, {
+                    action: 'rmmigrate_delete_bulk',
+                    job_ids: ids,
+                    nonce: rmmigrateAdmin.nonce
+                }).done(function (response) {
+                    if (!response.success) {
+                        $('.mm-row-deleting').stop(true, true).show().removeClass('mm-row-deleting');
+                        rmmigrateAdminUI.toast(response.data && response.data.message ? response.data.message : t('error', 'Error'), 'error');
+                        updateBulkDeleteButton();
+                        return;
+                    }
+                    var toastType = 'success';
+                    if (response.data && response.data.warnings && response.data.warnings.length) {
+                        toastType = 'warning';
+                    }
+                    rmmigrateAdminUI.toast(
+                        (response.data && response.data.message)
+                            ? response.data.message
+                            : (rmmigrateAdmin.deletingBackup || t('deletingBackup', 'Deleting…')),
+                        toastType
+                    );
+                    window.location.reload();
+                }).fail(function (xhr) {
+                    rmmigrateAdminUI.reportTransportFail('rmmigrate_delete_bulk', xhr, 'delete');
                     $('.mm-row-deleting').stop(true, true).show().removeClass('mm-row-deleting');
-                    rmmigrateAdminUI.toast(response.data && response.data.message ? response.data.message : t('error', 'Error'), 'error');
+                    rmmigrateAdminUI.toast(rmmigrateAdminUI.ajaxErrorMessage(xhr, t('requestFailed', 'Request failed')), 'error');
                     updateBulkDeleteButton();
-                    return;
-                }
-                var toastType = 'success';
-                if (response.data && response.data.warnings && response.data.warnings.length) {
-                    toastType = 'warning';
-                }
-                rmmigrateAdminUI.toast(
-                    (response.data && response.data.message)
-                        ? response.data.message
-                        : (rmmigrateAdmin.deletingBackup || t('deletingBackup', 'Deleting…')),
-                    toastType
-                );
-                window.location.reload();
-            }).fail(function () {
-                $('.mm-row-deleting').stop(true, true).show().removeClass('mm-row-deleting');
-                rmmigrateAdminUI.toast(t('requestFailed', 'Request failed'), 'error');
-                updateBulkDeleteButton();
-            });
-        });
+                }).always(release);
+            }, release);
+        })) {
+            return;
+        }
     });
 
     updateBulkDeleteButton();
 
     resumeActiveJob();
+
+    if (rmmigrateAdmin.activeJob && rmmigrateAdmin.activeJob.workerStaleWarning && rmmigrateAdminUI.syncWorkerStaleBanner) {
+        rmmigrateAdminUI.syncWorkerStaleBanner({ worker_stale_hint: true });
+    }
 
     try {
         var params = new URLSearchParams(window.location.search);

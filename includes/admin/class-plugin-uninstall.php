@@ -6,6 +6,8 @@ if (!defined('ABSPATH')) {
 
 class Rmmigrate_Plugin_Uninstall
 {
+    use Rmmigrate_Ajax_Base;
+
     public static function register(): void
     {
         add_action('admin_enqueue_scripts', array(__CLASS__, 'enqueue_plugins_screen'));
@@ -160,12 +162,26 @@ class Rmmigrate_Plugin_Uninstall
     public static function ajax_deactivate(): void
     {
         if (!self::user_can_deactivate_plugin()) {
-            wp_send_json_error(array('message' => __('You do not have permission to deactivate plugins.', 'rosenheinrich-multisite-migrate')), 403);
+            self::send_ajax_error(
+                __('You do not have permission to deactivate plugins.', 'rosenheinrich-multisite-migrate'),
+                403,
+                'system',
+                0,
+                array('phase' => 'plugin_deactivate'),
+                'warning'
+            );
         }
 
         $nonce = Rmmigrate_Request_Input::request_text('nonce');
         if (!wp_verify_nonce($nonce, 'rmmigrate_deactivate')) {
-            wp_send_json_error(array('message' => __('Your session expired. Refresh the page and try again.', 'rosenheinrich-multisite-migrate')), 403);
+            self::send_ajax_error(
+                __('Your session expired. Refresh the page and try again.', 'rosenheinrich-multisite-migrate'),
+                403,
+                'system',
+                0,
+                array('phase' => 'plugin_deactivate'),
+                'warning'
+            );
         }
 
         require_once RMMIGRATE_PATH . 'includes/class-uninstaller.php';
@@ -196,12 +212,26 @@ class Rmmigrate_Plugin_Uninstall
     public static function ajax_uninstall(): void
     {
         if (!self::user_can_delete_plugin()) {
-            wp_send_json_error(array('message' => __('You do not have permission to delete plugins.', 'rosenheinrich-multisite-migrate')), 403);
+            self::send_ajax_error(
+                __('You do not have permission to delete plugins.', 'rosenheinrich-multisite-migrate'),
+                403,
+                'system',
+                0,
+                array('phase' => 'plugin_uninstall'),
+                'warning'
+            );
         }
 
         $nonce = Rmmigrate_Request_Input::request_text('nonce');
         if (!wp_verify_nonce($nonce, 'rmmigrate_uninstall')) {
-            wp_send_json_error(array('message' => __('Your session expired. Refresh the page and try again.', 'rosenheinrich-multisite-migrate')), 403);
+            self::send_ajax_error(
+                __('Your session expired. Refresh the page and try again.', 'rosenheinrich-multisite-migrate'),
+                403,
+                'system',
+                0,
+                array('phase' => 'plugin_uninstall'),
+                'warning'
+            );
         }
 
         require_once RMMIGRATE_PATH . 'includes/class-uninstaller.php';
@@ -216,7 +246,14 @@ class Rmmigrate_Plugin_Uninstall
         $network = self::should_deactivate_network_wide($plugin);
 
         if ($network && !current_user_can('manage_network_plugins')) {
-            wp_send_json_error(array('message' => __('You do not have permission to delete network plugins.', 'rosenheinrich-multisite-migrate')), 403);
+            self::send_ajax_error(
+                __('You do not have permission to delete network plugins.', 'rosenheinrich-multisite-migrate'),
+                403,
+                'system',
+                0,
+                array('phase' => 'plugin_uninstall'),
+                'warning'
+            );
         }
 
         if (is_plugin_active($plugin) || ($network && is_plugin_active_for_network($plugin))) {
@@ -225,10 +262,22 @@ class Rmmigrate_Plugin_Uninstall
 
         $deleted = delete_plugins(array($plugin));
         if (is_wp_error($deleted)) {
-            wp_send_json_error(array('message' => $deleted->get_error_message()), 500);
+            self::send_ajax_error(
+                $deleted->get_error_message(),
+                500,
+                'system',
+                0,
+                array('phase' => 'plugin_uninstall')
+            );
         }
         if ($deleted !== true) {
-            wp_send_json_error(array('message' => __('Could not delete the plugin files.', 'rosenheinrich-multisite-migrate')), 500);
+            self::send_ajax_error(
+                __('Could not delete the plugin files.', 'rosenheinrich-multisite-migrate'),
+                500,
+                'system',
+                0,
+                array('phase' => 'plugin_uninstall')
+            );
         }
 
         $redirect = self::plugins_redirect_url('deleted=true', $network);

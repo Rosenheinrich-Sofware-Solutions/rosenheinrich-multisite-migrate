@@ -102,10 +102,19 @@
         $('body').removeClass('mm-feedback-open');
         state.open = false;
         if (dismissRemote) {
-            $.post(rmmigrateAdmin.ajaxUrl, {
-                action: cfg.dismissAction || 'rmmigrate_feedback_dismiss',
-                nonce: rmmigrateAdmin.nonce
-            });
+            if (!state.dismissInFlight) {
+                state.dismissInFlight = true;
+                $.post(rmmigrateAdmin.ajaxUrl, {
+                    action: cfg.dismissAction || 'rmmigrate_feedback_dismiss',
+                    nonce: rmmigrateAdmin.nonce
+                }).fail(function (xhr) {
+                    if (rmmigrateAdminUI.reportTransportFail) {
+                        rmmigrateAdminUI.reportTransportFail(cfg.dismissAction || 'rmmigrate_feedback_dismiss', xhr, 'feedback');
+                    }
+                }).always(function () {
+                    state.dismissInFlight = false;
+                });
+            }
         }
         var done = state.onDone;
         state.onDone = null;
@@ -159,10 +168,19 @@
         // Shared 14-day lock for auto prompts once the dialog appears.
         if (!opts.manual) {
             cfg.shouldPrompt = false;
-            $.post(rmmigrateAdmin.ajaxUrl, {
-                action: cfg.shownAction || 'rmmigrate_feedback_shown',
-                nonce: rmmigrateAdmin.nonce
-            });
+            if (!state.shownInFlight) {
+                state.shownInFlight = true;
+                $.post(rmmigrateAdmin.ajaxUrl, {
+                    action: cfg.shownAction || 'rmmigrate_feedback_shown',
+                    nonce: rmmigrateAdmin.nonce
+                }).fail(function (xhr) {
+                    if (rmmigrateAdminUI.reportTransportFail) {
+                        rmmigrateAdminUI.reportTransportFail(cfg.shownAction || 'rmmigrate_feedback_shown', xhr, 'feedback');
+                    }
+                }).always(function () {
+                    state.shownInFlight = false;
+                });
+            }
         }
 
         var $dialog = $('#mm-feedback-dialog');
@@ -205,7 +223,12 @@
         // Stay open until the user dismisses or submits — no auto-close/reload.
     }
 
+    var feedbackSubmitInFlight = false;
+
     function submitFeedback() {
+        if (feedbackSubmitInFlight) {
+            return;
+        }
         if (!state.sentiment) {
             return;
         }
@@ -217,6 +240,7 @@
             return;
         }
         $('.mm-feedback-error').addClass('mm-hidden').text('');
+        feedbackSubmitInFlight = true;
         var $btn = $('.mm-feedback-submit').prop('disabled', true).text(t('sending', 'Sending…'));
         $.post(rmmigrateAdmin.ajaxUrl, {
             action: cfg.submitAction || 'rmmigrate_feedback_submit',
@@ -240,9 +264,14 @@
             var msg = (res && res.data && res.data.message) ? res.data.message : t('error', 'Could not send feedback. Try again later.');
             $('.mm-feedback-error').removeClass('mm-hidden').text(msg);
             $btn.prop('disabled', false).text(t('submit', 'Send feedback'));
-        }).fail(function () {
+        }).fail(function (xhr) {
+            if (rmmigrateAdminUI.reportTransportFail) {
+                rmmigrateAdminUI.reportTransportFail(cfg.submitAction || 'rmmigrate_feedback_submit', xhr, 'feedback');
+            }
             $('.mm-feedback-error').removeClass('mm-hidden').text(t('error', 'Could not send feedback. Try again later.'));
             $btn.prop('disabled', false).text(t('submit', 'Send feedback'));
+        }).always(function () {
+            feedbackSubmitInFlight = false;
         });
     }
 
@@ -281,11 +310,18 @@
             e.preventDefault();
         }
         var action = cfg.reviewNudgeFeedbackAction;
-        if (action && typeof rmmigrateAdmin !== 'undefined') {
+        if (action && typeof rmmigrateAdmin !== 'undefined' && !state.reviewTrackInFlight) {
+            state.reviewTrackInFlight = true;
             $.post(rmmigrateAdmin.ajaxUrl, {
                 action: action,
                 nonce: rmmigrateAdmin.nonce,
                 feedback: 'reviewed'
+            }).fail(function (xhr) {
+                if (rmmigrateAdminUI.reportTransportFail) {
+                    rmmigrateAdminUI.reportTransportFail(action, xhr, 'feedback');
+                }
+            }).always(function () {
+                state.reviewTrackInFlight = false;
             });
         }
         cfg.shouldPrompt = false;

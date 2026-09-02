@@ -13,6 +13,7 @@ class Rmmigrate_Ajax_Activity
         add_action('wp_ajax_rmmigrate_activity_detail', array(__CLASS__, 'detail'));
         add_action('wp_ajax_rmmigrate_activity_list', array(__CLASS__, 'list_page'));
         add_action('wp_ajax_rmmigrate_log_chunk', array(__CLASS__, 'log_chunk'));
+        add_action('wp_ajax_rmmigrate_report_ajax_error', array(__CLASS__, 'report_client_error'));
     }
 
     public static function detail(): void
@@ -27,17 +28,36 @@ class Rmmigrate_Ajax_Activity
             $entry = Rmmigrate_Activity_Log::get_entry($entry_id);
             if ($entry !== null) {
                 if (!Rmmigrate_Activity_Log::entry_visible_to_current_user($entry)) {
-                    wp_send_json_error(array('message' => __('Permission denied.', 'rosenheinrich-multisite-migrate')), 403);
+                    self::send_ajax_error(
+                        __('Permission denied.', 'rosenheinrich-multisite-migrate'),
+                        403,
+                        'system',
+                        (int) ($entry['job_id'] ?? 0),
+                        array('phase' => 'activity_detail'),
+                        'warning'
+                    );
                 }
                 $job_id = (int) ($entry['job_id'] ?? 0);
             } elseif ($job_id <= 0) {
-                wp_send_json_error(array('message' => __('Activity entry not found.', 'rosenheinrich-multisite-migrate')));
+                self::send_ajax_error(
+                    __('Activity entry not found.', 'rosenheinrich-multisite-migrate'),
+                    404,
+                    'system',
+                    0,
+                    array('phase' => 'activity_detail')
+                );
             }
             // Synthetic / missing JSONL row: fall through with job_id from the request.
         }
 
         if ($job_id <= 0 && $entry === null) {
-             wp_send_json_error(array('message' => __('No entry or job specified.', 'rosenheinrich-multisite-migrate')));
+            self::send_ajax_error(
+                __('No entry or job specified.', 'rosenheinrich-multisite-migrate'),
+                400,
+                'system',
+                0,
+                array('phase' => 'activity_detail')
+            );
         }
         $job_data = null;
         $log_file = '';
@@ -47,7 +67,13 @@ class Rmmigrate_Ajax_Activity
             $job = Rmmigrate_Job::get($job_id);
             if ($job === null) {
                 if ($entry === null) {
-                    wp_send_json_error(array('message' => __('Job not found or already deleted.', 'rosenheinrich-multisite-migrate')), 404);
+                    self::send_ajax_error(
+                        __('Job not found or already deleted.', 'rosenheinrich-multisite-migrate'),
+                        404,
+                        self::ajax_operation_type(),
+                        $job_id,
+                        array('phase' => 'activity_detail')
+                    );
                 }
                 // Job deleted, but we have an activity entry. Proceed without job data.
             } else {
@@ -132,12 +158,24 @@ class Rmmigrate_Ajax_Activity
 
         $log = sanitize_file_name(Rmmigrate_Request_Input::post_text('log'));
         if ($log === '' || !Rmmigrate_Activity_Log::is_allowed_log_basename($log)) {
-            wp_send_json_error(array('message' => __('Invalid log file.', 'rosenheinrich-multisite-migrate')));
+            self::send_ajax_error(
+                __('Invalid log file.', 'rosenheinrich-multisite-migrate'),
+                400,
+                'system',
+                0,
+                array('phase' => 'log_chunk')
+            );
         }
 
         $path = Rmmigrate_Activity_Log::logs_dir() . '/' . $log;
         if (!Rmmigrate_Filesystem::is_readable($path)) {
-            wp_send_json_error(array('message' => __('Log file not found.', 'rosenheinrich-multisite-migrate')));
+            self::send_ajax_error(
+                __('Log file not found.', 'rosenheinrich-multisite-migrate'),
+                404,
+                'system',
+                0,
+                array('phase' => 'log_chunk', 'log' => $log)
+            );
         }
 
         $max_lines = max(1, (int) Rmmigrate_Engine_Config::log_view_lines());
@@ -149,6 +187,64 @@ class Rmmigrate_Ajax_Activity
         );
 
         wp_send_json_success($chunk);
+    }
+
+    public static function report_client_error(): void
+    {
+        $nonce = Rmmigrate_Request_Input::post_text('nonce');
+        if (!wp_verify_nonce($nonce, 'rmmigrate_admin')) {
+            wp_send_json_success(array('skipped' => 'nonce'));
+        }
+
+        if (!self::user_can_any_backup_action()) {
+            wp_send_json_success(array('skipped' => 'capability'));
+        }
+
+        $ajax_action = sanitize_key(Rmmigrate_Request_Input::post_text('ajax_action'));
+        $message = sanitize_text_field(Rmmigrate_Request_Input::post_text('message'));
+        $job_id = max(0, Rmmigrate_Request_Input::post_int('job_id'));
+        $http_status = max(0, Rmmigrate_Request_Input::post_int('http_status'));
+        $phase = sanitize_key(Rmmigrate_Request_Input::post_text('phase', 'transport'));
+
+        if ($ajax_action === '' || $message === '' || strpos($ajax_action, 'rmmigrate_') !== 0) {
+            wp_send_json_success(array('skipped' => 'invalid'));
+        }
+
+        $detail = $message;
+        if ($http_status > 0) {
+            $detail = sprintf(
+                /* translators: 1: HTTP status code, 2: error message */
+                __('HTTP %1$d — %2$s', 'rosenheinrich-multisite-migrate'),
+                $http_status,
+                $message
+            );
+        }
+
+        $log_message = sprintf(
+            /* translators: 1: WordPress admin-ajax action, 2: error detail */
+            __('Admin request failed (%1$s): %2$s', 'rosenheinrich-multisite-migrate'),
+            $ajax_action,
+            $detail
+        );
+
+        $context = array(
+            'phase'       => $phase !== '' ? $phase : 'transport',
+            'ajax_action' => $ajax_action,
+            'http_status' => $http_status,
+            'source'      => 'client',
+        );
+        if (self::should_skip_duplicate_ajax_log($log_message, $context)) {
+            wp_send_json_success(array('deduped' => true));
+        }
+
+        self::log_operation_failure(
+            self::ajax_operation_type($ajax_action),
+            $log_message,
+            $job_id,
+            $context
+        );
+
+        wp_send_json_success(array('logged' => true));
     }
 
     /**

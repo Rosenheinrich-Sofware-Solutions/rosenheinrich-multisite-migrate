@@ -26,10 +26,10 @@ final class Rmmigrate_Request_Input
         switch ($input_type) {
             case INPUT_GET:
                 // phpcs:ignore WordPress.Security.NonceVerification.Recommended, WordPress.Security.ValidatedSanitizedInput.InputNotSanitized, WordPress.Security.ValidatedSanitizedInput.MissingUnslash -- Read-only fallback bag; nonce/capability verified by the dispatch-layer caller; individual public getters sanitize each value before use.
-                return $_GET;
+                return (isset($_GET) && is_array($_GET)) ? $_GET : array();
             case INPUT_POST:
                 // phpcs:ignore WordPress.Security.NonceVerification.Missing, WordPress.Security.ValidatedSanitizedInput.InputNotSanitized, WordPress.Security.ValidatedSanitizedInput.MissingUnslash -- Read-only fallback bag; nonce/capability verified by the dispatch-layer caller; individual public getters sanitize each value before use.
-                return $_POST;
+                return (isset($_POST) && is_array($_POST)) ? $_POST : array();
             case INPUT_COOKIE:
                 // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized, WordPress.Security.ValidatedSanitizedInput.MissingUnslash -- Read-only fallback bag; consumers sanitize before use.
                 return $_COOKIE;

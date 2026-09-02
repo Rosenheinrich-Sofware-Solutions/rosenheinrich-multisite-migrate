@@ -90,11 +90,16 @@ class Rmmigrate_Activator
 
         self::ensure_schema();
 
-        require_once RMMIGRATE_PATH . 'includes/ai-agents/oauth/class-oauth-store.php';
-        Rmmigrate_OAuth_Store::maybe_install_tables();
-        Rmmigrate_OAuth_Store::schedule_purge_cron();
-        update_site_option('rmmigrate_oauth_flush_rewrite', 1);
-        update_option('rmmigrate_oauth_flush_rewrite', 1);
+        if (!class_exists('Rmmigrate_Bootstrap', false)) {
+            require_once RMMIGRATE_PATH . 'includes/class-bootstrap.php';
+        }
+        if (Rmmigrate_Bootstrap::mcp_supported()) {
+            require_once RMMIGRATE_PATH . 'includes/ai-agents/oauth/class-oauth-store.php';
+            Rmmigrate_OAuth_Store::maybe_install_tables();
+            Rmmigrate_OAuth_Store::schedule_purge_cron();
+            update_site_option('rmmigrate_oauth_flush_rewrite', 1);
+            update_option('rmmigrate_oauth_flush_rewrite', 1);
+        }
 
         if (!get_site_option('rmmigrate_settings')) {
             update_site_option('rmmigrate_settings', Rmmigrate_Settings::defaults());
@@ -103,6 +108,7 @@ class Rmmigrate_Activator
         /** Paid editions seed their license storage defaults on activation. */
         do_action('rmmigrate_activate_seed_defaults');
 
+        require_once RMMIGRATE_PATH . 'includes/admin/class-ajax-base.php';
         require_once RMMIGRATE_PATH . 'includes/admin/class-review-nudge.php';
         Rmmigrate_Review_Nudge::ensure_first_activated_timestamp();
 

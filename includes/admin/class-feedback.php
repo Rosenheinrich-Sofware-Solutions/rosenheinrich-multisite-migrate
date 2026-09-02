@@ -11,6 +11,8 @@ if (!defined('ABSPATH')) {
  */
 final class Rmmigrate_Feedback
 {
+    use Rmmigrate_Ajax_Base;
+
     const USER_META_KEY   = 'rmmigrate_feedback';
     const COOLDOWN_DAYS   = 14;
     const MESSAGE_MAX     = 1000;
@@ -205,7 +207,13 @@ final class Rmmigrate_Feedback
 
         $sentiment = sanitize_key(Rmmigrate_Request_Input::post_text('sentiment'));
         if (!isset(self::$allowed_sentiments[$sentiment])) {
-            wp_send_json_error(array('message' => __('Invalid sentiment.', 'rosenheinrich-multisite-migrate')), 400);
+            self::send_ajax_error(
+                __('Invalid sentiment.', 'rosenheinrich-multisite-migrate'),
+                400,
+                'system',
+                0,
+                array('phase' => 'feedback_submit', 'ajax_action' => self::AJAX_SUBMIT)
+            );
         }
 
         $type = sanitize_key(Rmmigrate_Request_Input::post_text('type'));
@@ -229,9 +237,13 @@ final class Rmmigrate_Feedback
         );
 
         if ($context !== 'deactivate' && ($sentiment === 'neutral' || $sentiment === 'negative' || $type === 'bug') && $message === '') {
-            wp_send_json_error(array(
-                'message' => __('Please add a short note so we can improve.', 'rosenheinrich-multisite-migrate'),
-            ), 400);
+            self::send_ajax_error(
+                __('Please add a short note so we can improve.', 'rosenheinrich-multisite-migrate'),
+                400,
+                'system',
+                0,
+                array('phase' => 'feedback_submit', 'ajax_action' => self::AJAX_SUBMIT)
+            );
         }
 
         $payload = array(
@@ -266,9 +278,13 @@ final class Rmmigrate_Feedback
         if (!$is_deactivate) {
             $ok = !is_wp_error($response) && (int) wp_remote_retrieve_response_code($response) < 400;
             if (!$ok) {
-                wp_send_json_error(array(
-                    'message' => __('Could not send feedback. Try again later.', 'rosenheinrich-multisite-migrate'),
-                ), 502);
+                self::send_ajax_error(
+                    __('Could not send feedback. Try again later.', 'rosenheinrich-multisite-migrate'),
+                    502,
+                    'system',
+                    0,
+                    array('phase' => 'feedback_submit')
+                );
             }
             self::mark_cooldown('submitted');
         }
@@ -465,11 +481,25 @@ final class Rmmigrate_Feedback
     {
         $nonce = Rmmigrate_Request_Input::post_text('nonce');
         if (!wp_verify_nonce($nonce, 'rmmigrate_admin')) {
-            wp_send_json_error(array('message' => __('Invalid nonce.', 'rosenheinrich-multisite-migrate')), 403);
+            self::send_ajax_error(
+                __('Invalid nonce.', 'rosenheinrich-multisite-migrate'),
+                403,
+                'system',
+                0,
+                array('phase' => 'feedback'),
+                'warning'
+            );
         }
 
         if (!self::user_can_see()) {
-            wp_send_json_error(array('message' => __('Permission denied.', 'rosenheinrich-multisite-migrate')), 403);
+            self::send_ajax_error(
+                __('Permission denied.', 'rosenheinrich-multisite-migrate'),
+                403,
+                'system',
+                0,
+                array('phase' => 'feedback'),
+                'warning'
+            );
         }
     }
 

@@ -1,10 +1,10 @@
 === Rosenheinrich Multisite Migrate – Backup, Restore & AI (MCP) ===
 Contributors: rosenheinrich, phillipro
 Tags: backup, migration, wordpress-backup, restore, multisite
-Requires at least: 6.9
+Requires at least: 6.2
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.2.3
+Stable tag: 1.2.4
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -34,7 +34,7 @@ No trial, no usage limits. Everything under Free features works without a key. F
 
 = AI Backup Tools & MCP =
 
-Connect Claude, Cursor, ChatGPT, and similar AI clients to your WordPress site through the WordPress Abilities API and an MCP adapter. Free AI abilities need no account or license key:
+Connect Claude, Cursor, ChatGPT, and similar AI clients to your WordPress site through the WordPress Abilities API and an MCP adapter. AI/MCP needs WordPress 6.9+ (Abilities API); backup and restore work from WordPress 6.2. Free AI abilities need no account or license key:
 
 * **Read** — backup status, archives list, health (with a recommended next action), and last error
 * **Write** — start a backup now only after an explicit confirm step
@@ -236,6 +236,9 @@ Backup and restore run as background-style chunked jobs. They are designed not t
 
 == Changelog ==
 
+= 1.2.4 =
+* Requires WordPress 6.2 or higher again; AI Agents (MCP) still need WordPress 6.9+ (Abilities API) and stay gated when the host is older.
+
 = 1.2.3 =
 * More reliable backups when another job is already running, and when a large database dump takes longer than expected.
 
@@ -340,6 +343,9 @@ Backup and restore run as background-style chunked jobs. They are designed not t
 * Initial public release of the free edition: multisite-aware backups, restore, local import/export, search & replace, AES-256 encryption and a health dashboard.
 
 == Upgrade Notice ==
+
+= 1.2.4 =
+Requires WordPress 6.2+ again; AI Agents (MCP) still need WordPress 6.9+. Recommended update.
 
 = 1.2.3 =
 More reliable backups when another job is already running, and when a large database dump takes longer than expected. Recommended update.

@@ -1299,6 +1299,14 @@
     margin-bottom: var(--mm-space-4);
 }
 
+.mm-active-job-banner--worker-stale {
+    border-left-color: var(--mm-warn-border, #dba617);
+}
+
+.mm-active-job-worker-stale-hint {
+    margin: var(--mm-space-2) 0 0;
+}
+
 .mm-active-job-banner + .mm-archives-hero,
 .mm-active-job-banner + .mm-toolbar,
 .mm-active-job-banner + .mm-action-bar,
@@ -2194,17 +2202,29 @@
     margin: 0 0 16px;
 }
 
-.mm-confirm-actions {
+.mm-confirm-actions,
+.mm-feedback-footer {
     display: flex;
     gap: 8px;
     justify-content: flex-end;
     align-items: stretch;
 }
 
-/* Body-mounted confirm/uninstall: equal size, no WP outline, brand teal.
+.multisite-migrate-wrap .mm-recovery-docs > p:last-of-type {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: stretch;
+}
+
+/* Body-mounted confirm/uninstall/feedback + in-page doc CTAs: equal size, brand teal.
    .wp-core-ui raises specificity above stock admin button-primary. */
 .wp-core-ui .mm-confirm-actions .button,
-.mm-confirm-actions .button {
+.mm-confirm-actions .button,
+.wp-core-ui .mm-feedback-footer .button,
+.mm-feedback-footer .button,
+.wp-core-ui .multisite-migrate-wrap .mm-recovery-docs .button,
+.multisite-migrate-wrap .mm-recovery-docs .button {
     min-width: 7rem;
     min-height: 36px;
     padding: 0 14px;
@@ -2216,10 +2236,15 @@
     box-shadow: none !important;
     text-shadow: none;
     line-height: 1.2;
+    text-decoration: none;
 }
 
 .wp-core-ui .mm-confirm-actions .button:not(.button-primary),
-.mm-confirm-actions .button:not(.button-primary) {
+.mm-confirm-actions .button:not(.button-primary),
+.wp-core-ui .mm-feedback-footer .button:not(.button-primary),
+.mm-feedback-footer .button:not(.button-primary),
+.wp-core-ui .multisite-migrate-wrap .mm-recovery-docs .button:not(.button-primary),
+.multisite-migrate-wrap .mm-recovery-docs .button:not(.button-primary) {
     background: var(--mm-surface-alt);
     color: var(--mm-text);
 }
@@ -2227,7 +2252,15 @@
 .wp-core-ui .mm-confirm-actions .button:not(.button-primary):hover,
 .wp-core-ui .mm-confirm-actions .button:not(.button-primary):focus,
 .mm-confirm-actions .button:not(.button-primary):hover,
-.mm-confirm-actions .button:not(.button-primary):focus {
+.mm-confirm-actions .button:not(.button-primary):focus,
+.wp-core-ui .mm-feedback-footer .button:not(.button-primary):hover,
+.wp-core-ui .mm-feedback-footer .button:not(.button-primary):focus,
+.mm-feedback-footer .button:not(.button-primary):hover,
+.mm-feedback-footer .button:not(.button-primary):focus,
+.wp-core-ui .multisite-migrate-wrap .mm-recovery-docs .button:not(.button-primary):hover,
+.wp-core-ui .multisite-migrate-wrap .mm-recovery-docs .button:not(.button-primary):focus,
+.multisite-migrate-wrap .mm-recovery-docs .button:not(.button-primary):hover,
+.multisite-migrate-wrap .mm-recovery-docs .button:not(.button-primary):focus {
     background: var(--mm-border);
     color: var(--mm-text);
     border: none !important;
@@ -2237,7 +2270,15 @@
 .wp-core-ui .mm-confirm-actions .button-primary,
 .wp-core-ui .mm-confirm-actions .button-primary.mm-btn-teal,
 .mm-confirm-actions .button-primary,
-.mm-confirm-actions .mm-btn-teal.button-primary {
+.mm-confirm-actions .mm-btn-teal.button-primary,
+.wp-core-ui .mm-feedback-footer .button-primary,
+.wp-core-ui .mm-feedback-footer .button-primary.mm-btn-teal,
+.mm-feedback-footer .button-primary,
+.mm-feedback-footer .mm-btn-teal.button-primary,
+.wp-core-ui .multisite-migrate-wrap .mm-recovery-docs .button-primary,
+.wp-core-ui .multisite-migrate-wrap .mm-recovery-docs .button-primary.mm-btn-teal,
+.multisite-migrate-wrap .mm-recovery-docs .button-primary,
+.multisite-migrate-wrap .mm-recovery-docs .mm-btn-teal.button-primary {
     background: var(--mm-btn-primary) !important;
     border: none !important;
     color: var(--mm-surface) !important;
@@ -2251,7 +2292,23 @@
 .mm-confirm-actions .button-primary:hover,
 .mm-confirm-actions .button-primary:focus,
 .mm-confirm-actions .mm-btn-teal.button-primary:hover,
-.mm-confirm-actions .mm-btn-teal.button-primary:focus {
+.mm-confirm-actions .mm-btn-teal.button-primary:focus,
+.wp-core-ui .mm-feedback-footer .button-primary:hover,
+.wp-core-ui .mm-feedback-footer .button-primary:focus,
+.wp-core-ui .mm-feedback-footer .button-primary.mm-btn-teal:hover,
+.wp-core-ui .mm-feedback-footer .button-primary.mm-btn-teal:focus,
+.mm-feedback-footer .button-primary:hover,
+.mm-feedback-footer .button-primary:focus,
+.mm-feedback-footer .mm-btn-teal.button-primary:hover,
+.mm-feedback-footer .mm-btn-teal.button-primary:focus,
+.wp-core-ui .multisite-migrate-wrap .mm-recovery-docs .button-primary:hover,
+.wp-core-ui .multisite-migrate-wrap .mm-recovery-docs .button-primary:focus,
+.wp-core-ui .multisite-migrate-wrap .mm-recovery-docs .button-primary.mm-btn-teal:hover,
+.wp-core-ui .multisite-migrate-wrap .mm-recovery-docs .button-primary.mm-btn-teal:focus,
+.multisite-migrate-wrap .mm-recovery-docs .button-primary:hover,
+.multisite-migrate-wrap .mm-recovery-docs .button-primary:focus,
+.multisite-migrate-wrap .mm-recovery-docs .mm-btn-teal.button-primary:hover,
+.multisite-migrate-wrap .mm-recovery-docs .mm-btn-teal.button-primary:focus {
     background: var(--mm-btn-primary-hover) !important;
     border: none !important;
     color: var(--mm-surface) !important;
@@ -2260,12 +2317,22 @@
 
 .wp-core-ui .mm-confirm-actions .button-primary:focus-visible,
 .mm-confirm-actions .button-primary:focus-visible,
-.mm-confirm-actions .button:not(.button-primary):focus-visible {
+.mm-confirm-actions .button:not(.button-primary):focus-visible,
+.wp-core-ui .mm-feedback-footer .button-primary:focus-visible,
+.mm-feedback-footer .button-primary:focus-visible,
+.mm-feedback-footer .button:not(.button-primary):focus-visible,
+.wp-core-ui .multisite-migrate-wrap .mm-recovery-docs .button-primary:focus-visible,
+.multisite-migrate-wrap .mm-recovery-docs .button-primary:focus-visible,
+.multisite-migrate-wrap .mm-recovery-docs .button:not(.button-primary):focus-visible {
     box-shadow: var(--mm-focus-ring) !important;
 }
 
 .wp-core-ui .mm-confirm-actions .button-primary:disabled,
-.mm-confirm-actions .button-primary:disabled {
+.mm-confirm-actions .button-primary:disabled,
+.wp-core-ui .mm-feedback-footer .button-primary:disabled,
+.mm-feedback-footer .button-primary:disabled,
+.wp-core-ui .multisite-migrate-wrap .mm-recovery-docs .button-primary:disabled,
+.multisite-migrate-wrap .mm-recovery-docs .button-primary:disabled {
     background: var(--mm-border) !important;
     color: var(--mm-text-muted) !important;
     cursor: not-allowed;
@@ -2399,9 +2466,6 @@
 }
 
 .mm-feedback-footer {
-    display: flex;
-    justify-content: flex-end;
-    gap: 8px;
     flex-wrap: wrap;
     align-items: center;
 }

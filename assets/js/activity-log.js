@@ -303,6 +303,8 @@
 
     var pollTimer = null;
     var pollInFlight = false;
+    var detailInFlight = false;
+    var logChunkInFlight = false;
 
     function stopActivityPoll() {
         if (pollTimer) {
@@ -364,7 +366,10 @@
             }
         }).always(function () {
             pollInFlight = false;
-        }).fail(function () {
+        }).fail(function (xhr) {
+            if (adminUI() && adminUI().reportTransportFail) {
+                adminUI().reportTransportFail(actionName('activityListAction', defaultListAction()), xhr, 'activity');
+            }
             scheduleActivityPoll(3000);
         });
     }
@@ -372,6 +377,10 @@
     var releaseDetailA11y = null;
 
     function openDetail(entryId, title, jobId) {
+        if (detailInFlight) {
+            return;
+        }
+        detailInFlight = true;
         var $dialog = $('#mm-activity-detail-dialog');
         var admin = adminConfig();
         var i18n = admin.i18n || {};
@@ -417,9 +426,14 @@
             }
             $('#mm-activity-detail-body').html(renderDetail(resp.data));
             refreshDetailTrap();
-        }).fail(function () {
+        }).fail(function (xhr) {
+            if (ui && ui.reportTransportFail) {
+                ui.reportTransportFail(actionName('activityDetailAction', defaultDetailAction()), xhr, 'activity');
+            }
             $('#mm-activity-detail-body').html('<p class="mm-status-warn">' + escHtml(requestFailedMsg) + '</p>');
             refreshDetailTrap();
+        }).always(function () {
+            detailInFlight = false;
         });
     }
 
@@ -443,6 +457,10 @@
     });
 
     function loadLogChunk($wrap, log, offset, lines) {
+        if (logChunkInFlight) {
+            return;
+        }
+        logChunkInFlight = true;
         var admin = adminConfig();
         var $viewer = $wrap.find('.mm-log-viewer');
         var $toolbar = $wrap.find('.mm-log-viewer-toolbar');
@@ -489,8 +507,14 @@
                     );
                 }
             }
-        }).fail(function () {
+        }).fail(function (xhr) {
+            var uiObj = adminUI();
+            if (uiObj && uiObj.reportTransportFail) {
+                uiObj.reportTransportFail(actionName('logChunkAction', defaultLogChunkAction()), xhr, 'activity');
+            }
             $viewer.text(requestFailedMsg);
+        }).always(function () {
+            logChunkInFlight = false;
         });
     }
 

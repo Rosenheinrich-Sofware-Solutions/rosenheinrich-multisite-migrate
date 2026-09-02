@@ -168,10 +168,17 @@ class Rmmigrate_Ajax_Backup
     public static function cancel(): void
     {
         self::verify_request();
-        if (!self::user_can_backup() && !self::user_can_restore()) {
-            wp_send_json_error(array('message' => __('You do not have permission to cancel this job.', 'rosenheinrich-multisite-migrate')), 403);
-        }
         $job_id = Rmmigrate_Request_Input::post_int('job_id');
+        if (!self::user_can_backup() && !self::user_can_restore()) {
+            self::send_ajax_error(
+                __('You do not have permission to cancel this job.', 'rosenheinrich-multisite-migrate'),
+                403,
+                'backup',
+                $job_id,
+                array('phase' => 'cancel'),
+                'warning'
+            );
+        }
         try {
             Rmmigrate_Backup_Service::cancel($job_id);
             wp_send_json_success();

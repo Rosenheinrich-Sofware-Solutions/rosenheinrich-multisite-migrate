@@ -74,6 +74,8 @@ class Rmmigrate_Scheduler
 
         update_site_option(self::LAST_TICK_OPTION, time());
 
+        Rmmigrate_Job::recover_stale_active();
+
         $settings = Rmmigrate_Schedules::normalize(Rmmigrate_Settings::get());
         if (!Rmmigrate_Schedules::has_enabled($settings)) {
             return;

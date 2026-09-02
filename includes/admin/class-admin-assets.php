@@ -303,6 +303,7 @@ class Rmmigrate_Admin_Assets
             'activityDetailAction'=> 'rmmigrate_activity_detail',
             'activityListAction'  => 'rmmigrate_activity_list',
             'logChunkAction'      => 'rmmigrate_log_chunk',
+            'reportAjaxErrorAction' => 'rmmigrate_report_ajax_error',
             'isNetwork'       => $is_network,
             'scope'           => is_multisite() ? Rmmigrate_Multisite_Scope::SCOPE_SUBSITE : Rmmigrate_Multisite_Scope::SCOPE_NETWORK,
             'scopeSubsiteLabel' => $scope_subsite_label,
@@ -413,6 +414,7 @@ class Rmmigrate_Admin_Assets
                 'starting'            => __('Starting…', 'rosenheinrich-multisite-migrate'),
                 'workerFailed'        => __('Backup worker stopped responding. Refresh the page or cancel and try again.', 'rosenheinrich-multisite-migrate'),
                 'workerStalled'       => __('Backup is taking longer than expected. Keep this tab open or refresh to resume.', 'rosenheinrich-multisite-migrate'),
+                'workerStaleHint'     => __('No recent worker activity. If progress stays frozen, refresh the page, cancel the job, or wait — stale jobs are cleared automatically.', 'rosenheinrich-multisite-migrate'),
                 'workerWaiting'       => __('Another operation is running — waiting…', 'rosenheinrich-multisite-migrate'),
                 'cancelRestoreConfirm' => __('Cancel restore? The site may be left in an inconsistent state.', 'rosenheinrich-multisite-migrate'),
                 'error'               => __('Error', 'rosenheinrich-multisite-migrate'),
@@ -477,6 +479,7 @@ class Rmmigrate_Admin_Assets
                 'progress_step' => $active_job->is_restore()
                     ? Rmmigrate_Restore_Runner::get_status_step($active_job)
                     : '',
+                'workerStaleWarning' => Rmmigrate_Job::should_warn_worker_stale($active_job),
             );
         }
 

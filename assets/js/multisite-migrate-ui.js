@@ -116,6 +116,54 @@
             return fallback;
         },
 
+        reportAjaxFailure: function (opts) {
+            opts = opts || {};
+            var admin = typeof rmmigrateAdmin !== 'undefined' ? rmmigrateAdmin : null;
+            if (!admin || !admin.reportAjaxErrorAction || !admin.nonce) {
+                return;
+            }
+            var action = String(opts.action || '').trim();
+            var message = String(opts.message || '').trim();
+            if (action === '' || message === '' || action.indexOf('rmmigrate_') !== 0) {
+                return;
+            }
+            $.post(admin.ajaxUrl, {
+                action: admin.reportAjaxErrorAction,
+                nonce: admin.nonce,
+                ajax_action: action,
+                message: message,
+                job_id: parseInt(opts.jobId, 10) || 0,
+                http_status: parseInt(opts.httpStatus, 10) || 0,
+                phase: opts.phase || 'transport'
+            });
+        },
+
+        reportJsonFail: function (action, message, phase, jobId) {
+            message = String(message || '').trim();
+            if (message === '' || action.indexOf('rmmigrate_') !== 0) {
+                return;
+            }
+            rmmigrateAdminUI.reportAjaxFailure({
+                action: action,
+                message: message,
+                httpStatus: 0,
+                phase: phase || 'response',
+                jobId: jobId || 0
+            });
+        },
+
+        reportTransportFail: function (action, xhr, phase, jobId) {
+            var msg = rmmigrateAdminUI.ajaxErrorMessage(xhr);
+            rmmigrateAdminUI.reportAjaxFailure({
+                action: action,
+                message: msg,
+                httpStatus: xhr && xhr.status ? xhr.status : 0,
+                phase: phase || 'transport',
+                jobId: jobId || 0
+            });
+            return msg;
+        },
+
         showNotice: function (message, type, title, opts) {
             if (!message) {
                 return $();
@@ -194,7 +242,64 @@
             return rmmigrateAdminUI.showNotice(message, type, null, opts);
         },
 
-        confirm: function (message, onConfirm) {
+        /**
+         * Disable click target(s) while work runs.
+         * work(release) may call release() itself and/or return a jQuery/Promise
+         * that settles → auto-release. Returns false if already busy.
+         * @param {JQuery|Element|string} targets
+         * @param {function(Function=): (*|undefined)} work
+         * @param {{keepDisabled?: boolean}} [opts]
+         * @return {boolean}
+         */
+        withBusy: function (targets, work, opts) {
+            opts = opts || {};
+            var $targets = $(targets);
+            if ($targets.length && $targets.filter(function () {
+                return $(this).data('mmBusy') || $(this).prop('disabled');
+            }).length) {
+                return false;
+            }
+            $targets.each(function () {
+                var $el = $(this);
+                $el.data('mmBusy', 1);
+                if ($el.is('button, input, select, textarea')) {
+                    $el.prop('disabled', true);
+                } else if ($el.is('a.button')) {
+                    $el.attr('aria-disabled', 'true').addClass('disabled');
+                }
+            });
+            var finished = false;
+            function release() {
+                if (finished || opts.keepDisabled) {
+                    return;
+                }
+                finished = true;
+                $targets.each(function () {
+                    var $el = $(this);
+                    $el.removeData('mmBusy');
+                    if ($el.is('button, input, select, textarea')) {
+                        $el.prop('disabled', false);
+                    } else if ($el.is('a.button')) {
+                        $el.removeAttr('aria-disabled').removeClass('disabled');
+                    }
+                });
+            }
+            var result;
+            try {
+                result = typeof work === 'function' ? work(release) : null;
+            } catch (err) {
+                release();
+                throw err;
+            }
+            if (result && typeof result.always === 'function') {
+                result.always(release);
+            } else if (result && typeof result.then === 'function') {
+                result.then(release, release);
+            }
+            return true;
+        },
+
+        confirm: function (message, onConfirm, onCancel) {
             var descId = 'mm-confirm-desc-' + String(Date.now()) + '-' + Math.random().toString(36).slice(2, 9);
             var $overlay = $('<div class="mm-confirm-overlay"></div>');
             var $modal = $('<div class="mm-confirm-modal" role="alertdialog" aria-modal="true" aria-describedby="' + descId + '"></div>');
@@ -209,32 +314,50 @@
             $('body').append($overlay);
 
             var releaseA11y = null;
-            function close() {
+            var settled = false;
+            function close(didConfirm) {
+                if (settled) {
+                    return;
+                }
+                settled = true;
                 if (typeof releaseA11y === 'function') {
                     releaseA11y();
                     releaseA11y = null;
                 }
                 $overlay.remove();
+                if (didConfirm) {
+                    if (typeof onConfirm === 'function') {
+                        onConfirm();
+                    }
+                } else if (typeof onCancel === 'function') {
+                    onCancel();
+                }
             }
 
             releaseA11y = rmmigrateAdminUI.bindOverlayA11y({
                 $container: $modal,
                 $initialFocus: $ok,
                 ns: 'mmConfirm',
-                onEscape: close
+                onEscape: function () {
+                    close(false);
+                }
             });
 
-            $cancel.on('click', close);
+            $cancel.on('click', function () {
+                close(false);
+            });
             $overlay.on('click', function (e) {
                 if (e.target === $overlay[0]) {
-                    close();
+                    close(false);
                 }
             });
             $ok.on('click', function () {
-                close();
-                if (typeof onConfirm === 'function') {
-                    onConfirm();
+                if ($ok.prop('disabled')) {
+                    return;
                 }
+                $ok.prop('disabled', true);
+                $cancel.prop('disabled', true);
+                close(true);
             });
         },
 
@@ -279,6 +402,33 @@
                     close();
                 }
             });
+        },
+
+        syncWorkerStaleBanner: function (data) {
+            var $banner = $('#mm-active-job-banner');
+            if (!$banner.length || $banner.hasClass('mm-finished-job')) {
+                return;
+            }
+            var show = !!(data && data.worker_stale_hint);
+            $banner.toggleClass('mm-active-job-banner--worker-stale', show);
+            var $hint = $('#mm-active-job-worker-stale-hint');
+            if (show) {
+                if (!$hint.length) {
+                    $hint = $('<p id="mm-active-job-worker-stale-hint" class="mm-active-job-worker-stale-hint mm-status-warn" role="status"></p>');
+                    var $text = $('#mm-active-job-text');
+                    if ($text.length) {
+                        $text.after($hint);
+                    } else {
+                        $banner.append($hint);
+                    }
+                }
+                $hint.text(rmmigrateAdminUI.i18n(
+                    'workerStaleHint',
+                    'No recent worker activity. If progress stays frozen, refresh the page, cancel the job, or wait — stale jobs are cleared automatically.'
+                )).removeClass('mm-hidden');
+            } else if ($hint.length) {
+                $hint.addClass('mm-hidden');
+            }
         },
 
         pollJob: function (options) {
@@ -344,6 +494,7 @@
                     var d = res.data;
                     var pct = d.percent || 0;
                     update(pct, resolveProgressMessage(d));
+                    rmmigrateAdminUI.syncWorkerStaleBanner(d);
 
                     if (d.active) {
                         var kickoff = rmmigrateAdmin.kickoffMode || 'auto';
@@ -395,6 +546,9 @@
                         return;
                     }
                     update(100, d.message || 'Complete');
+                    // Stop before onComplete so overlapping status polls cannot fire twice
+                    // (e.g. safety→restore handoff posting start_restore twice).
+                    stopped = true;
                     if (typeof options.onComplete === 'function') {
                         options.onComplete(d);
                     }
@@ -405,6 +559,15 @@
                     pollFailures++;
                     if (pollFailures >= pollFailureLimit) {
                         var failPayload = { error: rmmigrateAdminUI.i18n('jobFailed', 'Failed') };
+                        if (rmmigrateAdminUI.reportAjaxFailure) {
+                            rmmigrateAdminUI.reportAjaxFailure({
+                                action: options.reportAction || 'rmmigrate_status',
+                                message: failPayload.error,
+                                jobId: jobId || 0,
+                                httpStatus: 0,
+                                phase: options.reportPhase || 'poll'
+                            });
+                        }
                         rmmigrateAdminUI.toast(failPayload.error, 'error');
                         if (typeof options.onError === 'function') {
                             options.onError(failPayload);
@@ -532,9 +695,14 @@
         if (typeof rmmigrateAdmin === 'undefined') {
             return;
         }
-        $.post(rmmigrateAdmin.ajaxUrl, {
-            action: 'rmmigrate_dismiss_upgrade_notice',
-            nonce: rmmigrateAdmin.nonce
+        var $btn = $(this);
+        rmmigrateAdminUI.withBusy($btn, function (release) {
+            $.post(rmmigrateAdmin.ajaxUrl, {
+                action: 'rmmigrate_dismiss_upgrade_notice',
+                nonce: rmmigrateAdmin.nonce
+            }).fail(function (xhr) {
+                rmmigrateAdminUI.reportTransportFail('rmmigrate_dismiss_upgrade_notice', xhr, 'dismiss');
+            }).always(release);
         });
     });
 

@@ -5,9 +5,19 @@
         if (typeof rmmigrateAdminGlobalNotice === 'undefined') {
             return;
         }
+        if ($notice.data('mmDismissBusy')) {
+            return;
+        }
+        $notice.data('mmDismissBusy', 1);
         $.post(rmmigrateAdminGlobalNotice.ajaxUrl, {
             action: 'rmmigrate_dismiss_multisite_upgrade_notice',
             nonce: rmmigrateAdminGlobalNotice.nonce
+        }).fail(function (xhr) {
+            if (window.rmmigrateAdminUI && rmmigrateAdminUI.reportTransportFail) {
+                rmmigrateAdminUI.reportTransportFail('rmmigrate_dismiss_multisite_upgrade_notice', xhr, 'dismiss');
+            }
+        }).always(function () {
+            $notice.removeData('mmDismissBusy');
         });
         $notice.fadeOut(200, function () {
             $(this).remove();

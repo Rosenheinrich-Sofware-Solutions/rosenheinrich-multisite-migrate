@@ -115,12 +115,12 @@ final class Rmmigrate_Plugin
         require_once $includes . 'admin/class-admin-menu.php';
         require_once $includes . 'admin/class-admin-assets.php';
         require_once $includes . 'admin/class-wizard-controller.php';
+        require_once $includes . 'admin/class-ajax-base.php';
         require_once $includes . 'admin/class-setup-wizard.php';
         require_once $includes . 'admin/class-admin-save.php';
         require_once $includes . 'admin/class-review-nudge.php';
         require_once $includes . 'admin/class-feedback.php';
         require_once $includes . 'admin/class-telemetry.php';
-        require_once $includes . 'admin/class-ajax-base.php';
         require_once $includes . 'admin/class-ajax-backup.php';
         require_once $includes . 'admin/class-ajax-restore.php';
         require_once $includes . 'admin/class-ajax-import.php';
@@ -211,15 +211,18 @@ final class Rmmigrate_Plugin
         add_action('admin_init', array('Rmmigrate_Restore_Runner', 'recover_stale_maintenance'), 1);
 
         // Pro owns Ops-MCP when the commercial plugin is active (standalone or addon).
+        // MCP/Abilities need WP 6.9+; page still registers so admins see the WP 6.9 gate UI.
         if (!defined('RMMIGRATE_PRO_VERSION')) {
-            Rmmigrate_OAuth_Store::ensure_tables();
-            Rmmigrate_OAuth_Store::register_cron();
-            Rmmigrate_OAuth_Bearer_Auth::register();
-            Rmmigrate_OAuth_Server::register();
-            Rmmigrate_Ai_Agents_Rest::register();
-            Rmmigrate_Abilities::register();
+            if (Rmmigrate_Bootstrap::mcp_supported()) {
+                Rmmigrate_OAuth_Store::ensure_tables();
+                Rmmigrate_OAuth_Store::register_cron();
+                Rmmigrate_OAuth_Bearer_Auth::register();
+                Rmmigrate_OAuth_Server::register();
+                Rmmigrate_Ai_Agents_Rest::register();
+                Rmmigrate_Abilities::register();
+                add_action('init', array(__CLASS__, 'maybe_flush_oauth_rewrites'), 99);
+            }
             Rmmigrate_Mcp_Page::register();
-            add_action('init', array(__CLASS__, 'maybe_flush_oauth_rewrites'), 99);
         }
 
         if (is_multisite()) {

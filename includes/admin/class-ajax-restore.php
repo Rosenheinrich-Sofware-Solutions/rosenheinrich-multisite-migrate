@@ -22,7 +22,14 @@ class Rmmigrate_Ajax_Restore
     {
         self::verify_request(0, false, 'backup_restore');
         if (Rmmigrate_Access::is_subsite_scoped_operation()) {
-            wp_send_json_error(array('message' => __('Migration restore is not available for subsite administrators.', 'rosenheinrich-multisite-migrate')), 403);
+            self::send_ajax_error(
+                __('Migration restore is not available for subsite administrators.', 'rosenheinrich-multisite-migrate'),
+                403,
+                'restore',
+                0,
+                array('phase' => 'search_replace'),
+                'warning'
+            );
         }
         try {
             $result = Rmmigrate_Restore_Service::migration_preview(
@@ -40,7 +47,14 @@ class Rmmigrate_Ajax_Restore
     {
         self::verify_request(0, false, 'backup_restore');
         if (Rmmigrate_Access::is_subsite_scoped_operation()) {
-            wp_send_json_error(array('message' => __('Migration restore is not available for subsite administrators.', 'rosenheinrich-multisite-migrate')), 403);
+            self::send_ajax_error(
+                __('Migration restore is not available for subsite administrators.', 'rosenheinrich-multisite-migrate'),
+                403,
+                'restore',
+                0,
+                array('phase' => 'search_replace'),
+                'warning'
+            );
         }
         try {
             $resume_raw = Rmmigrate_Request_Input::post_text('resume');

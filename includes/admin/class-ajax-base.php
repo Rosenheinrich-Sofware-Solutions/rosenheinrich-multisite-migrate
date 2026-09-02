@@ -6,6 +6,103 @@ if (!defined('ABSPATH')) {
 
 trait Rmmigrate_Ajax_Base
 {
+    private static function current_ajax_action(): string
+    {
+        return sanitize_key(Rmmigrate_Request_Input::request_text('action'));
+    }
+
+    private static function ajax_operation_type(string $ajax_action = ''): string
+    {
+        if ($ajax_action === '') {
+            $ajax_action = self::current_ajax_action();
+        }
+
+        if (strpos($ajax_action, 'restore') !== false) {
+            return 'restore';
+        }
+        if (strpos($ajax_action, 'import') !== false) {
+            return 'import';
+        }
+        if (in_array($ajax_action, array(
+            'rmmigrate_start',
+            'rmmigrate_worker',
+            'rmmigrate_cancel',
+            'rmmigrate_delete',
+            'rmmigrate_delete_bulk',
+            'rmmigrate_prune',
+            'rmmigrate_clean_storage',
+        ), true)) {
+            return 'backup';
+        }
+
+        return 'system';
+    }
+
+    /**
+     * @param array<string,mixed> $context
+     */
+    private static function should_skip_duplicate_ajax_log(string $message, array $context): bool
+    {
+        $user_id = get_current_user_id();
+        if ($user_id <= 0 || $message === '') {
+            return false;
+        }
+
+        $key = 'rmmigrate_ajax_log_' . md5(
+            $user_id . '|' . (string) ($context['ajax_action'] ?? '') . '|' . $message
+        );
+        if (get_transient($key)) {
+            return true;
+        }
+
+        set_transient($key, 1, 60);
+
+        return false;
+    }
+
+    /**
+     * @param array<string,mixed> $context
+     */
+    private static function send_ajax_error(
+        string $message,
+        int $status = 400,
+        string $type = '',
+        int $job_id = 0,
+        array $context = array(),
+        string $activity_status = 'error'
+    ): void {
+        $logged = false;
+        if ($message !== '') {
+            if ($type === '') {
+                $type = self::ajax_operation_type();
+            }
+            $context = array_merge(
+                array(
+                    'phase'       => 'ajax',
+                    'http_status' => $status,
+                    'ajax_action' => self::current_ajax_action(),
+                ),
+                $context
+            );
+            if (!self::should_skip_duplicate_ajax_log($message, $context)) {
+                if ($activity_status === 'error') {
+                    self::log_operation_failure($type, $message, $job_id, $context);
+                } else {
+                    Rmmigrate_Logger::log_activity($type, $message, $activity_status, array(
+                        'job_id'  => $job_id,
+                        'context' => $context,
+                    ));
+                }
+                $logged = true;
+            }
+        }
+
+        wp_send_json_error(array(
+            'message' => $message,
+            'logged'  => $logged,
+        ), $status);
+    }
+
     private static function verify_request(int $job_id = 0, bool $allow_worker = false, string $action = 'any'): void
     {
         $nonce = Rmmigrate_Request_Input::request_text('nonce');
@@ -13,7 +110,12 @@ trait Rmmigrate_Ajax_Base
 
         if ($allow_worker && $worker_token !== '' && Rmmigrate_Runner::verify_worker_token($job_id, $worker_token)) {
             if ($job_id > 0 && Rmmigrate_Job::get($job_id) === null) {
-                wp_send_json_error(array('message' => __('Job not found.', 'rosenheinrich-multisite-migrate')), 404);
+                self::send_ajax_error(
+                    __('Job not found.', 'rosenheinrich-multisite-migrate'),
+                    404,
+                    '',
+                    $job_id
+                );
             }
             return;
         }
@@ -22,21 +124,47 @@ trait Rmmigrate_Ajax_Base
         // This also prevents a timing oracle that would reveal whether the current user
         // has a given capability before the nonce is validated.
         if (!wp_verify_nonce($nonce, 'rmmigrate_admin')) {
-            wp_send_json_error(array('message' => __('Your session expired. Refresh the page and try again.', 'rosenheinrich-multisite-migrate')), 403);
+            self::send_ajax_error(
+                __('Your session expired. Refresh the page and try again.', 'rosenheinrich-multisite-migrate'),
+                403,
+                'system',
+                $job_id,
+                array(),
+                'warning'
+            );
         }
 
         if ($action === 'any') {
             if (!self::user_can_any_backup_action()) {
-                wp_send_json_error(array('message' => __('You do not have permission to run backups. Contact your site administrator.', 'rosenheinrich-multisite-migrate')), 403);
+                self::send_ajax_error(
+                    __('You do not have permission to run backups. Contact your site administrator.', 'rosenheinrich-multisite-migrate'),
+                    403,
+                    'system',
+                    $job_id,
+                    array(),
+                    'warning'
+                );
             }
         } elseif (!self::user_can_action($action)) {
-            wp_send_json_error(array('message' => __('You do not have permission to run backups. Contact your site administrator.', 'rosenheinrich-multisite-migrate')), 403);
+            self::send_ajax_error(
+                __('You do not have permission to run backups. Contact your site administrator.', 'rosenheinrich-multisite-migrate'),
+                403,
+                'system',
+                $job_id,
+                array('capability' => $action),
+                'warning'
+            );
         }
 
         if ($job_id > 0) {
             $job = Rmmigrate_Job::get($job_id);
             if ($job === null) {
-                wp_send_json_error(array('message' => __('Job not found.', 'rosenheinrich-multisite-migrate')), 404);
+                self::send_ajax_error(
+                    __('Job not found.', 'rosenheinrich-multisite-migrate'),
+                    404,
+                    '',
+                    $job_id
+                );
             }
             self::assert_job_access($job);
         }
@@ -50,7 +178,14 @@ trait Rmmigrate_Ajax_Base
     private static function assert_job_access(Rmmigrate_Job $job): void
     {
         if (!self::user_can_access_job($job)) {
-            wp_send_json_error(array('message' => __('Permission denied.', 'rosenheinrich-multisite-migrate')), 403);
+            self::send_ajax_error(
+                __('Permission denied.', 'rosenheinrich-multisite-migrate'),
+                403,
+                self::ajax_operation_type(),
+                $job->get_id(),
+                array(),
+                'warning'
+            );
         }
     }
 
@@ -108,7 +243,14 @@ trait Rmmigrate_Ajax_Base
             self::assert_network_management();
         }
         if (!self::user_can_import()) {
-            wp_send_json_error(array('message' => __('You do not have permission to run imports.', 'rosenheinrich-multisite-migrate')), 403);
+            self::send_ajax_error(
+                __('You do not have permission to run imports.', 'rosenheinrich-multisite-migrate'),
+                403,
+                'import',
+                0,
+                array(),
+                'warning'
+            );
         }
     }
 
@@ -129,7 +271,14 @@ trait Rmmigrate_Ajax_Base
     private static function assert_network_management(): void
     {
         if (is_multisite() && !current_user_can('manage_network')) {
-            wp_send_json_error(array('message' => __('Network admin required.', 'rosenheinrich-multisite-migrate')), 403);
+            self::send_ajax_error(
+                __('Network admin required.', 'rosenheinrich-multisite-migrate'),
+                403,
+                'system',
+                0,
+                array(),
+                'warning'
+            );
         }
     }
 
@@ -261,8 +410,7 @@ trait Rmmigrate_Ajax_Base
      */
     private static function backup_start_error(string $message, array $context = array(), ?int $status = null): void
     {
-        self::log_operation_failure('backup', $message, 0, array_merge(array('phase' => 'start'), $context));
-        wp_send_json_error(array('message' => $message), $status);
+        self::send_ajax_error($message, $status ?? 400, 'backup', 0, array_merge(array('phase' => 'start'), $context));
     }
 
     /**
@@ -270,8 +418,7 @@ trait Rmmigrate_Ajax_Base
      */
     private static function import_error(string $message, array $context = array()): void
     {
-        self::log_operation_failure('import', $message, 0, $context);
-        wp_send_json_error(array('message' => $message));
+        self::send_ajax_error($message, 400, 'import', 0, $context);
     }
 
     /**
@@ -279,8 +426,7 @@ trait Rmmigrate_Ajax_Base
      */
     private static function restore_error(string $message, int $job_id = 0, array $context = array()): void
     {
-        self::log_operation_failure('restore', $message, $job_id, $context);
-        wp_send_json_error(array('message' => $message));
+        self::send_ajax_error($message, 400, 'restore', $job_id, $context);
     }
 
     private static function record_import_success(Rmmigrate_Job $job): void

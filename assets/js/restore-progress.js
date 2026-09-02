@@ -17,6 +17,15 @@
     var restorePollHandle = null;
     var progressMode = 'restore';
     var restoreFocusReturn = null;
+    var restoreStartInFlight = false;
+
+    function setRestoreStartBusy(busy) {
+        restoreStartInFlight = !!busy;
+        var $btn = $('#mm-restore-start');
+        if ($btn.length) {
+            $btn.prop('disabled', !!busy);
+        }
+    }
 
     function reloadWithoutJobId() {
         try {
@@ -174,11 +183,22 @@
         return $el;
     }
 
-    function toastRestoreRequestFailed(xhr) {
-        rmmigrateAdminUI.toast(
-            rmmigrateAdminUI.ajaxErrorMessage(xhr, t('restoreRequestFailed', 'Restore request failed. Refresh and try again.')),
-            'error'
+    function toastRestoreRequestFailed(xhr, opts) {
+        opts = opts || {};
+        var msg = rmmigrateAdminUI.ajaxErrorMessage(
+            xhr,
+            t('restoreRequestFailed', 'Restore request failed. Refresh and try again.')
         );
+        if (rmmigrateAdminUI.reportAjaxFailure) {
+            rmmigrateAdminUI.reportAjaxFailure({
+                action: opts.action || 'rmmigrate_start_restore',
+                message: msg,
+                jobId: opts.jobId || parseInt($('#mm-restore-source-id').val() || 0, 10) || 0,
+                httpStatus: xhr && xhr.status ? xhr.status : 0,
+                phase: opts.phase || 'transport'
+            });
+        }
+        rmmigrateAdminUI.toast(msg, 'error');
     }
 
     function tryResumeActiveRestorePoll(activityUrl) {
@@ -202,6 +222,7 @@
             releaseRestoreA11y();
             releaseRestoreA11y = null;
         }
+        setRestoreStartBusy(false);
         if (window.rmmigrateAdminRestoreWizard) {
             rmmigrateAdminRestoreWizard.reset(!!presetMigration);
         }
@@ -286,6 +307,10 @@
             $fill: progressFill(),
             $text: progressText(),
             onComplete: function () {
+                if (restoreStartInFlight) {
+                    return;
+                }
+                setRestoreStartBusy(true);
                 progressText().text(t('startingRestore', 'Starting restore…'));
                 var next = $.extend({}, restoreData, {
                     safety_snapshot: 0,
@@ -293,42 +318,57 @@
                 });
                 $.post(rmmigrateAdmin.ajaxUrl, next).done(function (res) {
                     if (!res || !res.success) {
+                        setRestoreStartBusy(false);
                         rmmigrateAdminUI.toast(res.data && res.data.message ? res.data.message : t('restoreFailed', 'Restore failed'), 'error');
                         return;
                     }
                     if (res.data.awaiting_safety) {
+                        setRestoreStartBusy(false);
                         pollSafetyThenRestore(res.data.safety_job_id, next);
                         return;
                     }
                     redirectToJobProgress(res.data.job_id);
                 }).fail(function (xhr) {
-                    toastRestoreRequestFailed(xhr);
+                    setRestoreStartBusy(false);
+                    toastRestoreRequestFailed(xhr, { action: 'rmmigrate_start_restore', phase: 'transport' });
                     tryResumeActiveRestorePoll();
                 });
             },
             onError: function (d) {
+                setRestoreStartBusy(false);
                 // pollJob already showed one error toast.
             }
         });
     }
 
     function runRestoreRequest(postData, activityUrl) {
+        if (restoreStartInFlight) {
+            return;
+        }
+        setRestoreStartBusy(true);
         $.post(rmmigrateAdmin.ajaxUrl, postData).done(function (res) {
             if (!res || !res.success) {
-                rmmigrateAdminUI.toast(res.data && res.data.message ? res.data.message : t('restoreFailed', 'Restore failed'), 'error');
+                setRestoreStartBusy(false);
+                var restoreFailMsg = res && res.data && res.data.message ? res.data.message : t('restoreFailed', 'Restore failed');
+                if (rmmigrateAdminUI.reportJsonFail) {
+                    rmmigrateAdminUI.reportJsonFail(postData.action || 'rmmigrate_start_restore', restoreFailMsg, 'start');
+                }
+                rmmigrateAdminUI.toast(restoreFailMsg, 'error');
                 return;
             }
             if (res.data.awaiting_safety && res.data.safety_job_id) {
                 hideDialog();
                 showProgressPanel('restore');
                 progressText().text(res.data.message || t('creatingSafetySnapshot', 'Creating safety snapshot…'));
+                setRestoreStartBusy(false);
                 pollSafetyThenRestore(res.data.safety_job_id, postData);
                 return;
             }
             hideDialog();
             redirectToJobProgress(res.data.job_id);
         }).fail(function (xhr) {
-            toastRestoreRequestFailed(xhr);
+            setRestoreStartBusy(false);
+            toastRestoreRequestFailed(xhr, { action: 'rmmigrate_start_restore', phase: 'transport' });
             tryResumeActiveRestorePoll(activityUrl);
         });
     }
@@ -505,6 +545,9 @@
     });
 
     $('#mm-restore-start').on('click', function () {
+        if (restoreStartInFlight || $(this).prop('disabled')) {
+            return;
+        }
         var $confirm = $('#mm-restore-confirm');
         var $label = $confirm.closest('.mm-restore-confirm-label');
         if (!$confirm.is(':checked')) {
@@ -595,22 +638,31 @@
         if (rmmigrateAdmin.activeJob.type === 'restore') {
             showProgressPanel('restore');
             pollRestore(rmmigrateAdmin.activeJob.id);
+            if (rmmigrateAdmin.activeJob.workerStaleWarning && rmmigrateAdminUI.syncWorkerStaleBanner) {
+                rmmigrateAdminUI.syncWorkerStaleBanner({ worker_stale_hint: true });
+            }
         }
     }
 
-    function cancelRestoreJob(jobId) {
+    function cancelRestoreJob(jobId, $trigger) {
         if (!jobId) {
             return;
         }
-        rmmigrateAdminUI.confirm(t('cancelRestoreConfirm', 'Cancel restore? The site may be left in an inconsistent state.'), function () {
-            $.post(rmmigrateAdmin.ajaxUrl, {
-                action: 'rmmigrate_cancel',
-                job_id: jobId,
-                nonce: rmmigrateAdmin.nonce
-            }).always(function () {
-                reloadWithoutJobId();
-            });
-        });
+        var $btn = $trigger && $trigger.length ? $trigger : $('#mm-restore-cancel-progress, .mm-cancel-restore-progress').first();
+        if (!rmmigrateAdminUI.withBusy($btn, function (release) {
+            rmmigrateAdminUI.confirm(t('cancelRestoreConfirm', 'Cancel restore? The site may be left in an inconsistent state.'), function () {
+                $.post(rmmigrateAdmin.ajaxUrl, {
+                    action: 'rmmigrate_cancel',
+                    job_id: jobId,
+                    nonce: rmmigrateAdmin.nonce
+                }).always(function () {
+                    release();
+                    reloadWithoutJobId();
+                });
+            }, release);
+        }, { keepDisabled: false })) {
+            return;
+        }
     }
 
     $(document).on('click', '#mm-restore-cancel-progress, .mm-cancel-restore-progress', function () {
@@ -618,14 +670,15 @@
             reloadWithoutJobId();
             return;
         }
+        var $btn = $(this);
         var jobId = parseInt(
-            $(this).data('job-id')
+            $btn.data('job-id')
             || $('#mm-active-job-banner').data('job-id')
             || (rmmigrateAdmin.activeJob && rmmigrateAdmin.activeJob.id)
             || 0,
             10
         );
-        cancelRestoreJob(jobId);
+        cancelRestoreJob(jobId, $btn);
     });
 
     window.rmmigrateAdminRestoreProgress = {
