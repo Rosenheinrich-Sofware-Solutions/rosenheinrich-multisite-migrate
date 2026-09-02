@@ -1333,7 +1333,7 @@ class Rmmigrate_Job
             // Do not advance in-memory progress when durable write failed (stale cursor risk).
             // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
             throw Rmmigrate_Job_Exception::raise(
-                Rmmigrate_Error_Codes::DB_CONNECTION,
+                sanitize_key(Rmmigrate_Error_Codes::DB_CONNECTION),
                 esc_html__('Could not save backup progress. Retry the backup.', 'rosenheinrich-multisite-migrate')
             );
         }
