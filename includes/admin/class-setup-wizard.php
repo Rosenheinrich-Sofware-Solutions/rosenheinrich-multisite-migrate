@@ -122,21 +122,6 @@ class Rmmigrate_Setup_Wizard
         update_site_option(self::PENDING_REDIRECT_OPTION, '1');
     }
 
-    private static function is_fresh_activation_request(): bool
-    {
-        global $pagenow;
-
-        if ($pagenow !== 'plugins.php') {
-            return false;
-        }
-
-        if (Rmmigrate_Request_Input::get_text('activate') === 'true') {
-            return true;
-        }
-
-        return Rmmigrate_Request_Input::get_text('activated') === 'true';
-    }
-
     public static function clear_pending_post_activation_redirect(): void
     {
         delete_site_option(self::PENDING_REDIRECT_OPTION);
@@ -251,9 +236,6 @@ class Rmmigrate_Setup_Wizard
         if (self::is_pending_post_activation_redirect()) {
             return true;
         }
-        if (self::is_fresh_activation_request()) {
-            return true;
-        }
         $rmmigrate_page = Rmmigrate_Request_Input::get_key('page');
         if ($rmmigrate_page === 'multisite-migrate-setup') {
             return false;
@@ -322,7 +304,7 @@ class Rmmigrate_Setup_Wizard
 
     public static function maybe_redirect(): void
     {
-        if (wp_doing_ajax()) {
+        if (wp_doing_ajax() || (defined('WP_CLI') && WP_CLI)) {
             return;
         }
         $request_method = isset($_SERVER['REQUEST_METHOD'])
@@ -332,10 +314,8 @@ class Rmmigrate_Setup_Wizard
             return;
         }
         if (Rmmigrate_Request_Input::get_exists('activate-multi')) {
+            self::clear_pending_post_activation_redirect();
             return;
-        }
-        if (self::is_fresh_activation_request() && self::should_queue_post_activation_redirect()) {
-            self::queue_post_activation_redirect();
         }
         if (!self::should_redirect()) {
             return;

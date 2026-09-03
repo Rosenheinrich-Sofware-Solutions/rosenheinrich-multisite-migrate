@@ -192,14 +192,32 @@ class Rmmigrate_Uninstaller
         wp_clear_scheduled_hook('rmmigrate_telemetry_flush');
         wp_clear_scheduled_hook('rmmigrate_daily_telemetry_snapshot');
         wp_clear_scheduled_hook('rmmigrate_telemetry_snapshot_oneshot');
+        wp_clear_scheduled_hook('rmmigrate_oauth_purge_tokens');
+        wp_clear_scheduled_hook('rmmigrate_pro_worker_cron');
+        wp_clear_scheduled_hook('rmmigrate_pro_staging_push_cron');
+        wp_clear_scheduled_hook('rmmigrate_pro_remote_import_cron');
+        wp_clear_scheduled_hook('rmmigrate_pro_purge_deletes');
+        wp_clear_scheduled_hook('rmmigrate_pro_deferred_hosting_detect');
+        wp_clear_scheduled_hook('rmmigrate_pro_deferred_retention_prune');
+        wp_clear_scheduled_hook('rmmigrate_pro_telemetry_flush');
+        wp_clear_scheduled_hook('rmmigrate_pro_daily_telemetry_snapshot');
+        wp_clear_scheduled_hook('rmmigrate_pro_telemetry_snapshot_oneshot');
     }
+
 
     private static function delete_settings(): void
     {
         $site_options = array(
             'rmmigrate_settings',
             'rmmigrate_setup_wizard',
+            'rmmigrate_setup_wizard_state',
             'rmmigrate_pending_setup',
+            'rmmigrate_setup_wizard_completed_emitted',
+            'rmmigrate_pro_settings',
+            'rmmigrate_pro_setup_wizard',
+            'rmmigrate_pro_setup_wizard_state',
+            'rmmigrate_pro_pending_setup',
+            'rmmigrate_pro_setup_wizard_completed_emitted',
             'rmmigrate_pending_welcome',
             'rmmigrate_free_welcome_version',
             'rmmigrate_hosting_status',
@@ -214,6 +232,20 @@ class Rmmigrate_Uninstaller
             'rmmigrate_maintenance',
             'rmmigrate_telemetry',
             'rmmigrate_telemetry_queue',
+            'rmmigrate_uninstall_plan',
+            'rmmigrate_pro_uninstall_plan',
+            'rmmigrate_backup_root_failed',
+            'rmmigrate_pro_backup_root_failed',
+            'rmmigrate_oauth_flush_rewrite',
+            'rmmigrate_pro_gdrive_tokens',
+            'rmmigrate_pro_gdrive_folder_id',
+            'rmmigrate_pro_license_data',
+            'rmmigrate_pro_staging_sites',
+            'rmmigrate_pro_dropbox_tokens',
+            'rmmigrate_pro_last_tick',
+            'rmmigrate_pro_schedule_blocked_since',
+            'rmmigrate_pro_schedule_fail_count',
+            'rmmigrate_pro_merged_free_schedule',
         );
 
         foreach ($site_options as $option_name) {
@@ -244,35 +276,52 @@ class Rmmigrate_Uninstaller
             }
         }
 
-        global $wpdb;
-        $wpdb->query(
-            $wpdb->prepare(
-                "DELETE FROM {$wpdb->usermeta} WHERE meta_key = %s",
-                'rmmigrate_review_nudge'
-            )
-        );
-        $wpdb->query(
-            $wpdb->prepare(
-                "DELETE FROM {$wpdb->usermeta} WHERE meta_key = %s",
-                'rmmigrate_review_nudge_cooldown_until'
-            )
-        );
-        $wpdb->query(
-            $wpdb->prepare(
-                "DELETE FROM {$wpdb->usermeta} WHERE meta_key = %s",
-                'rmmigrate_feedback'
-            )
-        );
-
         $transients = array(
             'rmmigrate_lock',
             'rmmigrate_migration_notice',
             'rmmigrate_preflight',
+            'rmmigrate_pro_lock',
+            'rmmigrate_pro_migration_notice',
+            'rmmigrate_pro_preflight',
+            'rmmigrate_pro_split_state',
+            'rmmigrate_pro_staging_push_active',
         );
 
         foreach ($transients as $transient_name) {
             delete_transient($transient_name);
             delete_site_transient($transient_name);
+        }
+
+        global $wpdb;
+
+        // Wildcard cleanup across usermeta, sitemeta, and options
+        $wpdb->query(
+            $wpdb->prepare(
+                "DELETE FROM {$wpdb->usermeta} WHERE meta_key LIKE %s",
+                $wpdb->esc_like('rmmigrate_') . '%'
+            )
+        );
+
+        if (is_multisite() && isset($wpdb->sitemeta)) {
+            $wpdb->query(
+                $wpdb->prepare(
+                    "DELETE FROM {$wpdb->sitemeta} WHERE meta_key LIKE %s OR meta_key LIKE %s OR meta_key LIKE %s",
+                    $wpdb->esc_like('rmmigrate_') . '%',
+                    $wpdb->esc_like('_site_transient_rmmigrate_') . '%',
+                    $wpdb->esc_like('_site_transient_timeout_rmmigrate_') . '%'
+                )
+            );
+        }
+
+        if (isset($wpdb->options)) {
+            $wpdb->query(
+                $wpdb->prepare(
+                    "DELETE FROM {$wpdb->options} WHERE option_name LIKE %s OR option_name LIKE %s OR option_name LIKE %s",
+                    $wpdb->esc_like('rmmigrate_') . '%',
+                    $wpdb->esc_like('_transient_rmmigrate_') . '%',
+                    $wpdb->esc_like('_transient_timeout_rmmigrate_') . '%'
+                )
+            );
         }
 
         $snap_db_file = dirname(__DIR__) . '/includes/class-snap-db.php';
@@ -283,24 +332,10 @@ class Rmmigrate_Uninstaller
         if (class_exists('Rmmigrate_Snap_DB', false)) {
             Rmmigrate_Snap_DB::drop_table_if_exists($wpdb->base_prefix . 'mm_oauth_clients');
             Rmmigrate_Snap_DB::drop_table_if_exists($wpdb->base_prefix . 'mm_oauth_tokens');
-        }
-
-        if (is_multisite()) {
-            $wpdb->query(
-                $wpdb->prepare(
-                    "DELETE FROM {$wpdb->sitemeta} WHERE meta_key LIKE %s",
-                    $wpdb->esc_like('rmmigrate_sql_worker_lock_') . '%'
-                )
-            );
-        } else {
-            $wpdb->query(
-                $wpdb->prepare(
-                    "DELETE FROM {$wpdb->options} WHERE option_name LIKE %s",
-                    $wpdb->esc_like('rmmigrate_sql_worker_lock_') . '%'
-                )
-            );
+            Rmmigrate_Snap_DB::drop_table_if_exists($wpdb->base_prefix . 'rmmigrate_staging_push_jobs');
         }
     }
+
 
     /**
      * @param array{delete_backups?: bool, delete_logs?: bool, delete_settings?: bool} $plan

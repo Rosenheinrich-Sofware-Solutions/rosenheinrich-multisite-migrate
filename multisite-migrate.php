@@ -3,7 +3,7 @@
  * Plugin Name:       Rosenheinrich Multisite Migrate – Backup, Restore & AI (MCP)
  * Plugin URI:        https://multisitemigrate.rosenheinrich.com/
  * Description:       Back up, restore and migrate single sites or multisite networks. Free, portable archives, search & replace, plus AI/MCP tools.
- * Version:           1.2.4
+ * Version:           1.2.5
  * Requires at least: 6.2
  * Requires PHP:      7.4
  * Author:            Rosenheinrich Software Solutions

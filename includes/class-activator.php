@@ -84,6 +84,10 @@ class Rmmigrate_Activator
 
     private static function run_activate(): void
     {
+        if (!defined('RMMIGRATE_PATH')) {
+            define('RMMIGRATE_PATH', dirname(__DIR__) . '/');
+        }
+
         require_once RMMIGRATE_PATH . 'includes/class-access.php';
         require_once RMMIGRATE_PATH . 'includes/class-settings.php';
         require_once RMMIGRATE_PATH . 'includes/class-filesystem.php';

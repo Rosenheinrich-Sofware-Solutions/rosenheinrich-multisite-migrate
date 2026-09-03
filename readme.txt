@@ -4,7 +4,7 @@ Tags: backup, migration, wordpress-backup, restore, multisite
 Requires at least: 6.2
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.2.4
+Stable tag: 1.2.5
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -236,6 +236,10 @@ Backup and restore run as background-style chunked jobs. They are designed not t
 
 == Changelog ==
 
+= 1.2.5 =
+* Fix: Prevent Setup Wizard redirect when activating other third-party WordPress plugins.
+* Setup Wizard redirect is now strictly one-shot on Multisite Migrate activation only.
+
 = 1.2.4 =
 * Requires WordPress 6.2 or higher again; AI Agents (MCP) still need WordPress 6.9+ (Abilities API) and stay gated when the host is older.
 
@@ -343,6 +347,9 @@ Backup and restore run as background-style chunked jobs. They are designed not t
 * Initial public release of the free edition: multisite-aware backups, restore, local import/export, search & replace, AES-256 encryption and a health dashboard.
 
 == Upgrade Notice ==
+
+= 1.2.5 =
+Fixes Setup Wizard redirect when activating other plugins. Recommended update.
 
 = 1.2.4 =
 Requires WordPress 6.2+ again; AI Agents (MCP) still need WordPress 6.9+. Recommended update.
