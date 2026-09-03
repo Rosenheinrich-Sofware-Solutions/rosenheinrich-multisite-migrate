@@ -22,6 +22,10 @@ class Rmmigrate_Bootstrap
             return false;
         }
 
+        if (self::is_activating($boot_file)) {
+            return true;
+        }
+
         $basename = plugin_basename($boot_file);
         if (self::is_plugin_listed_as_active($basename) && self::plugin_file_exists($basename)) {
             return true;
@@ -34,6 +38,44 @@ class Rmmigrate_Bootstrap
 
         return self::plugin_file_exists($edition_slug);
     }
+
+    public static function is_activating(string $boot_file): bool
+    {
+        $basename = plugin_basename($boot_file);
+        $edition_slug = self::edition_slug_for_boot_file($boot_file);
+        $candidates = array_filter(array($basename, $edition_slug));
+
+        $plugin_param = isset($_REQUEST['plugin']) ? sanitize_text_field(wp_unslash($_REQUEST['plugin'])) : '';
+        $action = isset($_REQUEST['action']) ? sanitize_text_field(wp_unslash($_REQUEST['action'])) : '';
+        if ($action === '' && isset($_REQUEST['action2'])) {
+            $action = sanitize_text_field(wp_unslash($_REQUEST['action2']));
+        }
+
+        if (in_array($action, array('activate', 'activate-plugin', 'activate-selected'), true)) {
+            if (in_array($plugin_param, $candidates, true)) {
+                return true;
+            }
+            if (isset($_POST['checked']) && is_array($_POST['checked'])) {
+                foreach ($_POST['checked'] as $checked_plugin) {
+                    if (in_array(sanitize_text_field(wp_unslash($checked_plugin)), $candidates, true)) {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        if (function_exists('debug_backtrace')) {
+            $trace = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 10);
+            foreach ($trace as $frame) {
+                if (isset($frame['function']) && $frame['function'] === 'activate_plugin') {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
 
     /**
      * Whether AI Agents (MCP) / Abilities API can run on this WordPress.

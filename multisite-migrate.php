@@ -53,7 +53,7 @@ if (!defined('RMMIGRATE_FREE')) {
 }
 
 if (!defined('RMMIGRATE_VERSION')) {
-    define('RMMIGRATE_VERSION', '1.2.4');
+    define('RMMIGRATE_VERSION', '1.2.5');
 }
 if (!defined('RMMIGRATE_PATH')) {
     define('RMMIGRATE_PATH', plugin_dir_path(__FILE__));

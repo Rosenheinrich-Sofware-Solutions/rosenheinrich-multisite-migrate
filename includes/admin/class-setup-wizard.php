@@ -115,12 +115,9 @@ class Rmmigrate_Setup_Wizard
 
     public static function queue_post_activation_redirect(): void
     {
-        if (!self::should_queue_post_activation_redirect()) {
-            return;
-        }
-
         update_site_option(self::PENDING_REDIRECT_OPTION, '1');
     }
+
 
     public static function clear_pending_post_activation_redirect(): void
     {
@@ -317,6 +314,18 @@ class Rmmigrate_Setup_Wizard
             self::clear_pending_post_activation_redirect();
             return;
         }
+        if (self::is_pending_post_activation_redirect()) {
+            self::clear_pending_post_activation_redirect();
+            $target_page = self::is_finished() ? 'multisite-migrate-archives' : 'multisite-migrate-setup';
+            $target_url  = Rmmigrate_Admin_Router::admin_url(
+                $target_page,
+                array(),
+                is_multisite() && is_network_admin()
+            );
+            wp_safe_redirect($target_url);
+            exit;
+        }
+
         if (!self::should_redirect()) {
             return;
         }
@@ -328,6 +337,7 @@ class Rmmigrate_Setup_Wizard
         );
         wp_safe_redirect($rmmigrate_setup_url);
         exit;
+
     }
 
     public static function ajax_skip(): void
