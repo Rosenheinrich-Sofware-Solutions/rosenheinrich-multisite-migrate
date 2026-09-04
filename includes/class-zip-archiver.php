@@ -144,10 +144,25 @@ class Rmmigrate_Zip_Archiver
 
         $zip = new ZipArchive();
         $open_flags = $resume ? ZipArchive::CREATE : (ZipArchive::CREATE | ZipArchive::OVERWRITE);
-        if ($zip->open($zip_path, $open_flags) !== true) {
+        $open_res = $zip->open($zip_path, $open_flags);
+
+        if ($open_res !== true) {
+            $code = Rmmigrate_Error_Codes::ARCHIVE_VALIDATION_FAILED;
+            if (defined('ZipArchive::ER_MEMORY') && $open_res === ZipArchive::ER_MEMORY) {
+                $code = Rmmigrate_Error_Codes::MEMORY_LIMIT;
+            } elseif (defined('ZipArchive::ER_OPEN') && ($open_res === ZipArchive::ER_OPEN || $open_res === ZipArchive::ER_READ)) {
+                $code = Rmmigrate_Error_Codes::PERMISSION_DENIED;
+            }
             // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
-            throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::EXTRACT_FAILED),
-                esc_html__('Cannot open backup archive for writing.', 'rosenheinrich-multisite-migrate')
+            throw Rmmigrate_Job_Exception::raise(
+                sanitize_key($code),
+                esc_html(
+                    sprintf(
+                        /* translators: %s: ZipArchive error code */
+                        __('Cannot open backup archive for writing (code: %s).', 'rosenheinrich-multisite-migrate'),
+                        (string) $open_res
+                    )
+                )
             );
         }
 
@@ -192,9 +207,12 @@ class Rmmigrate_Zip_Archiver
 
         if ($zip->close() !== true) {
             $status = $zip->getStatusString() ?: 'Unknown error';
+            $error_code = (stripos($status, 'quota') !== false || stripos($status, 'space') !== false)
+                ? Rmmigrate_Error_Codes::DISK_SPACE
+                : Rmmigrate_Error_Codes::ARCHIVE_VALIDATION_FAILED;
             // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
             throw Rmmigrate_Job_Exception::raise(
-                sanitize_key(Rmmigrate_Error_Codes::EXTRACT_FAILED),
+                sanitize_key($error_code),
                 esc_html(
                     sprintf(
                         /* translators: %s: ZipArchive error status string */
