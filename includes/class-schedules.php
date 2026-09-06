@@ -269,6 +269,30 @@ class Rmmigrate_Schedules
     }
 
     /**
+     * Next wall-clock occurrence strictly after now. Catches compute() returning the
+     * already-due slot (would otherwise re-fire every tick until grace ends, then
+     * flood activity log with the same missed next_run).
+     *
+     * @param array<string,mixed> $schedule
+     */
+    public static function compute_next_run_strictly_future(array $schedule, ?int $from = null): int
+    {
+        $anchor = $from ?? time();
+        $next = self::compute_next_run($schedule, $anchor);
+        $guard = 0;
+        while ($next <= time() && $guard < 400) {
+            $anchor = max($next, $anchor) + 1;
+            $next = self::compute_next_run($schedule, $anchor);
+            $guard++;
+        }
+        if ($next <= time()) {
+            $next = time() + (defined('DAY_IN_SECONDS') ? DAY_IN_SECONDS : 86400);
+        }
+
+        return $next;
+    }
+
+    /**
      * @param array<string, array<string,mixed>> $previous_by_id
      */
     private static function resolve_schedule_post_id(string $key, array $previous_by_id, string $fallback_id = ''): string
@@ -481,7 +505,7 @@ class Rmmigrate_Schedules
             if (empty($schedule['enabled'])) {
                 $settings['schedules'][$index]['next_run'] = 0;
             } else {
-                $settings['schedules'][$index]['next_run'] = self::compute_next_run($schedule);
+                $settings['schedules'][$index]['next_run'] = self::compute_next_run_strictly_future($schedule);
             }
             $updated = true;
             break;
@@ -672,7 +696,7 @@ class Rmmigrate_Schedules
             return $prev_next;
         }
 
-        return self::compute_next_run($schedule);
+        return self::compute_next_run_strictly_future($schedule);
     }
 
     /**

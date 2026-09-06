@@ -45,6 +45,7 @@ class Rmmigrate_Bootstrap
         $edition_slug = self::edition_slug_for_boot_file($boot_file);
         $candidates = array_filter(array($basename, $edition_slug));
 
+        // phpcs:disable WordPress.Security.NonceVerification.Recommended, WordPress.Security.NonceVerification.Missing -- Early bootstrap gate; reads activation request params before core verifies nonce.
         $plugin_param = isset($_REQUEST['plugin']) ? sanitize_text_field(wp_unslash($_REQUEST['plugin'])) : '';
         $action = isset($_REQUEST['action']) ? sanitize_text_field(wp_unslash($_REQUEST['action'])) : '';
         if ($action === '' && isset($_REQUEST['action2'])) {
@@ -56,15 +57,19 @@ class Rmmigrate_Bootstrap
                 return true;
             }
             if (isset($_POST['checked']) && is_array($_POST['checked'])) {
-                foreach ($_POST['checked'] as $checked_plugin) {
-                    if (in_array(sanitize_text_field(wp_unslash($checked_plugin)), $candidates, true)) {
+                // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- Sanitized per-item inside the loop.
+                $raw_checked = (array) wp_unslash($_POST['checked']);
+                foreach ($raw_checked as $checked_plugin) {
+                    if (is_scalar($checked_plugin) && in_array(sanitize_text_field((string) $checked_plugin), $candidates, true)) {
                         return true;
                     }
                 }
             }
         }
+        // phpcs:enable WordPress.Security.NonceVerification.Recommended, WordPress.Security.NonceVerification.Missing
 
         if (function_exists('debug_backtrace')) {
+            // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_debug_backtrace -- Inspects call stack for programmatic core activate_plugin() during bootstrap.
             $trace = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 10);
             foreach ($trace as $frame) {
                 if (isset($frame['function']) && $frame['function'] === 'activate_plugin') {

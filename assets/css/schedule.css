@@ -305,7 +305,20 @@
 .mm-schedule-inline-fields .mm-schedule-hour,
 .mm-schedule-inline-fields .mm-schedule-minute,
 .mm-schedule-inline-fields .mm-schedule-dom {
-    width: 3.25rem;
+    width: 4.5rem;
+    min-width: 4.5rem;
+    flex: 0 0 auto;
+}
+
+.mm-schedule-inline-fields .mm-schedule-ampm {
+    width: 5.5rem;
+    min-width: 5.5rem;
+    flex: 0 0 auto;
+}
+
+.mm-schedule-inline-fields .mm-schedule-weekday {
+    width: 9.5rem;
+    min-width: 9.5rem;
     flex: 0 0 auto;
 }
 

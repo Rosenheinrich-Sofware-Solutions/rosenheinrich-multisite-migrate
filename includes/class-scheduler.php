@@ -18,6 +18,8 @@ class Rmmigrate_Scheduler
     const ADMIN_DUE_TRANSIENT = 'rmmigrate_admin_due_tick';
     const ADMIN_DUE_LOCK_OPTION = 'rmmigrate_admin_due_lock';
     const LAST_TICK_OPTION = 'rmmigrate_last_tick';
+    const MISS_LOG_TRANSIENT_PREFIX = 'rmmigrate_sched_miss_';
+    const SLOT_TRANSIENT_PREFIX = 'rmmigrate_sched_slot_';
 
     public static function register(): void
     {
@@ -72,6 +74,16 @@ class Rmmigrate_Scheduler
             wp_schedule_single_event(time() + self::tick_interval(), self::HOOK);
         }
 
+        $switched = self::switch_to_site_locale();
+        try {
+            self::tick_body();
+        } finally {
+            self::restore_site_locale($switched);
+        }
+    }
+
+    private static function tick_body(): void
+    {
         update_site_option(self::LAST_TICK_OPTION, time());
 
         Rmmigrate_Job::recover_stale_active();
@@ -114,22 +126,12 @@ class Rmmigrate_Scheduler
         $next_run = (int) ($schedule['next_run'] ?? 0);
         $grace = self::grace_seconds_for_interval((string) ($schedule['interval'] ?? 'weekly'));
         if ($next_run > 0 && $next_run < (time() - $grace)) {
-            Rmmigrate_Logger::log_system(
-                sprintf(
-                    /* translators: 1: schedule ID, 2: Unix timestamp of missed next_run */
-                    __('Scheduled backup skipped: missed slot for schedule %1$s (next_run %2$d), advanced to next occurrence.', 'rosenheinrich-multisite-migrate'),
-                    $schedule_id,
-                    $next_run
-                ),
-                array(
-                    'triggered_by' => 'cron',
-                    'schedule_id'  => $schedule_id,
-                    'next_run'     => $next_run,
-                    'grace'        => $grace,
-                ),
-                'info'
-            );
+            self::log_missed_slot_once($schedule_id, $next_run, $grace);
             self::advance_next_run($schedule_id);
+            return;
+        }
+
+        if (!self::claim_schedule_slot($schedule_id, $next_run)) {
             return;
         }
 
@@ -152,6 +154,8 @@ class Rmmigrate_Scheduler
 
         $raw_args['scope'] = $resolved['scope'];
         $raw_args['excluded_blogs'] = $resolved['excluded_blogs'];
+
+        self::advance_next_run($schedule_id);
 
         try {
             $result = Rmmigrate_Backup_Service::start_backup($raw_args);
@@ -183,10 +187,8 @@ class Rmmigrate_Scheduler
                 'info'
             );
             delete_site_option(self::FAIL_COUNT_OPTION);
-            self::advance_next_run($schedule_id);
         } catch (Throwable $e) {
             self::record_schedule_failure(sanitize_text_field($e->getMessage()));
-            self::advance_next_run($schedule_id);
         }
     }
 
@@ -263,6 +265,10 @@ class Rmmigrate_Scheduler
 
     public static function maybe_run_due_on_admin(): void
     {
+        if (self::is_background_admin_request()) {
+            return;
+        }
+
         if (!current_user_can('manage_network') && !current_user_can('manage_options')) {
             return;
         }
@@ -277,7 +283,6 @@ class Rmmigrate_Scheduler
         }
 
         try {
-            set_transient(self::ADMIN_DUE_TRANSIENT, time(), 2 * MINUTE_IN_SECONDS);
             $settings = Rmmigrate_Schedules::normalize(Rmmigrate_Settings::get());
             if (!Rmmigrate_Schedules::has_enabled($settings)) {
                 return;
@@ -286,10 +291,93 @@ class Rmmigrate_Scheduler
                 return;
             }
 
+            set_transient(self::ADMIN_DUE_TRANSIENT, time(), 2 * MINUTE_IN_SECONDS);
             self::tick();
         } finally {
             self::release_admin_due_lock();
         }
+    }
+
+    /**
+     * Activity-log polling and Heartbeat hit admin_init every ~1.5s. Those must
+     * not drive the scheduler (one skip log per poll while next_run is stuck).
+     */
+    private static function is_background_admin_request(): bool
+    {
+        if (function_exists('wp_doing_ajax') && wp_doing_ajax()) {
+            return true;
+        }
+        if (defined('REST_REQUEST') && REST_REQUEST) {
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * @return bool True when locale was switched and must be restored.
+     */
+    private static function switch_to_site_locale(): bool
+    {
+        if (!function_exists('switch_to_locale') || !function_exists('get_locale')) {
+            return false;
+        }
+        $site = (string) get_locale();
+        if ($site === '') {
+            return false;
+        }
+        $current = function_exists('determine_locale') ? (string) determine_locale() : $site;
+        if ($site === $current) {
+            return false;
+        }
+
+        return (bool) switch_to_locale($site);
+    }
+
+    private static function restore_site_locale(bool $switched): void
+    {
+        if ($switched && function_exists('restore_previous_locale')) {
+            restore_previous_locale();
+        }
+    }
+
+    private static function log_missed_slot_once(string $schedule_id, int $next_run, int $grace): void
+    {
+        $key = self::MISS_LOG_TRANSIENT_PREFIX . md5($schedule_id . '|' . $next_run);
+        if (get_site_transient($key)) {
+            return;
+        }
+        set_site_transient($key, 1, defined('WEEK_IN_SECONDS') ? WEEK_IN_SECONDS : 604800);
+        Rmmigrate_Logger::log_system(
+            sprintf(
+                /* translators: 1: schedule ID, 2: Unix timestamp of missed next_run */
+                __('Scheduled backup skipped: missed slot for schedule %1$s (next_run %2$d), advanced to next occurrence.', 'rosenheinrich-multisite-migrate'),
+                $schedule_id,
+                $next_run
+            ),
+            array(
+                'triggered_by' => 'cron',
+                'schedule_id'  => $schedule_id,
+                'next_run'     => $next_run,
+                'grace'        => $grace,
+            ),
+            'info'
+        );
+    }
+
+    /**
+     * First tick to win this wall-clock slot starts the backup. Later ticks
+     * only advance next_run (no second 370MB archive in the grace window).
+     */
+    private static function claim_schedule_slot(string $schedule_id, int $next_run): bool
+    {
+        $key = self::SLOT_TRANSIENT_PREFIX . md5($schedule_id . '|' . $next_run);
+        if (get_site_transient($key)) {
+            return false;
+        }
+        set_site_transient($key, 1, defined('HOUR_IN_SECONDS') ? HOUR_IN_SECONDS : 3600);
+
+        return true;
     }
 
     private static function acquire_admin_due_lock(): bool

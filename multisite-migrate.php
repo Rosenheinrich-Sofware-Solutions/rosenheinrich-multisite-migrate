@@ -1,9 +1,9 @@
 <?php
 /**
- * Plugin Name:       Rosenheinrich Multisite Migrate – Backup, Restore & AI (MCP)
+ * Plugin Name:       Rosenheinrich Multisite Migrate – Single Site & Network Backup, Restore & AI
  * Plugin URI:        https://multisitemigrate.rosenheinrich.com/
  * Description:       Back up, restore and migrate single sites or multisite networks. Free, portable archives, search & replace, plus AI/MCP tools.
- * Version:           1.2.5
+ * Version:           1.2.6
  * Requires at least: 6.2
  * Requires PHP:      7.4
  * Author:            Rosenheinrich Software Solutions
@@ -53,7 +53,7 @@ if (!defined('RMMIGRATE_FREE')) {
 }
 
 if (!defined('RMMIGRATE_VERSION')) {
-    define('RMMIGRATE_VERSION', '1.2.5');
+    define('RMMIGRATE_VERSION', '1.2.6');
 }
 if (!defined('RMMIGRATE_PATH')) {
     define('RMMIGRATE_PATH', plugin_dir_path(__FILE__));

@@ -1,10 +1,10 @@
-=== Rosenheinrich Multisite Migrate – Backup, Restore & AI (MCP) ===
+=== Rosenheinrich Multisite Migrate – Single Site & Network Backup, Restore & AI ===
 Contributors: rosenheinrich, phillipro
 Tags: backup, migration, wordpress-backup, restore, multisite
 Requires at least: 6.2
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.2.5
+Stable tag: 1.2.6
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -236,6 +236,10 @@ Backup and restore run as background-style chunked jobs. They are designed not t
 
 == Changelog ==
 
+= 1.2.6 =
+* Fix: Scheduled backups no longer repeat every minute or flood the activity log with skipped-slot messages.
+* Network Admin shows backup and activity times in UTC so they match stored job timestamps.
+
 = 1.2.5 =
 * Fix: Prevent Setup Wizard redirect when activating other third-party WordPress plugins.
 * Setup Wizard redirect is now strictly one-shot on Multisite Migrate activation only.
@@ -347,6 +351,9 @@ Backup and restore run as background-style chunked jobs. They are designed not t
 * Initial public release of the free edition: multisite-aware backups, restore, local import/export, search & replace, AES-256 encryption and a health dashboard.
 
 == Upgrade Notice ==
+
+= 1.2.6 =
+Stops extra scheduled backups and activity-log spam; Network Admin times display in UTC. Recommended update.
 
 = 1.2.5 =
 Fixes Setup Wizard redirect when activating other plugins. Recommended update.

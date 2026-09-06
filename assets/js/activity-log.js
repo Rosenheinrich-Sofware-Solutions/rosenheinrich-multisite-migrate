@@ -348,6 +348,7 @@
         $.post(admin.ajaxUrl, {
             action: actionName('activityListAction', defaultListAction()),
             nonce: admin.nonce,
+            is_network: admin.isNetwork ? '1' : '0',
             type: filters.type,
             date_from: filters.date_from,
             date_to: filters.date_to,
@@ -416,6 +417,7 @@
         $.post(admin.ajaxUrl, {
             action: actionName('activityDetailAction', defaultDetailAction()),
             nonce: admin.nonce,
+            is_network: admin.isNetwork ? '1' : '0',
             entry_id: entryId || '',
             job_id: jobId || 0
         }).done(function (resp) {
@@ -470,6 +472,7 @@
         $.post(admin.ajaxUrl, {
             action: actionName('logChunkAction', defaultLogChunkAction()),
             nonce: admin.nonce,
+            is_network: admin.isNetwork ? '1' : '0',
             log: log,
             offset: offset,
             lines: lines
