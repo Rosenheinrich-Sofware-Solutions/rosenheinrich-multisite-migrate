@@ -74,12 +74,7 @@ class Rmmigrate_Scheduler
             wp_schedule_single_event(time() + self::tick_interval(), self::HOOK);
         }
 
-        $switched = self::switch_to_site_locale();
-        try {
-            self::tick_body();
-        } finally {
-            self::restore_site_locale($switched);
-        }
+        self::tick_body();
     }
 
     private static function tick_body(): void
@@ -124,14 +119,9 @@ class Rmmigrate_Scheduler
         $schedule = $due[0];
         $schedule_id = (string) ($schedule['id'] ?? '');
         $next_run = (int) ($schedule['next_run'] ?? 0);
-        $grace = self::grace_seconds_for_interval((string) ($schedule['interval'] ?? 'weekly'));
-        if ($next_run > 0 && $next_run < (time() - $grace)) {
-            self::log_missed_slot_once($schedule_id, $next_run, $grace);
-            self::advance_next_run($schedule_id);
-            return;
-        }
 
         if (!self::claim_schedule_slot($schedule_id, $next_run)) {
+            self::advance_next_run($schedule_id);
             return;
         }
 
@@ -172,19 +162,13 @@ class Rmmigrate_Scheduler
                     );
                 }
             }
-            Rmmigrate_Logger::log_system(
+            Rmmigrate_Logger::log_job(
+                $job_id,
                 sprintf(
-                    /* translators: 1: job ID, 2: schedule ID */
-                    __('Scheduled backup #%1$d started (schedule %2$s).', 'rosenheinrich-multisite-migrate'),
+                    'Scheduled backup #%1$d started (schedule %2$s).',
                     $job_id,
                     $schedule_id
-                ),
-                array(
-                    'triggered_by' => 'cron',
-                    'job_id'       => $job_id,
-                    'schedule_id'  => $schedule_id,
-                ),
-                'info'
+                )
             );
             delete_site_option(self::FAIL_COUNT_OPTION);
         } catch (Throwable $e) {
@@ -315,54 +299,10 @@ class Rmmigrate_Scheduler
     }
 
     /**
-     * @return bool True when locale was switched and must be restored.
+     * @deprecated Scheduled backups are not skipped on delayed cron.
      */
-    private static function switch_to_site_locale(): bool
-    {
-        if (!function_exists('switch_to_locale') || !function_exists('get_locale')) {
-            return false;
-        }
-        $site = (string) get_locale();
-        if ($site === '') {
-            return false;
-        }
-        $current = function_exists('determine_locale') ? (string) determine_locale() : $site;
-        if ($site === $current) {
-            return false;
-        }
-
-        return (bool) switch_to_locale($site);
-    }
-
-    private static function restore_site_locale(bool $switched): void
-    {
-        if ($switched && function_exists('restore_previous_locale')) {
-            restore_previous_locale();
-        }
-    }
-
     private static function log_missed_slot_once(string $schedule_id, int $next_run, int $grace): void
     {
-        $key = self::MISS_LOG_TRANSIENT_PREFIX . md5($schedule_id . '|' . $next_run);
-        if (get_site_transient($key)) {
-            return;
-        }
-        set_site_transient($key, 1, defined('WEEK_IN_SECONDS') ? WEEK_IN_SECONDS : 604800);
-        Rmmigrate_Logger::log_system(
-            sprintf(
-                /* translators: 1: schedule ID, 2: Unix timestamp of missed next_run */
-                __('Scheduled backup skipped: missed slot for schedule %1$s (next_run %2$d), advanced to next occurrence.', 'rosenheinrich-multisite-migrate'),
-                $schedule_id,
-                $next_run
-            ),
-            array(
-                'triggered_by' => 'cron',
-                'schedule_id'  => $schedule_id,
-                'next_run'     => $next_run,
-                'grace'        => $grace,
-            ),
-            'info'
-        );
     }
 
     /**

@@ -160,8 +160,7 @@ class Rmmigrate_Job
 
         $triggered_by = (string) ($args['triggered_by'] ?? 'manual');
         $message = sprintf(
-            /* translators: 1: job ID, 2: scope, 3: backup profile */
-            __('Backup job #%1$d queued (%2$s, %3$s).', 'rosenheinrich-multisite-migrate'),
+            'Backup job #%1$d queued (%2$s, %3$s).',
             $job->get_id(),
             $job->get_scope(),
             $job->get_backup_profile()
@@ -1157,21 +1156,18 @@ class Rmmigrate_Job
                     $status === self::STATUS_COMPLETE
                         ? ($error !== null
                             ? sprintf(
-                                /* translators: 1: job type, 2: job ID, 3: warning message */
-                                __('%1$s job #%2$d completed with a warning: %3$s', 'rosenheinrich-multisite-migrate'),
+                                '%1$s job #%2$d completed with a warning: %3$s',
                                 ucfirst($type),
                                 $this->get_id(),
                                 $error
                             )
                             : sprintf(
-                                /* translators: 1: job type, 2: job ID */
-                                __('%1$s job #%2$d completed.', 'rosenheinrich-multisite-migrate'),
+                                '%1$s job #%2$d completed.',
                                 ucfirst($type),
                                 $this->get_id()
                             ))
                         : sprintf(
-                            /* translators: 1: job type, 2: job ID, 3: error message */
-                            __('%1$s job #%2$d failed: %3$s', 'rosenheinrich-multisite-migrate'),
+                            '%1$s job #%2$d failed: %3$s',
                             ucfirst($type),
                             $this->get_id(),
                             $error ?? ''
@@ -1206,8 +1202,7 @@ class Rmmigrate_Job
         if ($status === self::STATUS_CANCELLED && !in_array($previous, array(self::STATUS_CANCELLED, self::STATUS_COMPLETE, self::STATUS_ERROR), true)) {
             $type = $this->get_job_type() === self::JOB_TYPE_RESTORE ? 'restore' : 'backup';
             $message = sprintf(
-                /* translators: 1: job type, 2: job ID */
-                __('%1$s job #%2$d cancelled.', 'rosenheinrich-multisite-migrate'),
+                '%1$s job #%2$d cancelled.',
                 ucfirst($type),
                 $this->get_id()
             );

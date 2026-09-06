@@ -268,11 +268,7 @@
         html += '<td class="column-date mm-activity-time" data-label="' + escHtml(timeLabel) + '"><code>' + escHtml(entry.time_display || entry.time || '') + '</code></td>';
         html += '<td class="column-type" data-label="' + escHtml(typeCol) + '"><span class="mm-status-chip mm-activity-type">' + escHtml(typeLabel) + '</span></td>';
         html += '<td class="column-status" data-label="' + escHtml(statusCol) + '"><span class="' + escHtml(statusPillClass(status)) + '">' + escHtml(statusLabel) + '</span></td>';
-        html += '<td class="column-message mm-activity-message" data-label="' + escHtml(messageCol) + '" title="' + escHtml(message) + '">' + escHtml(message);
-        if (bundledCount > 1) {
-            html += ' <span class="mm-activity-bundled-hint">' + escHtml((i18n.bundledEventsHint || '(%d events — open Details)').replace('%d', String(bundledCount))) + '</span>';
-        }
-        html += '</td>';
+        html += '<td class="column-message mm-activity-message" data-label="' + escHtml(messageCol) + '" title="' + escHtml(message) + '">' + escHtml(message) + '</td>';
         html += '<td class="column-actions mm-row-actions" data-label="' + escHtml(actionsCol) + '">';
         html += '<button type="button" class="button button-small button-primary mm-btn-teal mm-activity-detail-btn" data-entry-id="' + escHtml(entryId) + '" data-job-id="' + escHtml(String(jobId)) + '" data-title="' + escHtml(detailTitle) + '">' + escHtml(i18n.details || 'Details') + '</button>';
         html += '</td></tr>';
