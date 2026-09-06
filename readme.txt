@@ -1,6 +1,6 @@
 === Rosenheinrich Multisite Migrate – Single Site & Network Backup, Restore & AI ===
 Contributors: rosenheinrich, phillipro
-Tags: backup, migration, wordpress-backup, restore, multisite
+Tags: multisite, site-migration, wordpress-migration, migrate-wordpress, clone-site
 Requires at least: 6.2
 Tested up to: 7.1
 Requires PHP: 7.4
