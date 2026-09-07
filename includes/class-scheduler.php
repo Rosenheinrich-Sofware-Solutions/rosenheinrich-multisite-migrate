@@ -118,10 +118,11 @@ class Rmmigrate_Scheduler
 
         $schedule = $due[0];
         $schedule_id = (string) ($schedule['id'] ?? '');
+        $blog_id = isset($schedule['blog_id']) ? (int) $schedule['blog_id'] : null;
         $next_run = (int) ($schedule['next_run'] ?? 0);
 
-        if (!self::claim_schedule_slot($schedule_id, $next_run)) {
-            self::advance_next_run($schedule_id);
+        if (!self::claim_schedule_slot($schedule_id, $next_run, $blog_id)) {
+            self::advance_next_run($schedule_id, $blog_id);
             return;
         }
 
@@ -138,14 +139,14 @@ class Rmmigrate_Scheduler
         );
         if (is_wp_error($resolved)) {
             self::record_schedule_failure('Scope invalid: ' . $resolved->get_error_message());
-            self::advance_next_run($schedule_id);
+            self::advance_next_run($schedule_id, $blog_id);
             return;
         }
 
         $raw_args['scope'] = $resolved['scope'];
         $raw_args['excluded_blogs'] = $resolved['excluded_blogs'];
 
-        self::advance_next_run($schedule_id);
+        self::advance_next_run($schedule_id, $blog_id);
 
         try {
             $result = Rmmigrate_Backup_Service::start_backup($raw_args);
@@ -210,26 +211,28 @@ class Rmmigrate_Scheduler
         delete_site_option(self::FAIL_COUNT_OPTION);
     }
 
-    public static function advance_next_run(string $schedule_id = ''): void
+    public static function advance_next_run(string $schedule_id = '', ?int $blog_id = null): void
     {
         $settings = Rmmigrate_Schedules::normalize(Rmmigrate_Settings::get());
-        if ($schedule_id === '') {
+        if ($schedule_id === '' && $blog_id === null) {
             foreach ($settings['schedules'] as $schedule) {
                 if (!empty($schedule['enabled'])) {
                     $schedule_id = (string) ($schedule['id'] ?? '');
+                    $blog_id = (int) ($schedule['blog_id'] ?? 0);
                     break;
                 }
             }
             if ($schedule_id === '' && !empty($settings['schedules'][0]['id'])) {
                 $schedule_id = (string) $settings['schedules'][0]['id'];
+                $blog_id = (int) ($settings['schedules'][0]['blog_id'] ?? 0);
             }
         }
 
-        if ($schedule_id === '') {
+        if ($schedule_id === '' && $blog_id === null) {
             return;
         }
 
-        Rmmigrate_Schedules::advance_schedule($schedule_id);
+        Rmmigrate_Schedules::advance_schedule($schedule_id, $blog_id);
     }
 
     public static function grace_seconds_for_interval(string $interval): int
@@ -257,7 +260,7 @@ class Rmmigrate_Scheduler
             return;
         }
 
-        $last = (int) get_transient(self::ADMIN_DUE_TRANSIENT);
+        $last = (int) get_site_transient(self::ADMIN_DUE_TRANSIENT);
         if ($last > 0 && (time() - $last) < MINUTE_IN_SECONDS) {
             return;
         }
@@ -275,7 +278,7 @@ class Rmmigrate_Scheduler
                 return;
             }
 
-            set_transient(self::ADMIN_DUE_TRANSIENT, time(), 2 * MINUTE_IN_SECONDS);
+            set_site_transient(self::ADMIN_DUE_TRANSIENT, time(), 2 * MINUTE_IN_SECONDS);
             self::tick();
         } finally {
             self::release_admin_due_lock();
@@ -309,9 +312,10 @@ class Rmmigrate_Scheduler
      * First tick to win this wall-clock slot starts the backup. Later ticks
      * only advance next_run (no second 370MB archive in the grace window).
      */
-    private static function claim_schedule_slot(string $schedule_id, int $next_run): bool
+    private static function claim_schedule_slot(string $schedule_id, int $next_run, ?int $blog_id = null): bool
     {
-        $key = self::SLOT_TRANSIENT_PREFIX . md5($schedule_id . '|' . $next_run);
+        $slot_id = ($blog_id !== null && $blog_id > 0) ? ($schedule_id . '_b' . $blog_id) : $schedule_id;
+        $key = self::SLOT_TRANSIENT_PREFIX . md5($slot_id . '|' . $next_run);
         if (get_site_transient($key)) {
             return false;
         }

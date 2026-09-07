@@ -562,7 +562,7 @@ class Rmmigrate_Job
         }
 
         // Fresh worker lease proves the holder is alive (long quiet slices OK).
-        if (Rmmigrate_Runner::lease_is_fresh($job->get_id())) {
+        if (class_exists('Rmmigrate_Runner') && Rmmigrate_Runner::lease_is_fresh($job->get_id())) {
             return false;
         }
 

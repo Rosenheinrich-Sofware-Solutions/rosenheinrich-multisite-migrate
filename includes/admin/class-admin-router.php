@@ -251,6 +251,9 @@ class Rmmigrate_Admin_Router
         }
 
         $rmmigrate_page = $pages[$rmmigrate_page_slug];
+        if ($rmmigrate_page_slug === 'multisite-migrate-schedule') {
+            Rmmigrate_Schedules::heal_mismatched_next_runs();
+        }
         $rmmigrate_settings = Rmmigrate_Settings::get();
         $rmmigrate_highlight_job_id = Rmmigrate_Request_Input::get_int('job_id');
         Rmmigrate_Job::recover_stale_active();

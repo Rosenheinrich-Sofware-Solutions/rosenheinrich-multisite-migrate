@@ -115,9 +115,12 @@ $rmmigrate_show_network_scope = is_multisite() && !empty($rmmigrate_is_network);
                 <?php endforeach; ?>
             </select>
         </div>
-        <?php else : ?>
+        <?php elseif (is_multisite()) : ?>
         <input type="hidden" name="<?php echo esc_attr($rmmigrate_prefix); ?>[scope]" value="subsite">
         <input type="hidden" name="<?php echo esc_attr($rmmigrate_prefix); ?>[blog_id]" value="<?php echo esc_attr((string) get_current_blog_id()); ?>">
+        <?php else : ?>
+        <input type="hidden" name="<?php echo esc_attr($rmmigrate_prefix); ?>[scope]" value="network">
+        <input type="hidden" name="<?php echo esc_attr($rmmigrate_prefix); ?>[blog_id]" value="0">
         <?php endif; ?>
     </div>
 
