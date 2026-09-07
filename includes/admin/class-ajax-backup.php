@@ -242,6 +242,9 @@ class Rmmigrate_Ajax_Backup
             wp_die(esc_html__('File not found.', 'rosenheinrich-multisite-migrate'));
         }
         self::prepare_binary_download_response();
+        if (function_exists('session_status') && session_status() === PHP_SESSION_ACTIVE) {
+            @session_write_close();
+        }
         $ext = strtolower(pathinfo($path, PATHINFO_EXTENSION));
         $mime = 'application/octet-stream';
         if ($ext === 'zip') {
@@ -255,9 +258,45 @@ class Rmmigrate_Ajax_Backup
         if ($filename === '') {
             $filename = 'archive.' . $ext;
         }
+
+        $filesize = Rmmigrate_Filesystem::filesize($path);
+
         header('Content-Type: ' . $mime);
         header('Content-Disposition: attachment; filename="' . $filename . '"');
-        header('Content-Length: ' . Rmmigrate_Filesystem::filesize($path));
+        header('Accept-Ranges: bytes');
+        header('X-Accel-Buffering: no');
+        header('Cache-Control: private, no-transform, no-store, must-revalidate');
+        header('Pragma: no-cache');
+        header('Expires: 0');
+
+        $range_header = isset($_SERVER['HTTP_RANGE']) ? sanitize_text_field(wp_unslash($_SERVER['HTTP_RANGE'])) : '';
+        $range = $range_header !== '' ? Rmmigrate_Filesystem::parse_byte_range($range_header, $filesize) : null;
+
+        if ($range !== null) {
+            if ($range['status'] === 416) {
+                if (function_exists('status_header')) {
+                    status_header(416);
+                } else {
+                    header('HTTP/1.1 416 Range Not Satisfiable');
+                }
+                header('Content-Range: bytes */' . $filesize);
+                exit;
+            }
+
+            if ($range['status'] === 206) {
+                if (function_exists('status_header')) {
+                    status_header(206);
+                } else {
+                    header('HTTP/1.1 206 Partial Content');
+                }
+                header('Content-Range: bytes ' . $range['start'] . '-' . $range['end'] . '/' . $filesize);
+                header('Content-Length: ' . $range['length']);
+                Rmmigrate_Filesystem::stream_to_stdout($path, $range['start'], $range['length']);
+                exit;
+            }
+        }
+
+        header('Content-Length: ' . $filesize);
         Rmmigrate_Filesystem::stream_to_stdout($path);
         exit;
     }

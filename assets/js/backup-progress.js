@@ -523,7 +523,7 @@
         waitingForLock = false;
         clearStatusTimer();
         stuckPolls = 0;
-        $('#multisite-migrate-start').prop('disabled', false);
+        $('#multisite-migrate-start, #mm-quick-start-btn').prop('disabled', false);
         $('#mm-active-job-banner').addClass('mm-finished-job').css('position', 'relative');
         if (ok) {
             lastDisplayedPercent = 100;
@@ -784,7 +784,7 @@
             updateProgress(lastDisplayedPercent, (rmmigrateAdmin.activeJob && rmmigrateAdmin.activeJob.message) || '');
         }
         clearStatusTimer();
-        $('#multisite-migrate-start').prop('disabled', true);
+        $('#multisite-migrate-start, #mm-quick-start-btn').prop('disabled', true);
         focusActiveJobBanner(false);
         pollJobStatus(function () {
             if (browserDrivesWorker()) {
@@ -852,6 +852,17 @@
         }
     });
 
+    $(document).on('click', '#mm-quick-start-btn', function (e) {
+        e.preventDefault();
+        if ($('#multisite-migrate-start').prop('disabled') || running) {
+            return;
+        }
+        if ($('input[name="mm_scope"][value="network"]').length) {
+            $('input[name="mm_scope"][value="network"]').prop('checked', true).trigger('change');
+        }
+        $('#multisite-migrate-start').trigger('click');
+    });
+
     $('#multisite-migrate-start').on('click', function () {
         if (running) {
             return;
@@ -861,6 +872,7 @@
         }
         var $btn = $(this);
         $btn.prop('disabled', true);
+        $('#mm-quick-start-btn').prop('disabled', true);
         running = true;
         lastDisplayedPercent = 0;
         updateProgress(0, t('starting', 'Starting…'));
@@ -882,6 +894,7 @@
             if (!response.success) {
                 running = false;
                 $btn.prop('disabled', false);
+                $('#mm-quick-start-btn').prop('disabled', false);
                 var startFailMsg = response.data && response.data.message ? response.data.message : t('failedToStartBackup', 'Failed to start backup');
                 if (rmmigrateAdminUI.reportJsonFail) {
                     rmmigrateAdminUI.reportJsonFail('rmmigrate_start', startFailMsg, 'start');
@@ -896,6 +909,7 @@
         }).fail(function (xhr) {
             running = false;
             $btn.prop('disabled', false);
+            $('#mm-quick-start-btn').prop('disabled', false);
             var msg = rmmigrateAdminUI.ajaxErrorMessage(xhr, t('requestFailed', 'Request failed'));
             if (rmmigrateAdminUI.reportAjaxFailure) {
                 rmmigrateAdminUI.reportAjaxFailure({

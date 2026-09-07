@@ -45,6 +45,27 @@ $rmmigrate_uploads_placeholder = Rmmigrate_Engine_Config::uploads_basedir();
         </ol>
 
         <div class="mm-create-step is-active" data-create-step="1">
+            <div class="mm-quick-start-box">
+                <div class="mm-quick-start-box__content">
+                    <span class="dashicons dashicons-shield-alt mm-quick-start-box__icon" aria-hidden="true"></span>
+                    <div class="mm-quick-start-box__text">
+                        <strong class="mm-quick-start-box__title"><?php esc_html_e('Quick Full Backup (Recommended)', 'rosenheinrich-multisite-migrate'); ?></strong>
+                        <p class="description mm-quick-start-box__desc"><?php esc_html_e('Back up everything safely in one click.', 'rosenheinrich-multisite-migrate'); ?></p>
+                    </div>
+                </div>
+                <button type="button" class="button button-primary button-large mm-quick-start-btn" id="mm-quick-start-btn" <?php disabled(!empty($rmmigrate_backup_blocked)); ?>>
+                    <span class="mm-quick-start-btn__arrow-badge" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+                    </span>
+                    <span class="mm-quick-start-btn__label"><?php esc_html_e('Start Full Backup Now', 'rosenheinrich-multisite-migrate'); ?></span>
+                    <span class="mm-quick-start-btn__chevron" aria-hidden="true">
+                        <svg viewBox="0 0 20 20" width="16" height="16" fill="currentColor"><path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd"/></svg>
+                    </span>
+                </button>
+            </div>
+            <div class="mm-create-divider">
+                <span><?php esc_html_e('or customize options below', 'rosenheinrich-multisite-migrate'); ?></span>
+            </div>
             <?php if (!empty($rmmigrate_subsite_mode)) : ?>
                 <input type="hidden" name="mm_scope" value="subsite">
                 <p><?php esc_html_e('Backup this site (database + files).', 'rosenheinrich-multisite-migrate'); ?></p>
@@ -97,12 +118,12 @@ $rmmigrate_uploads_placeholder = Rmmigrate_Engine_Config::uploads_basedir();
             </p>
             <p>
                 <label for="mm-archive-mode"><?php esc_html_e('Archive format', 'rosenheinrich-multisite-migrate'); ?></label>
-                <button type="button" class="mm-help-tip" aria-expanded="false" data-tip="<?php echo esc_attr(__('Choose how this backup is packaged. ZIP needs the ZipArchive extension; DAF is a resumable streaming format that survives short PHP timeouts. Your last choice is remembered for the next backup.', 'rosenheinrich-multisite-migrate')); ?>" aria-label="<?php esc_attr_e('Archive format help', 'rosenheinrich-multisite-migrate'); ?>">?</button><br>
+                <button type="button" class="mm-help-tip" aria-expanded="false" data-tip="<?php echo esc_attr(__('Choose how this backup is packaged. DAF is a resumable format that survives server timeouts. ZIP is the standard format.', 'rosenheinrich-multisite-migrate')); ?>" aria-label="<?php esc_attr_e('Archive format help', 'rosenheinrich-multisite-migrate'); ?>">?</button><br>
                 <select id="mm-archive-mode">
-                    <option value="daf" <?php selected($rmmigrate_default_archive_mode, 'daf'); ?>><?php esc_html_e('DAF — Resumable', 'rosenheinrich-multisite-migrate'); ?></option>
+                    <option value="daf" <?php selected($rmmigrate_default_archive_mode, 'daf'); ?>><?php esc_html_e('DAF — Resumable (Recommended)', 'rosenheinrich-multisite-migrate'); ?></option>
                     <option value="zip" <?php selected($rmmigrate_default_archive_mode, 'zip'); ?>><?php esc_html_e('ZIP — Standard', 'rosenheinrich-multisite-migrate'); ?></option>
                 </select><br>
-                <span class="description"><?php esc_html_e('DAF resumes across PHP timeouts (best for large sites). ZIP is the universal format but needs the ZipArchive extension.', 'rosenheinrich-multisite-migrate'); ?></span>
+                <span class="description"><?php esc_html_e('DAF automatically resumes across server timeouts (recommended for large & multisite networks). ZIP is universal but cannot resume interrupted transfers.', 'rosenheinrich-multisite-migrate'); ?></span>
             </p>
             <p>
                 <label><input type="checkbox" id="mm-include-wp-core" value="1" <?php checked($rmmigrate_default_include_core); ?>> <?php esc_html_e('Include WordPress core files', 'rosenheinrich-multisite-migrate'); ?></label>

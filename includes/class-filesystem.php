@@ -612,11 +612,93 @@ class Rmmigrate_Filesystem
     }
 
     /**
-     * Stream a local file to stdout without readfile().
+     * Parse an HTTP Range header (RFC 7233 / RFC 9110).
+     *
+     * @param string $header   e.g. 'bytes=0-1023' or 'bytes=1024-'.
+     * @param int    $filesize Total size of the file in bytes.
+     * @return array{status: int, start?: int, end?: int, length?: int}|null
+     *         Returns null if Range header is not present/recognized,
+     *         array('status' => 416) if unsatisfiable,
+     *         array('status' => 206, 'start' => int, 'end' => int, 'length' => int) if valid.
      */
-    public static function stream_to_stdout(string $path): bool
+    public static function parse_byte_range(string $header, int $filesize): ?array
+    {
+        $header = trim($header);
+        if ($header === '' || stripos($header, 'bytes=') !== 0) {
+            return null;
+        }
+
+        if ($filesize <= 0) {
+            return array('status' => 416);
+        }
+
+        // Support only first range if multiple comma-separated ranges requested.
+        $spec = substr($header, 6);
+        $comma_pos = strpos($spec, ',');
+        if ($comma_pos !== false) {
+            $spec = substr($spec, 0, $comma_pos);
+        }
+        $spec = trim($spec);
+
+        if (!preg_match('/^(\d*)-(\d*)$/', $spec, $matches)) {
+            return null;
+        }
+
+        $raw_start = $matches[1];
+        $raw_end   = $matches[2];
+
+        if ($raw_start === '' && $raw_end === '') {
+            return null;
+        }
+
+        if ($raw_start === '') {
+            // Suffix byte range: e.g. -500 (last 500 bytes).
+            $suffix = (int) $raw_end;
+            if ($suffix <= 0) {
+                return array('status' => 416);
+            }
+            $start = max(0, $filesize - $suffix);
+            $end   = $filesize - 1;
+        } elseif ($raw_end === '') {
+            // Range from start to EOF: e.g. 1024-.
+            $start = (int) $raw_start;
+            $end   = $filesize - 1;
+        } else {
+            // Range with both start and end: e.g. 0-1023.
+            $start = (int) $raw_start;
+            $end   = (int) $raw_end;
+        }
+
+        if ($start > $end || $start >= $filesize) {
+            return array('status' => 416);
+        }
+
+        if ($end >= $filesize) {
+            $end = $filesize - 1;
+        }
+
+        $length = $end - $start + 1;
+
+        return array(
+            'status' => 206,
+            'start'  => $start,
+            'end'    => $end,
+            'length' => $length,
+        );
+    }
+
+    /**
+     * Stream a local file to stdout without readfile(), supporting byte ranges and proxy keep-alives.
+     */
+    public static function stream_to_stdout(string $path, int $start_offset = 0, ?int $length = null): bool
     {
         self::$last_stream_to_stdout_abort = '';
+
+        // Free PHP session lock immediately so long downloads do not block concurrent requests.
+        if (function_exists('session_status') && session_status() === PHP_SESSION_ACTIVE) {
+            @session_write_close();
+        }
+
         $size = self::filesize($path);
         if ($size <= 0) {
             $contents = self::get_contents($path);
@@ -641,16 +723,15 @@ class Rmmigrate_Filesystem
         // archive body, matching the disabled gzip above.
         if (!headers_sent()) {
             header('Content-Encoding: identity');
+            header('X-Accel-Buffering: no');
+            header('X-LiteSpeed-Connection: keep-alive');
         }
         if (function_exists('set_time_limit')) {
             // phpcs:ignore Squiz.PHP.DiscouragedFunctions.Discouraged -- Large downloads must not be killed by the default time limit.
             @set_time_limit(0);
         }
 
-        // Open the handle once and stream sequentially. The previous
-        // implementation re-opened the file for every 1 MB chunk via
-        // file_get_contents() with an offset, which is O(n) opens/seeks on large
-        // archives and made multi-GB downloads extremely slow.
+        // Open the handle once and stream sequentially.
         $handle = self::fopen_raw($path, 'rb');
         if ($handle === false) {
             self::$last_stream_to_stdout_abort = 'read_failed';
@@ -658,10 +739,22 @@ class Rmmigrate_Filesystem
             return false;
         }
 
-        $chunk = 8 * 1024 * 1024;
+        if ($start_offset > 0) {
+            if (fseek($handle, $start_offset, SEEK_SET) !== 0) {
+                self::fclose_raw($handle);
+                self::$last_stream_to_stdout_abort = 'read_failed';
+
+                return false;
+            }
+        }
+
+        $remaining = ($length !== null && $length >= 0) ? $length : max(0, $size - $start_offset);
+        $chunk = 1024 * 1024; // 1 MB chunk for continuous TCP transmission and proxy keepalive.
         $ok = true;
-        while (true) {
-            $slice = self::fread_raw($handle, $chunk);
+
+        while ($remaining > 0) {
+            $to_read = min($chunk, $remaining);
+            $slice = self::fread_raw($handle, $to_read);
             if ($slice === false) {
                 self::$last_stream_to_stdout_abort = 'read_failed';
                 $ok = false;
@@ -672,16 +765,19 @@ class Rmmigrate_Filesystem
             }
             // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Binary archive stream to stdout.
             echo $slice;
-            // Push each chunk to the client immediately instead of buffering the
-            // whole file in memory before sending.
-            if (function_exists('ob_get_level')) {
-                while (ob_get_level() > 0) {
-                    if (ob_end_flush() === false) {
-                        break;
-                    }
-                }
+            $remaining -= strlen($slice);
+
+            // Push each chunk to the client immediately instead of buffering the whole file in memory.
+            if (function_exists('ob_get_level') && ob_get_level() > 0) {
+                @ob_flush();
             }
             flush();
+
+            if (function_exists('set_time_limit')) {
+                // phpcs:ignore Squiz.PHP.DiscouragedFunctions.Discouraged -- Keep process alive during multi-hour downloads.
+                @set_time_limit(300);
+            }
+
             if (function_exists('connection_aborted') && connection_aborted() !== 0) {
                 self::$last_stream_to_stdout_abort = 'client_disconnect';
                 $ok = false;
