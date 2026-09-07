@@ -219,24 +219,28 @@ final class Rmmigrate_Backup_Service
         $deleted = 0;
         $skipped = 0;
         $warnings = array();
+        $deleted_job_ids = array();
+        $is_bulk = count($job_ids) > 1;
 
         foreach ($job_ids as $job_id) {
             $job = Rmmigrate_Job::get($job_id);
             if ($job === null) {
                 Rmmigrate_Job_Cleanup::purge_orphan_references($job_id);
                 $deleted++;
+                $deleted_job_ids[] = $job_id;
                 continue;
             }
             if (!Rmmigrate_Access::can_view_job($job)) {
                 $skipped++;
                 continue;
             }
-            $result = self::delete_job_record($job);
+            $result = self::delete_job_record($job, $is_bulk);
             if (!$result['ok']) {
                 $skipped++;
                 continue;
             }
             $deleted++;
+            $deleted_job_ids[] = $job_id;
             if ($result['warning'] !== '') {
                 $warnings[] = sprintf(
                     /* translators: 1: job ID, 2: warning message */
@@ -250,6 +254,28 @@ final class Rmmigrate_Backup_Service
         if ($deleted === 0) {
             // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Structured service exception payload.
             throw new Rmmigrate_Service_Exception(esc_html(__('No backups were deleted. Active or inaccessible jobs were skipped.', 'rosenheinrich-multisite-migrate')));
+        }
+
+        if (count($deleted_job_ids) > 1) {
+            $bulk_message = sprintf(
+                /* translators: %d: number of backups deleted */
+                _n('%d backup deleted.', '%d backups deleted.', count($deleted_job_ids), 'rosenheinrich-multisite-migrate'),
+                count($deleted_job_ids)
+            );
+            Rmmigrate_Logger::log_activity(
+                'backup',
+                $bulk_message,
+                'info',
+                array(
+                    'job_id'  => 0,
+                    'context' => array('job_ids' => $deleted_job_ids),
+                )
+            );
+        } elseif (count($deleted_job_ids) === 1 && $is_bulk) {
+            $single_job = Rmmigrate_Job::get($deleted_job_ids[0]);
+            if ($single_job !== null) {
+                $single_job->update_progress(array('bulk_delete' => false));
+            }
         }
 
         $message = sprintf(
@@ -333,7 +359,7 @@ final class Rmmigrate_Backup_Service
     /**
      * @return array{ok:bool,message:string,warning:string,queued?:bool}
      */
-    private static function delete_job_record(Rmmigrate_Job $job): array
+    private static function delete_job_record(Rmmigrate_Job $job, bool $is_bulk = false): array
     {
         if ($job->get_status() >= 0 && $job->get_status() < 100) {
             return array(
@@ -349,6 +375,9 @@ final class Rmmigrate_Backup_Service
         // runs via Job_Cleanup::purge_pending_deletes (cron / scheduled hook).
         // Do not schedule_cron_worker — it bails/unschedules on STATUS_DELETING.
         if ($job->get_status() === Rmmigrate_Job::STATUS_DELETING) {
+            if ($is_bulk) {
+                $job->update_progress(array('bulk_delete' => true));
+            }
             Rmmigrate_Job_Cleanup::schedule_purge();
             return array(
                 'ok'      => true,
@@ -358,7 +387,11 @@ final class Rmmigrate_Backup_Service
             );
         }
 
-        $job->update_progress(array('purge_failed' => false));
+        $patch = array('purge_failed' => false);
+        if ($is_bulk) {
+            $patch['bulk_delete'] = true;
+        }
+        $job->update_progress($patch);
         $job->set_status(Rmmigrate_Job::STATUS_DELETING);
 
         $message = sprintf(
@@ -366,7 +399,9 @@ final class Rmmigrate_Backup_Service
             __('Backup #%1$d queued for deletion.', 'rosenheinrich-multisite-migrate'),
             $job_id
         );
-        Rmmigrate_Logger::log_activity('backup', $message, 'info', array('job_id' => $job_id));
+        if (!$is_bulk) {
+            Rmmigrate_Logger::log_activity('backup', $message, 'info', array('job_id' => $job_id));
+        }
 
         Rmmigrate_Job_Cleanup::schedule_purge();
 

@@ -206,16 +206,19 @@ class Rmmigrate_Job_Cleanup
                 continue;
             }
             $job->save_fields(array('purge_delete_attempts' => 0));
-            Rmmigrate_Logger::log_activity(
-                'backup',
-                sprintf(
-                    /* translators: %d: job ID */
-                    __('Backup #%1$d deleted.', 'rosenheinrich-multisite-migrate'),
-                    $job_id
-                ),
-                'info',
-                array('job_id' => $job_id)
-            );
+            $is_bulk = !empty($job->get_progress()['bulk_delete']);
+            if (!$is_bulk) {
+                Rmmigrate_Logger::log_activity(
+                    'backup',
+                    sprintf(
+                        /* translators: %d: job ID */
+                        __('Backup #%1$d deleted.', 'rosenheinrich-multisite-migrate'),
+                        $job_id
+                    ),
+                    'info',
+                    array('job_id' => $job_id)
+                );
+            }
         }
 
         $more = Rmmigrate_Snap_DB::jobs_list_rows(array(
