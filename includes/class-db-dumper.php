@@ -104,6 +104,7 @@ class Rmmigrate_DB_Dumper
             $this->migrate_table_meta_from_progress();
             while ((microtime(true) - $start) < $budget_sec) {
                 Rmmigrate_Runner::refresh_sql_lock($this->job->get_id());
+                Rmmigrate_Runner::touch_worker_lease($this->job->get_id());
                 $remaining_budget = max(1, (int) floor($budget_sec - (microtime(true) - $start)));
                 $done = $this->run_php_inserts_batch($remaining_budget);
                 if ($done) {
@@ -506,6 +507,7 @@ class Rmmigrate_DB_Dumper
             }
             $this->sync_sql_bytes_written();
             Rmmigrate_Runner::refresh_sql_lock($this->job->get_id());
+            Rmmigrate_Runner::touch_worker_lease($this->job->get_id());
 
             if (count($batch) > 1) {
                 $next_batch = max(1, (int) floor(count($batch) / 2));
@@ -686,6 +688,7 @@ class Rmmigrate_DB_Dumper
             }
             $this->sync_sql_bytes_written();
             Rmmigrate_Runner::refresh_sql_lock($this->job->get_id());
+            Rmmigrate_Runner::touch_worker_lease($this->job->get_id());
             Rmmigrate_Logger::log(
                 sprintf('mysqldump schema slice budget reached for table %s; resuming next worker.', $table)
             );
@@ -892,6 +895,7 @@ class Rmmigrate_DB_Dumper
             $now = microtime(true);
             if ($now - $last_maintenance_at >= 2.0) {
                 Rmmigrate_Runner::refresh_sql_lock($this->job->get_id());
+                Rmmigrate_Runner::touch_worker_lease($this->job->get_id());
 
                 if ($this->job_is_cancelled()) {
                     if ($bytes_since_sync > 0) {
@@ -1173,6 +1177,7 @@ class Rmmigrate_DB_Dumper
 
         while ($create_index < $total && (microtime(true) - $start) < $budget_sec) {
             Rmmigrate_Runner::refresh_sql_lock($this->job->get_id());
+            Rmmigrate_Runner::touch_worker_lease($this->job->get_id());
             $table = $tables[$create_index];
             $quoted_table = Rmmigrate_Snap_DB::quote_identifier($table);
             $create = Rmmigrate_Snap_DB::get_show_create_table_row($table);

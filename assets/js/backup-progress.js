@@ -738,6 +738,14 @@
             }
             workerFailCount++;
             if (workerFailCount >= maxWorkerFails) {
+                var cancelId = jobId || parseInt($('#mm-active-job-banner').data('job-id') || 0, 10) || null;
+                if (cancelId && browserDrivesWorker() && rmmigrateAdmin && rmmigrateAdmin.ajaxUrl && rmmigrateAdmin.nonce) {
+                    $.post(rmmigrateAdmin.ajaxUrl, {
+                        action: 'rmmigrate_cancel',
+                        job_id: cancelId,
+                        nonce: rmmigrateAdmin.nonce
+                    });
+                }
                 finishJobUi(false, workerStoppedMessage(xhr), {
                     report: true,
                     action: 'rmmigrate_worker',

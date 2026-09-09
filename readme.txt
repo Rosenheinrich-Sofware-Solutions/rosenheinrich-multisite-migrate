@@ -4,7 +4,7 @@ Tags: multisite, site-migration, wordpress-migration, migrate-wordpress, clone-s
 Requires at least: 6.2
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.2.7
+Stable tag: 1.2.8
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -235,6 +235,12 @@ No. Backup, restore, and local migration are driven from the WordPress admin UI.
 Backup and restore run as background-style chunked jobs. They are designed not to hold a single request open for the entire archive build. See [shared hosting guidance](https://multisitemigrate.rosenheinrich.com/features/shared-hosting/?utm_source=wprepo&utm_medium=link&utm_content=shared_hosting&utm_campaign=multisite_migrate_free).
 
 == Changelog ==
+
+= 1.2.8 =
+* Improved backup worker reliability and lease refresh during long-running tasks.
+* Dynamic archive close budget and adaptive batch processing for large backups.
+* Immediate server-side job cancellation when worker connections are interrupted.
+* Automatic fallback to portable archive format when ZipArchive PHP extension is missing.
 
 = 1.2.7 =
 * 1-Click Quick Backup: Start a full backup instantly with safe default settings directly from Step 1.

@@ -206,6 +206,9 @@ class Rmmigrate_Hosting_Detection
         if ($mode === 'daf') {
             return 'daf';
         }
+        if (!class_exists('ZipArchive')) {
+            return 'daf';
+        }
         if ($max_exec === null) {
             $max_exec = (int) ini_get('max_execution_time');
         }

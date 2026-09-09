@@ -169,13 +169,20 @@ class Rmmigrate_Zip_Archiver
         $start = microtime(true);
         $max_file_bytes = Rmmigrate_Settings::get_max_archive_file_bytes();
         $skipped_large = (int) ($archive['skipped_large'] ?? 0);
-        $close_budget_sec = 5.0;
-        $add_budget_sec = max(0.0, (float) $budget_sec - $close_budget_sec);
+        $zip_size = Rmmigrate_Filesystem::exists($zip_path) ? (int) Rmmigrate_Filesystem::filesize($zip_path) : 0;
+        $close_budget_sec = min(10.0, max(5.0, 5.0 + ($zip_size / (100 * 1024 * 1024))));
+        $add_budget_sec = max(1.0, (float) $budget_sec - $close_budget_sec);
+        $max_add = self::MAX_ADD_FILES_PER_SLICE;
+        if ($zip_size > 500 * 1024 * 1024) {
+            $max_add = 250;
+        } elseif ($zip_size > 100 * 1024 * 1024) {
+            $max_add = 500;
+        }
         $processed = 0;
         $added = 0;
         while ($file_index < $total
             && ((microtime(true) - $start) < $add_budget_sec || $processed === 0)
-            && $added < self::MAX_ADD_FILES_PER_SLICE
+            && $added < $max_add
         ) {
             Rmmigrate_Runner::touch_worker_lease($this->job->get_id());
             $item = $queue[$file_index];
@@ -205,6 +212,7 @@ class Rmmigrate_Zip_Archiver
             $processed++;
         }
 
+        Rmmigrate_Runner::touch_worker_lease($this->job->get_id());
         if ($zip->close() !== true) {
             $status = $zip->getStatusString() ?: 'Unknown error';
             $error_code = (stripos($status, 'quota') !== false || stripos($status, 'space') !== false)
