@@ -1,6 +1,18 @@
 (function ($) {
     'use strict';
 
+    function isFreeAdminSurface() {
+        var $root = $('.multisite-migrate-wrap[data-mm-admin-surface]').first();
+        if (!$root.length) {
+            return true;
+        }
+        return $root.attr('data-mm-admin-surface') === 'free';
+    }
+
+    if (!isFreeAdminSurface()) {
+        return;
+    }
+
     var createStep = 1;
     var jobId = null;
     var running = false;
@@ -12,6 +24,8 @@
     var waitingForLock = false;
     var lastDisplayedPercent = 0;
     var statusTimer = null;
+    var statusPollFailCount = 0;
+    var inactiveOrphanPolls = 0;
     var STATUS_POLL_MS = 1500;
     var WAITING_STATUS_POLL_MS = 2500;
     var FAILSAFE_WORKER_MS = 30000;
@@ -21,6 +35,23 @@
 
     function t(key, fallback) {
         return rmmigrateAdminUI.i18n(key, fallback);
+    }
+
+    function progressFailureMessage(data, fallbackKey) {
+        fallbackKey = fallbackKey || 'backupFailed';
+        if (!data) {
+            return t(fallbackKey, 'Backup failed');
+        }
+        if (data.message) {
+            return data.message;
+        }
+        if (data.error === 'not_found') {
+            return t('jobNotFound', 'Job not found.');
+        }
+        if (data.error) {
+            return data.error;
+        }
+        return t(fallbackKey, 'Backup failed');
     }
 
     function getCreateWizard() {
@@ -457,6 +488,8 @@
         running = true;
         workerFailCount = 0;
         stuckPolls = 0;
+        statusPollFailCount = 0;
+        inactiveOrphanPolls = 0;
         lastPollKey = '';
         lastFailsafeAt = 0;
         clearStatusTimer();
@@ -575,14 +608,25 @@
             return true;
         }
         if (status !== null && status < 0) {
-            finishJobUi(false, data.error || data.message || t('backupFailed', 'Backup failed'));
+            finishJobUi(false, progressFailureMessage(data));
             return true;
         }
         // Worker terminal payload (has status/error). Bare {active:false} is not failure —
         // that also means "job not found yet" right after redirect from setup.
         if (data.done === true && (status !== null || data.error)) {
-            finishJobUi(false, data.error || data.message || t('backupFailed', 'Backup failed'));
+            finishJobUi(false, progressFailureMessage(data));
             return true;
+        }
+        if (jobId && data.active === false && status === null && !data.error && data.done !== true) {
+            inactiveOrphanPolls++;
+            if (inactiveOrphanPolls >= 15) {
+                finishJobUi(false, progressFailureMessage({ error: 'not_found' }));
+                return true;
+            }
+            return false;
+        }
+        if (inactiveOrphanPolls > 0) {
+            inactiveOrphanPolls = 0;
         }
         return false;
     }
@@ -652,14 +696,33 @@
                     return;
                 }
                 applyProgressFromData(response.data);
+                if (typeof callback === 'function') {
+                    callback();
+                }
+                return;
+            }
+            if (response && response.data && handleTerminalStatus(response.data)) {
+                return;
+            }
+            if (!response.success) {
+                finishJobUi(false, (response.data && response.data.message)
+                    ? response.data.message
+                    : t('workerFailed', 'Backup worker stopped responding. Refresh the page or cancel and try again.'), {
+                    report: true,
+                    action: 'rmmigrate_status',
+                    phase: 'status'
+                });
+                return;
             }
             if (typeof callback === 'function') {
                 callback();
             }
         }).fail(function () {
-            if (typeof callback === 'function') {
-                callback();
-            }
+            finishJobUi(false, t('workerFailed', 'Backup worker stopped responding. Refresh the page or cancel and try again.'), {
+                report: true,
+                action: 'rmmigrate_status',
+                phase: 'status'
+            });
         });
     }
 
@@ -675,7 +738,24 @@
             if (!running) {
                 return;
             }
-            if (response.success && response.data) {
+            if (!response.success) {
+                statusPollFailCount++;
+                var statusErr = (response.data && response.data.message)
+                    ? response.data.message
+                    : t('workerFailed', 'Backup worker stopped responding. Refresh the page or cancel and try again.');
+                if (statusPollFailCount >= maxWorkerFails) {
+                    finishJobUi(false, statusErr, {
+                        report: true,
+                        action: 'rmmigrate_status',
+                        phase: 'status'
+                    });
+                    return;
+                }
+                scheduleNextTick(true);
+                return;
+            }
+            statusPollFailCount = 0;
+            if (response.data) {
                 if (handleTerminalStatus(response.data)) {
                     return;
                 }
@@ -685,6 +765,15 @@
             scheduleNextTick(false);
         }).fail(function () {
             if (!running) {
+                return;
+            }
+            statusPollFailCount++;
+            if (statusPollFailCount >= maxWorkerFails) {
+                finishJobUi(false, t('workerFailed', 'Backup worker stopped responding. Refresh the page or cancel and try again.'), {
+                    report: true,
+                    action: 'rmmigrate_status',
+                    phase: 'transport'
+                });
                 return;
             }
             scheduleNextTick(true);
@@ -725,7 +814,7 @@
                 if (data.status === 100) {
                     finishJobUi(true, data.message);
                 } else {
-                    finishJobUi(false, data.error || data.message || t('backupFailed', 'Backup failed'));
+                    finishJobUi(false, progressFailureMessage(data));
                 }
                 return;
             }
@@ -781,6 +870,8 @@
         running = true;
         workerFailCount = 0;
         stuckPolls = 0;
+        statusPollFailCount = 0;
+        inactiveOrphanPolls = 0;
         lastFailsafeAt = 0;
         waitingForLock = false;
         var styleWidth = ($('#mm-active-job-fill').attr('style') || '').match(/width\s*:\s*([\d.]+)%/i);

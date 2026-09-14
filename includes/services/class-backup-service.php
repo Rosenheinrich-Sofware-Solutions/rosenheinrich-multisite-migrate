@@ -166,6 +166,16 @@ final class Rmmigrate_Backup_Service
     {
         $job = $job_id ? Rmmigrate_Job::get($job_id) : Rmmigrate_Job::get_active();
         if ($job === null) {
+            if ($job_id !== null && $job_id > 0) {
+                return array(
+                    'active'  => false,
+                    'status'  => Rmmigrate_Job::STATUS_ERROR,
+                    'percent' => 0,
+                    'message' => esc_html__('Job not found.', 'rosenheinrich-multisite-migrate'),
+                    'error'   => Rmmigrate_Service_Exception::CODE_NOT_FOUND,
+                );
+            }
+
             return array('active' => false);
         }
         Rmmigrate_Job_Preflight::assert_can_view_job($job);

@@ -299,6 +299,8 @@
 
     var pollTimer = null;
     var pollInFlight = false;
+    var pollFailCount = 0;
+    var pollFailLimit = 25;
     var detailInFlight = false;
     var logChunkInFlight = false;
 
@@ -351,6 +353,7 @@
             page: filters.page,
             per_page: filters.per_page
         }).done(function (resp) {
+            pollFailCount = 0;
             if (!resp || !resp.success || !resp.data || !Array.isArray(resp.data.entries)) {
                 return;
             }
@@ -364,6 +367,11 @@
         }).always(function () {
             pollInFlight = false;
         }).fail(function (xhr) {
+            pollFailCount++;
+            if (pollFailCount >= pollFailLimit) {
+                stopActivityPoll();
+                return;
+            }
             if (adminUI() && adminUI().reportTransportFail) {
                 adminUI().reportTransportFail(actionName('activityListAction', defaultListAction()), xhr, 'activity');
             }

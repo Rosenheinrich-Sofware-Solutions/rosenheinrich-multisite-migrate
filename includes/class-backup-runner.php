@@ -57,13 +57,31 @@ class Rmmigrate_Runner
     }
 
     /**
+     * Stop background workers when the job row is gone (deleted mid-run or stale UI poll).
+     *
+     * @return array{done:bool,status:int,percent:int,message:string,error:string}
+     */
+    private static function terminal_missing_job_response(int $job_id): array
+    {
+        Rmmigrate_Hosting_Detection::unschedule_cron_worker($job_id);
+
+        return array(
+            'done'    => true,
+            'status'  => Rmmigrate_Job::STATUS_ERROR,
+            'percent' => 0,
+            'message' => esc_html__('Job not found.', 'rosenheinrich-multisite-migrate'),
+            'error'   => Rmmigrate_Service_Exception::CODE_NOT_FOUND,
+        );
+    }
+
+    /**
      * @return array{done:bool,status:int,percent:int,message:string,error?:string,waiting?:bool,lease_fresh?:bool}
      */
     public static function process(int $job_id): array
     {
         $job = Rmmigrate_Job::get($job_id);
         if ($job === null) {
-            return array('done' => true, 'status' => -1, 'percent' => 0, 'message' => 'Job not found', 'error' => 'not_found');
+            return self::terminal_missing_job_response($job_id);
         }
 
         if (in_array($job->get_status(), array(
@@ -212,7 +230,7 @@ class Rmmigrate_Runner
 
         $job = Rmmigrate_Job::get($job_id);
         if ($job === null) {
-            return array('done' => true, 'status' => -1, 'percent' => 0, 'message' => 'Job lost');
+            return self::terminal_missing_job_response($job_id);
         }
 
         if ($job->get_status() === Rmmigrate_Job::STATUS_CANCELLED) {
@@ -250,6 +268,11 @@ class Rmmigrate_Runner
      */
     private static function schedule_continuation(int $job_id): void
     {
+        if ($job_id <= 0 || Rmmigrate_Job::get($job_id) === null) {
+            Rmmigrate_Hosting_Detection::unschedule_cron_worker($job_id);
+            return;
+        }
+
         $mode = Rmmigrate_Hosting_Detection::effective_kickoff_mode();
         if ($mode === 'browser' || $mode === 'cron') {
             Rmmigrate_Hosting_Detection::schedule_cron_worker($job_id);
@@ -808,6 +831,11 @@ class Rmmigrate_Runner
 
     public static function kick_worker(int $job_id): void
     {
+        if ($job_id <= 0 || Rmmigrate_Job::get($job_id) === null) {
+            Rmmigrate_Hosting_Detection::unschedule_cron_worker($job_id);
+            return;
+        }
+
         $mode = Rmmigrate_Hosting_Detection::effective_kickoff_mode();
         if ($mode === 'browser') {
             set_transient('rmmigrate_browser_kick_' . $job_id, 1, 300);
@@ -935,6 +963,11 @@ class Rmmigrate_Runner
 
     private static function kick_loopback(int $job_id): void
     {
+        if ($job_id <= 0 || Rmmigrate_Job::get($job_id) === null) {
+            Rmmigrate_Hosting_Detection::unschedule_cron_worker($job_id);
+            return;
+        }
+
         $url = admin_url('admin-ajax.php');
         $response = wp_remote_post($url, array(
             'timeout'   => 0.01,
@@ -1234,7 +1267,8 @@ class Rmmigrate_Runner
      */
     public static function schedule_continuation_backoff(int $job_id): void
     {
-        if ($job_id <= 0) {
+        if ($job_id <= 0 || Rmmigrate_Job::get($job_id) === null) {
+            Rmmigrate_Hosting_Detection::unschedule_cron_worker($job_id);
             return;
         }
         $key   = self::WAIT_BACKOFF_PREFIX . $job_id;

@@ -301,7 +301,7 @@ class Rmmigrate_Archive_Extractor
                 $headroom = (!$daf_slice_first_block && $timeouts > 0 && ($had_partial_at_start || $bytes_done > 0 || $entries > 0))
                     ? 2.0
                     : 0.0;
-                if ((microtime(true) - $start) + $headroom >= $budget_sec) {
+                if (!$daf_slice_first_block && (microtime(true) - $start) + $headroom >= $budget_sec) {
                     if ($out_fh !== null) {
                         $out_fh->close();
                     }

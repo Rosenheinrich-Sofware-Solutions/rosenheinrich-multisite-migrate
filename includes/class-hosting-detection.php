@@ -306,7 +306,11 @@ class Rmmigrate_Hosting_Detection
         }
 
         $job = Rmmigrate_Job::get($job_id);
-        if ($job !== null && in_array($job->get_status(), array(
+        if ($job === null) {
+            self::unschedule_cron_worker($job_id);
+            return;
+        }
+        if (in_array($job->get_status(), array(
             Rmmigrate_Job::STATUS_COMPLETE,
             Rmmigrate_Job::STATUS_ERROR,
             Rmmigrate_Job::STATUS_CANCELLED,

@@ -115,6 +115,10 @@ class Rmmigrate_Setup_Wizard
 
     public static function queue_post_activation_redirect(): void
     {
+        if (!self::should_queue_post_activation_redirect()) {
+            return;
+        }
+
         update_site_option(self::PENDING_REDIRECT_OPTION, '1');
     }
 

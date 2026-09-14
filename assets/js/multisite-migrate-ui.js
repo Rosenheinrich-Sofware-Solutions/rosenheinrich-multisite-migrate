@@ -432,6 +432,12 @@
         },
 
         pollJob: function (options) {
+            var $surface = $('.multisite-migrate-wrap[data-mm-admin-surface]').first();
+            if ($surface.length && $surface.attr('data-mm-admin-surface') !== 'free') {
+                return {
+                    stop: function () {}
+                };
+            }
             var jobId = options.jobId;
             var $fill = options.$fill;
             var $text = options.$text;
@@ -531,7 +537,18 @@
                         return;
                     }
                     // Terminal failure: ERROR=-1, CANCELLED=-2, DELETING=-3 (empty error must not onComplete).
-                    var terminalStatus = typeof d.status === 'number' ? d.status : null;
+                    var terminalStatus = typeof d.status === 'number' ? d.status : parseInt(d.status, 10);
+                    if (isNaN(terminalStatus)) {
+                        terminalStatus = null;
+                    }
+                    if (terminalStatus === 100) {
+                        update(100, d.message || rmmigrateAdminUI.i18n('complete', 'Complete'));
+                        stopped = true;
+                        if (typeof options.onComplete === 'function') {
+                            options.onComplete(d);
+                        }
+                        return;
+                    }
                     if (d.error || (terminalStatus !== null && terminalStatus < 0)) {
                         if (!d.error) {
                             d.error = terminalStatus === -2
@@ -539,10 +556,43 @@
                                 : (rmmigrateAdminUI.i18n('jobFailed', 'Failed'));
                         }
                         // One sticky toast only — callers must not toast again in onError.
-                        rmmigrateAdminUI.toast(d.error, 'error');
+                        rmmigrateAdminUI.toast(d.message || d.error, 'error');
                         if (typeof options.onError === 'function') {
                             options.onError(d);
                         }
+                        return;
+                    }
+                    // Orphan poll: inactive payload without terminal status (missing job row).
+                    if (!d.active && terminalStatus === null && !d.error) {
+                        pollFailures++;
+                        if (pollFailures >= pollFailureLimit) {
+                            var orphanPayload = {
+                                error: rmmigrateAdminUI.i18n('jobNotFound', 'Job not found.')
+                            };
+                            rmmigrateAdminUI.toast(orphanPayload.error, 'error');
+                            if (typeof options.onError === 'function') {
+                                options.onError(orphanPayload);
+                            }
+                            return;
+                        }
+                        pollTimer = setTimeout(poll, 2000);
+                        return;
+                    }
+                    var looksComplete = terminalStatus === 100 || d.done === true
+                        || (!d.active && (d.percent || 0) >= 100);
+                    if (!looksComplete) {
+                        pollFailures++;
+                        if (pollFailures >= pollFailureLimit) {
+                            var stallPayload = {
+                                error: rmmigrateAdminUI.i18n('jobNotFound', 'Job not found.')
+                            };
+                            rmmigrateAdminUI.toast(stallPayload.error, 'error');
+                            if (typeof options.onError === 'function') {
+                                options.onError(stallPayload);
+                            }
+                            return;
+                        }
+                        pollTimer = setTimeout(poll, 2000);
                         return;
                     }
                     update(100, d.message || 'Complete');
