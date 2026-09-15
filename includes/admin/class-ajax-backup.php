@@ -157,7 +157,7 @@ class Rmmigrate_Ajax_Backup
     {
         self::verify_request();
         Rmmigrate_Job::recover_stale_active();
-        $job_id = Rmmigrate_Request_Input::get_int('job_id');
+        $job_id = Rmmigrate_Request_Input::request_int('job_id');
         try {
             wp_send_json_success(Rmmigrate_Backup_Service::get_status($job_id ?: null));
         } catch (Rmmigrate_Service_Exception $e) {

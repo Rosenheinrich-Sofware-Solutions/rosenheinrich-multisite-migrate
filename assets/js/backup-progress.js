@@ -682,10 +682,11 @@
         statusTimer = setTimeout(pollJobStatusLoop, STATUS_POLL_MS);
     }
 
-    function pollJobStatus(callback) {
+    function pollJobStatus(callback, retryCount) {
         if (!jobId) {
             return;
         }
+        retryCount = retryCount || 0;
         $.post(rmmigrateAdmin.ajaxUrl, {
             action: 'rmmigrate_status',
             job_id: jobId,
@@ -705,6 +706,12 @@
                 return;
             }
             if (!response.success) {
+                if (retryCount < 3) {
+                    setTimeout(function () {
+                        pollJobStatus(callback, retryCount + 1);
+                    }, 1500);
+                    return;
+                }
                 finishJobUi(false, (response.data && response.data.message)
                     ? response.data.message
                     : t('workerFailed', 'Backup worker stopped responding. Refresh the page or cancel and try again.'), {
@@ -717,11 +724,21 @@
             if (typeof callback === 'function') {
                 callback();
             }
-        }).fail(function () {
+        }).fail(function (xhr) {
+            if (xhr && (xhr.status === 0 || xhr.statusText === 'abort')) {
+                return;
+            }
+            if (retryCount < maxWorkerFails) {
+                setTimeout(function () {
+                    pollJobStatus(callback, retryCount + 1);
+                }, Math.min(2000 * (retryCount + 1), 10000));
+                return;
+            }
             finishJobUi(false, t('workerFailed', 'Backup worker stopped responding. Refresh the page or cancel and try again.'), {
                 report: true,
                 action: 'rmmigrate_status',
-                phase: 'status'
+                httpStatus: xhr && xhr.status ? xhr.status : 0,
+                phase: 'transport'
             });
         });
     }

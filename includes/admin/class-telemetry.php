@@ -533,15 +533,16 @@ final class Rmmigrate_Telemetry
             return;
         }
         self::record_event('operation_error', array(
-            'operation'     => $operation,
-            'outcome'       => 'failed',
-            'error_code'    => ($service_code !== '' && $service_code !== 'unknown')
+            'operation'      => $operation,
+            'outcome'        => 'failed',
+            'error_code'     => ($service_code !== '' && $service_code !== 'unknown')
                 ? $service_code
                 : self::classify_error_category($clean_message),
-            'error_message' => $clean_message,
-            'error_phase'   => $phase,
-            'service_code'  => $service_code,
-            'job_id'        => max(0, $job_id),
+            'error_message'  => $clean_message,
+            'error_phase'    => $phase,
+            'service_code'   => $service_code,
+            'job_id'         => max(0, $job_id),
+            'plugin_version' => defined('RMMIGRATE_VERSION') ? (string) RMMIGRATE_VERSION : '',
         ));
     }
 
@@ -935,12 +936,13 @@ final class Rmmigrate_Telemetry
         $clean_message = self::sanitize_error_message($raw_error);
         $progress      = $job->get_progress();
         $props         = array(
-            'outcome'      => 'unknown',
-            'job_id'       => $job->get_id(),
-            'scope'        => sanitize_key((string) ($job->data['scope'] ?? '')),
-            'triggered_by' => sanitize_key((string) ($job->data['triggered_by'] ?? '')),
-            'destination'  => sanitize_key($job->get_destination()),
-            'job_type'     => sanitize_key($job->get_job_type()),
+            'outcome'        => 'unknown',
+            'job_id'         => $job->get_id(),
+            'scope'          => sanitize_key((string) ($job->data['scope'] ?? '')),
+            'triggered_by'   => sanitize_key((string) ($job->data['triggered_by'] ?? '')),
+            'destination'    => sanitize_key($job->get_destination()),
+            'job_type'       => sanitize_key($job->get_job_type()),
+            'plugin_version' => defined('RMMIGRATE_VERSION') ? (string) RMMIGRATE_VERSION : '',
         );
         $backup_profile = sanitize_key((string) ($job->data['backup_profile'] ?? ''));
         if ($backup_profile !== '') {

@@ -153,6 +153,9 @@
         },
 
         reportTransportFail: function (action, xhr, phase, jobId) {
+            if (xhr && (xhr.status === 0 || xhr.statusText === 'abort')) {
+                return '';
+            }
             var msg = rmmigrateAdminUI.ajaxErrorMessage(xhr);
             rmmigrateAdminUI.reportAjaxFailure({
                 action: action,

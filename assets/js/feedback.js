@@ -108,6 +108,9 @@
                     action: cfg.dismissAction || 'rmmigrate_feedback_dismiss',
                     nonce: rmmigrateAdmin.nonce
                 }).fail(function (xhr) {
+                    if (xhr && (xhr.status === 0 || xhr.statusText === 'abort')) {
+                        return;
+                    }
                     if (rmmigrateAdminUI.reportTransportFail) {
                         rmmigrateAdminUI.reportTransportFail(cfg.dismissAction || 'rmmigrate_feedback_dismiss', xhr, 'feedback');
                     }

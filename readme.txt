@@ -4,7 +4,7 @@ Tags: multisite, site-migration, wordpress-migration, migrate-wordpress, clone-s
 Requires at least: 6.2
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.2.9
+Stable tag: 1.2.10
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -236,6 +236,9 @@ Backup and restore run as background-style chunked jobs. They are designed not t
 
 == Changelog ==
 
+= 1.2.10 =
+* Bug fixes.
+
 = 1.2.9 =
 * Bug fixes.
 
@@ -364,6 +367,9 @@ Backup and restore run as background-style chunked jobs. They are designed not t
 * Initial public release of the free edition: multisite-aware backups, restore, local import/export, search & replace, AES-256 encryption and a health dashboard.
 
 == Upgrade Notice ==
+
+= 1.2.10 =
+Bug fixes. Recommended update.
 
 = 1.2.6 =
 Stops extra scheduled backups and activity-log spam; Network Admin times display in UTC. Recommended update.
