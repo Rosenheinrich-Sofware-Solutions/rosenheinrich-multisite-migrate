@@ -113,6 +113,18 @@
             if (xhr && xhr.status === 403) {
                 return rmmigrateAdminUI.i18n('sessionExpired', 'Your session expired. Refresh the page and try again.');
             }
+            if (xhr && xhr.status === 500) {
+                return rmmigrateAdminUI.i18n('serverError500', 'Server error (HTTP 500). Check your PHP memory limit and max_execution_time settings, or contact your hosting provider.');
+            }
+            if (xhr && xhr.status === 502) {
+                return rmmigrateAdminUI.i18n('badGateway502', 'Bad gateway (HTTP 502). Your server or proxy closed the connection prematurely. Try a smaller chunk size or contact your hosting provider.');
+            }
+            if (xhr && xhr.status === 504) {
+                return rmmigrateAdminUI.i18n('gatewayTimeout504', 'Gateway timeout (HTTP 504). The server took too long to respond. Increase your PHP max_execution_time or contact your hosting provider.');
+            }
+            if (xhr && xhr.status === 413) {
+                return rmmigrateAdminUI.i18n('requestTooLarge413', 'Request too large (HTTP 413). Your server rejected the upload. Try a smaller file or increase your server upload_max_filesize.');
+            }
             return fallback;
         },
 

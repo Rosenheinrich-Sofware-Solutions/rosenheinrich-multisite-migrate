@@ -45,6 +45,13 @@
         return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
     }
 
+    function isDownsizeableStatus(status) {
+        return status === 400 || status === 408 || status === 413 || status === 429 ||
+               status === 500 || status === 502 || status === 503 || status === 504 ||
+               status === 520 || status === 521 || status === 522 || status === 523 || status === 524 ||
+               status === 0;
+    }
+
     var importInFlight = false;
 
     function uploadLocalFile(file) {
@@ -177,8 +184,9 @@
             form.append('archive_passphrase', archivePassphrase);
             form.append('chunk', blob, file.name + '.part');
 
+            var chunkUrl = rmmigrateAdmin.ajaxUrl + (rmmigrateAdmin.ajaxUrl.indexOf('?') >= 0 ? '&' : '?') + 'action=rmmigrate_import_local_chunk';
             $.ajax({
-                url: rmmigrateAdmin.ajaxUrl,
+                url: chunkUrl,
                 method: 'POST',
                 data: form,
                 processData: false,
@@ -220,6 +228,32 @@
                     return xhr;
                 }
             }).done(function (res) {
+                if (typeof res === 'string') {
+                    try {
+                        res = JSON.parse(res);
+                    } catch (e) {
+                        // Non-JSON string response (e.g. "0" or "-1" from WordPress core)
+                    }
+                }
+
+                if (res === 0 || res === '0' || res === -1 || res === '-1') {
+                    stopVerifyInterval();
+                    if (chunkSize > 65536) {
+                        var currentUploadedZero = start;
+                        chunkSize = Math.max(65536, Math.floor(chunkSize / 2));
+                        totalChunks = Math.ceil(file.size / chunkSize);
+                        chunkIndex = Math.floor(currentUploadedZero / chunkSize);
+                        chunkRetries = 0;
+                        setTimeout(uploadChunk, 500);
+                        return;
+                    }
+                    if (chunkRetries < maxChunkRetries) {
+                        chunkRetries++;
+                        setTimeout(uploadChunk, 1000 * chunkRetries);
+                        return;
+                    }
+                }
+
                 if (!res || res.success === false) {
                     stopVerifyInterval();
                     if (res && res.data && res.data.downsize && chunkSize > 65536) {
@@ -268,25 +302,48 @@
 
             }).fail(function (xhr) {
                 stopVerifyInterval();
-                if (chunkSize > 65536 && xhr && (xhr.status === 413 || xhr.status === 500 || xhr.status === 502 || xhr.status === 504 || xhr.status === 0)) {
+                var resData = (xhr && xhr.responseJSON && xhr.responseJSON.data) ? xhr.responseJSON.data : null;
+                var shouldDownsize = false;
+
+                if (resData && resData.downsize) {
+                    shouldDownsize = true;
+                } else if (!resData && xhr && isDownsizeableStatus(xhr.status)) {
+                    shouldDownsize = true;
+                } else if (resData && xhr && (xhr.status === 413 || xhr.status === 408 || xhr.status === 500 || xhr.status === 502 || xhr.status === 504 || xhr.status === 524)) {
+                    shouldDownsize = true;
+                }
+
+                if (shouldDownsize && chunkSize > 65536) {
                     var currentUploaded = start;
                     chunkSize = Math.max(65536, Math.floor(chunkSize / 2));
                     totalChunks = Math.ceil(file.size / chunkSize);
                     chunkIndex = Math.floor(currentUploaded / chunkSize);
                     chunkRetries = 0;
-                    setTimeout(uploadChunk, 500);
+                    var delay = (xhr && xhr.status === 429) ? 2500 : 500;
+                    setTimeout(uploadChunk, delay);
+                    return;
+                }
+
+                if (xhr && (xhr.status === 400 || xhr.status === 403) && resData && !resData.downsize) {
+                    restoreUploadUI();
+                    var specificMsg = resData.message || (rmmigrateAdminUI.ajaxErrorMessage ? rmmigrateAdminUI.ajaxErrorMessage(xhr, t('importFailed', 'Import failed')) : t('importFailed', 'Import failed'));
+                    status.text(specificMsg);
+                    rmmigrateAdminUI.toast(specificMsg, 'error');
                     return;
                 }
 
                 if (chunkRetries < maxChunkRetries) {
                     chunkRetries++;
-                    setTimeout(uploadChunk, 1000 * chunkRetries);
+                    var backoff = (xhr && xhr.status === 429) ? 3000 * chunkRetries : 1000 * chunkRetries;
+                    setTimeout(uploadChunk, backoff);
                     return;
                 }
 
                 restoreUploadUI();
-                status.text(t('importFailed', 'Import failed'));
-                var chunkFailMsg = t('importFailed', 'Import failed');
+                var chunkFailMsg = rmmigrateAdminUI.ajaxErrorMessage
+                    ? rmmigrateAdminUI.ajaxErrorMessage(xhr, t('importFailed', 'Import failed'))
+                    : t('importFailed', 'Import failed');
+                status.text(chunkFailMsg);
                 if (rmmigrateAdminUI.reportAjaxFailure) {
                     rmmigrateAdminUI.reportAjaxFailure({
                         action: 'rmmigrate_import_local_chunk',
@@ -313,8 +370,9 @@
                 '0% (0 B / ' + formatBytes(file.size) + ')'
             );
 
+            var directUrl = rmmigrateAdmin.ajaxUrl + (rmmigrateAdmin.ajaxUrl.indexOf('?') >= 0 ? '&' : '?') + 'action=rmmigrate_import_local';
             $.ajax({
-                url: rmmigrateAdmin.ajaxUrl,
+                url: directUrl,
                 method: 'POST',
                 data: form,
                 processData: false,
@@ -354,11 +412,16 @@
                     return xhr;
                 }
             }).done(function (res) {
+                if (typeof res === 'string') {
+                    try {
+                        res = JSON.parse(res);
+                    } catch (e) {}
+                }
                 if (res && res.success && res.data && res.data.job_id) {
                     stopVerifyInterval();
                     setImportProgress(100, t('importComplete', 'Archive verified & registered successfully. Completing import…'), '100%');
                     redirectToDone(res.data.job_id);
-                } else if (res && res.data && res.data.downsize && chunkSize > 65536) {
+                } else if ((res && res.data && res.data.downsize) || res === 0 || res === '0' || res === -1) {
                     stopVerifyInterval();
                     chunkSize = Math.max(65536, Math.floor(chunkSize / 2));
                     totalChunks = Math.ceil(file.size / chunkSize);
@@ -373,8 +436,18 @@
                 }
             }).fail(function (xhr) {
                 stopVerifyInterval();
-                var retryable = xhr && (xhr.status === 413 || xhr.status === 500 || xhr.status === 502 || xhr.status === 504 || xhr.status === 0);
-                if (retryable && chunkSize > 65536) {
+                var resData = (xhr && xhr.responseJSON && xhr.responseJSON.data) ? xhr.responseJSON.data : null;
+                var shouldDownsize = false;
+
+                if (resData && resData.downsize) {
+                    shouldDownsize = true;
+                } else if (!resData && xhr && isDownsizeableStatus(xhr.status)) {
+                    shouldDownsize = true;
+                } else if (resData && xhr && (xhr.status === 413 || xhr.status === 408 || xhr.status === 500 || xhr.status === 502 || xhr.status === 504 || xhr.status === 524)) {
+                    shouldDownsize = true;
+                }
+
+                if (shouldDownsize && chunkSize > 65536) {
                     chunkSize = Math.max(65536, Math.floor(chunkSize / 2));
                     totalChunks = Math.ceil(file.size / chunkSize);
                     maxImportPercent = 0;

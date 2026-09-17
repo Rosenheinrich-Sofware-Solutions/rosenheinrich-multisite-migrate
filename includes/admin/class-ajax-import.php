@@ -17,6 +17,22 @@ class Rmmigrate_Ajax_Import
 
     public static function import_local(): void
     {
+        // phpcs:ignore WordPress.Security.NonceVerification.Missing -- Early limit detection before nonce verification.
+        if (empty($_POST) && empty($_FILES) && isset($_SERVER['CONTENT_LENGTH']) && (int) $_SERVER['CONTENT_LENGTH'] > 0) {
+            wp_send_json_error(array(
+                'message'  => __('Upload payload exceeds server PHP limits. Reducing chunk size…', 'rosenheinrich-multisite-migrate'),
+                'downsize' => true,
+            ), 400);
+        }
+
+        // phpcs:ignore WordPress.Security.NonceVerification.Missing -- Early limit detection before nonce verification.
+        if (isset($_FILES['archive']['error']) && in_array((int) $_FILES['archive']['error'], array(UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE), true)) {
+            wp_send_json_error(array(
+                'message'  => __('File exceeds server upload limit. Switching to chunked upload…', 'rosenheinrich-multisite-migrate'),
+                'downsize' => true,
+            ), 400);
+        }
+
         self::verify_request();
         self::assert_import_access();
 
@@ -74,32 +90,28 @@ class Rmmigrate_Ajax_Import
 
     public static function import_local_chunk(): void
     {
+        // phpcs:ignore WordPress.Security.NonceVerification.Missing -- Early limit detection before nonce verification.
+        if (empty($_POST) && empty($_FILES) && isset($_SERVER['CONTENT_LENGTH']) && (int) $_SERVER['CONTENT_LENGTH'] > 0) {
+            wp_send_json_error(array(
+                'message'  => __('Upload payload exceeds server PHP limits. Reducing chunk size…', 'rosenheinrich-multisite-migrate'),
+                'downsize' => true,
+            ), 400);
+        }
+
+        // phpcs:ignore WordPress.Security.NonceVerification.Missing -- Early limit detection before nonce verification.
+        if (isset($_FILES['chunk']['error']) && in_array((int) $_FILES['chunk']['error'], array(UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE), true)) {
+            wp_send_json_error(array(
+                'message'  => __('Chunk size exceeds server PHP limits. Reducing chunk size…', 'rosenheinrich-multisite-migrate'),
+                'downsize' => true,
+            ), 400);
+        }
+
         self::verify_request();
         self::assert_import_access();
 
         if (!defined('WP_IMPORTING')) {
             // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedConstantFound -- WordPress core import flag required during restore/import.
             define('WP_IMPORTING', true);
-        }
-
-        // phpcs:ignore WordPress.Security.NonceVerification.Missing -- Nonce verified via self::verify_request().
-        if (empty($_POST) && empty($_FILES) && isset($_SERVER['CONTENT_LENGTH']) && (int) $_SERVER['CONTENT_LENGTH'] > 0) {
-            wp_send_json_error(array(
-                'message'  => __('Upload payload exceeds server PHP limits. Reducing chunk size…', 'rosenheinrich-multisite-migrate'),
-                'downsize' => true,
-            ));
-        }
-
-        // phpcs:ignore WordPress.Security.NonceVerification.Missing -- Nonce verified via self::verify_request().
-        if (isset($_FILES['chunk']['error']) && $_FILES['chunk']['error'] !== UPLOAD_ERR_OK) {
-            // phpcs:ignore WordPress.Security.NonceVerification.Missing -- Nonce verified via self::verify_request().
-            $err_code = (int) $_FILES['chunk']['error'];
-            if ($err_code === UPLOAD_ERR_INI_SIZE || $err_code === UPLOAD_ERR_FORM_SIZE) {
-                wp_send_json_error(array(
-                    'message'  => __('Chunk size exceeds server PHP limits. Reducing chunk size…', 'rosenheinrich-multisite-migrate'),
-                    'downsize' => true,
-                ));
-            }
         }
 
         $upload_id = Rmmigrate_Request_Input::post_text('upload_id');
@@ -162,7 +174,13 @@ class Rmmigrate_Ajax_Import
             self::import_error(__('Empty chunk.', 'rosenheinrich-multisite-migrate'), $err_ctx);
         }
         if (strlen($chunk) > Rmmigrate_Extract_Engine::BLOCKING_SAFE_BYTES) {
-            self::import_error(__('Chunk exceeds maximum allowed size.', 'rosenheinrich-multisite-migrate'), $err_ctx);
+            $msg = __('Chunk exceeds maximum allowed size.', 'rosenheinrich-multisite-migrate');
+            self::log_operation_failure('import', $msg, 0, $err_ctx);
+            wp_send_json_error(array(
+                'message'  => $msg,
+                'downsize' => true,
+                'logged'   => true,
+            ), 400);
         }
 
         $append = self::append_import_chunk($part_path, $chunk, $chunk_index, $expected_offset);
@@ -239,9 +257,17 @@ class Rmmigrate_Ajax_Import
 
         clearstatcache(true, $part_path);
         $current_size = (int) @filesize($part_path);
-        if ($chunk_index > 0 && $expected_offset > 0 && $current_size !== $expected_offset) {
-            Rmmigrate_Filesystem::release_lock($fh);
-            return 'offset_mismatch';
+        if ($chunk_index > 0 && $expected_offset > 0) {
+            if ($current_size > $expected_offset) {
+                // Duplicate chunk retry or stale bytes after connection timeout: truncate back to expected_offset.
+                ftruncate($fh, $expected_offset);
+                fseek($fh, $expected_offset, SEEK_SET);
+                clearstatcache(true, $part_path);
+                $current_size = (int) @filesize($part_path);
+            } elseif ($current_size < $expected_offset) {
+                Rmmigrate_Filesystem::release_lock($fh);
+                return 'offset_mismatch';
+            }
         }
 
         $chunk_len = strlen($chunk);
