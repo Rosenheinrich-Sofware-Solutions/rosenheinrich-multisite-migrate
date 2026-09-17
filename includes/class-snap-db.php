@@ -590,15 +590,27 @@ class Rmmigrate_Snap_DB
         list($where, $params) = self::jobs_list_where($filters);
 
         $limit = max(1, min(200, (int) ($filters['limit'] ?? 100)));
+        $offset = max(0, (int) ($filters['offset'] ?? 0));
 
-        // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- Plugin jobs table; identifier via quote_identifier(); values use prepare().
-        $rows = $wpdb->get_results(
-            $wpdb->prepare(
-                'SELECT * FROM ' . $table . ' WHERE ' . implode(' AND ', $where) . ' ORDER BY id DESC LIMIT %d',
-                ...array_merge($params, array($limit))
-            ),
-            ARRAY_A
-        );
+        if ($offset > 0) {
+            // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- Plugin jobs table; identifier via quote_identifier(); values use prepare().
+            $rows = $wpdb->get_results(
+                $wpdb->prepare(
+                    'SELECT * FROM ' . $table . ' WHERE ' . implode(' AND ', $where) . ' ORDER BY id DESC LIMIT %d OFFSET %d',
+                    ...array_merge($params, array($limit, $offset))
+                ),
+                ARRAY_A
+            );
+        } else {
+            // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- Plugin jobs table; identifier via quote_identifier(); values use prepare().
+            $rows = $wpdb->get_results(
+                $wpdb->prepare(
+                    'SELECT * FROM ' . $table . ' WHERE ' . implode(' AND ', $where) . ' ORDER BY id DESC LIMIT %d',
+                    ...array_merge($params, array($limit))
+                ),
+                ARRAY_A
+            );
+        }
 
         return is_array($rows) ? $rows : array();
     }

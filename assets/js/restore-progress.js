@@ -46,6 +46,9 @@
     function reloadAfterRestoreSuccess(jobId) {
         try {
             var url = new URL(window.location.href);
+            if (url.searchParams.get('mm_restore_ok') === '1' && url.searchParams.get('job_id') === String(jobId)) {
+                return;
+            }
             url.searchParams.delete('create');
             url.searchParams.delete('mm_verify');
             if (jobId) {

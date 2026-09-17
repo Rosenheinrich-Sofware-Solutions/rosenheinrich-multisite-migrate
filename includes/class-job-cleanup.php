@@ -54,6 +54,7 @@ class Rmmigrate_Job_Cleanup
             return 0;
         }
 
+        global $wpdb;
         $changed = 0;
 
         foreach ($jobs as $job) {
@@ -61,7 +62,18 @@ class Rmmigrate_Job_Cleanup
                 continue;
             }
             $local_path = trim((string) ($job->data['local_path'] ?? ''));
+            // Free has no cloud remote_file_id column in normal installs; keep the check for parity.
+            $has_remote = !empty($job->data['remote_file_id']);
+            $job_id = $job->get_id();
+
             if ($local_path === '') {
+                // Completed backup with no local path and no remote copy has no utility; purge it.
+                if (!$has_remote) {
+                    self::purge($job);
+                    // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Plugin jobs table.
+                    $wpdb->delete(Rmmigrate_Job::table_name(), array('id' => $job_id), array('%d'));
+                    $changed++;
+                }
                 continue;
             }
 
@@ -70,30 +82,25 @@ class Rmmigrate_Job_Cleanup
                 continue;
             }
 
-            // Free has no cloud remote_file_id column in normal installs; keep the check for parity.
-            $has_remote = !empty($job->data['remote_file_id']);
-            $job_id = $job->get_id();
-
-            $job->save_fields(array('local_path' => ''));
             if ($has_remote) {
+                $job->save_fields(array('local_path' => ''));
                 $activity = sprintf(
                     /* translators: %d: job ID */
                     __('Local archive for backup #%1$d is missing; kept remote copy in the list.', 'rosenheinrich-multisite-migrate'),
                     $job_id
                 );
-            } else {
-                $activity = sprintf(
-                    /* translators: %d: job ID */
-                    __('Local archive for backup #%1$d is missing; kept job history without local file.', 'rosenheinrich-multisite-migrate'),
-                    $job_id
+                Rmmigrate_Logger::log_activity(
+                    'backup',
+                    $activity,
+                    'info',
+                    array('job_id' => $job_id)
                 );
+            } else {
+                // If the archive file was deleted and no remote copy exists, purge the dead record.
+                self::purge($job);
+                // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Plugin jobs table.
+                $wpdb->delete(Rmmigrate_Job::table_name(), array('id' => $job_id), array('%d'));
             }
-            Rmmigrate_Logger::log_activity(
-                'backup',
-                $activity,
-                'info',
-                array('job_id' => $job_id)
-            );
             $changed++;
         }
 

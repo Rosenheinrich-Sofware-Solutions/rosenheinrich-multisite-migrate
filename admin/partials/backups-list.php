@@ -34,6 +34,22 @@ $rmmigrate_date_to = Rmmigrate_Activity_Log::normalize_date_filter(
 );
 $rmmigrate_date_filter_active = ($rmmigrate_date_from !== '' || $rmmigrate_date_to !== '');
 $rmmigrate_list_page_slug = $rmmigrate_current_page ?? 'multisite-migrate-archives';
+$rmmigrate_backups_page = $rmmigrate_backups_page ?? max(1, Rmmigrate_Request_Input::get_int('paged', 1));
+$rmmigrate_backups_total_pages = $rmmigrate_backups_total_pages ?? 1;
+$rmmigrate_pagination_base = $rmmigrate_pagination_base ?? add_query_arg(
+    array_filter(
+        array(
+            'page'      => $rmmigrate_list_page_slug,
+            'filter'    => $rmmigrate_filter !== 'all' ? $rmmigrate_filter : null,
+            'date_from' => $rmmigrate_date_from !== '' ? $rmmigrate_date_from : null,
+            'date_to'   => $rmmigrate_date_to !== '' ? $rmmigrate_date_to : null,
+        ),
+        static function ($val) {
+            return $val !== null;
+        }
+    ),
+    $rmmigrate_is_network ? network_admin_url('admin.php') : admin_url('admin.php')
+);
 
 ?>
 
@@ -295,13 +311,8 @@ $rmmigrate_list_page_slug = $rmmigrate_current_page ?? 'multisite-migrate-archiv
                         echo '<span class="dashicons dashicons-database" aria-hidden="true"></span>';
                         echo '<span class="mm-local-badge__text">' . esc_html__('On this server', 'rosenheinrich-multisite-migrate') . '</span>';
                         echo '</span>';
-                    } elseif ($rmmigrate_job->get_status() === Rmmigrate_Job::STATUS_CANCELLED) {
-                        echo '<span class="mm-local-none" aria-hidden="true">&mdash;</span>';
                     } else {
-                        echo '<span class="mm-local-none" title="' . esc_attr__('Not stored locally', 'rosenheinrich-multisite-migrate') . '">';
-                        echo '<span class="dashicons dashicons-minus" aria-hidden="true"></span>';
-                        echo '<span class="mm-local-badge__text">' . esc_html__('Not local', 'rosenheinrich-multisite-migrate') . '</span>';
-                        echo '</span>';
+                        echo '<span class="mm-local-none" aria-hidden="true">&mdash;</span>';
                     }
                     ?></td>
 
@@ -346,6 +357,27 @@ $rmmigrate_list_page_slug = $rmmigrate_current_page ?? 'multisite-migrate-archiv
 
 </table>
 </div>
+
+<?php if (!empty($rmmigrate_backups_total_pages) && $rmmigrate_backups_total_pages > 1) : ?>
+    <div class="tablenav bottom mm-backups-pagination">
+        <div class="tablenav-pages">
+            <?php
+            echo wp_kses_post(
+                paginate_links(
+                    array(
+                        'base'      => add_query_arg('paged', '%#%', $rmmigrate_pagination_base),
+                        'format'    => '',
+                        'current'   => $rmmigrate_backups_page,
+                        'total'     => $rmmigrate_backups_total_pages,
+                        'prev_text' => '&laquo;',
+                        'next_text' => '&raquo;',
+                    )
+                )
+            );
+            ?>
+        </div>
+    </div>
+<?php endif; ?>
 
 <?php endif; ?>
 

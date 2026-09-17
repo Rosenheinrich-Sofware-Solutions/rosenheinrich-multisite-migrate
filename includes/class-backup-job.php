@@ -799,6 +799,14 @@ class Rmmigrate_Job
     }
 
     /**
+     * @param array<string,mixed> $filters
+     */
+    public static function count_jobs(array $filters = array()): int
+    {
+        return Rmmigrate_Snap_DB::jobs_count_rows($filters);
+    }
+
+    /**
      * Ensure a specific job appears in a list (e.g. deep-link from error banner).
      *
      * @param self[] $jobs

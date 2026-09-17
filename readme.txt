@@ -4,7 +4,7 @@ Tags: multisite, site-migration, wordpress-migration, migrate-wordpress, clone-s
 Requires at least: 6.2
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.2.11
+Stable tag: 1.2.12
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -236,6 +236,9 @@ Backup and restore run as background-style chunked jobs. They are designed not t
 
 == Changelog ==
 
+= 1.2.12 =
+* Automatic cleanup of deleted backup records and improved archive table display.
+
 = 1.2.11 =
 * Improved: Import error messages now show HTTP-status-specific guidance (500, 502, 504, 413) instead of a generic "Import failed", helping users troubleshoot server-side issues.
 * Fixed: Chunk uploads that exceed the server limit now auto-downsize and retry instead of failing with "Import failed".
@@ -371,6 +374,9 @@ Backup and restore run as background-style chunked jobs. They are designed not t
 * Initial public release of the free edition: multisite-aware backups, restore, local import/export, search & replace, AES-256 encryption and a health dashboard.
 
 == Upgrade Notice ==
+
+= 1.2.12 =
+Automatic cleanup of deleted backup records and improved table display. Recommended update.
 
 = 1.2.11 =
 Improved import error messages with actionable server-error guidance. Recommended update.

@@ -307,6 +307,26 @@ class Rmmigrate_Admin_Router
             }
             if ($rmmigrate_page_slug === 'multisite-migrate-archives') {
                 Rmmigrate_Job_Cleanup::reconcile_missing_local_archives();
+                $rmmigrate_backups_per_page = 25;
+                $rmmigrate_backups_total = Rmmigrate_Job::count_jobs($rmmigrate_args);
+                $rmmigrate_backups_total_pages = max(1, (int) ceil($rmmigrate_backups_total / $rmmigrate_backups_per_page));
+                $rmmigrate_backups_page = max(1, min(Rmmigrate_Request_Input::get_int('paged', 1), $rmmigrate_backups_total_pages));
+                $rmmigrate_args['limit'] = $rmmigrate_backups_per_page;
+                $rmmigrate_args['offset'] = ($rmmigrate_backups_page - 1) * $rmmigrate_backups_per_page;
+                $rmmigrate_pagination_base = add_query_arg(
+                    array_filter(
+                        array(
+                            'page'      => $rmmigrate_page_slug,
+                            'filter'    => $rmmigrate_filter !== 'all' ? $rmmigrate_filter : null,
+                            'date_from' => $rmmigrate_date_from !== '' ? $rmmigrate_date_from : null,
+                            'date_to'   => $rmmigrate_date_to !== '' ? $rmmigrate_date_to : null,
+                        ),
+                        static function ($val) {
+                            return $val !== null;
+                        }
+                    ),
+                    $rmmigrate_is_network ? network_admin_url('admin.php') : admin_url('admin.php')
+                );
             }
             $rmmigrate_jobs = Rmmigrate_Job::list_jobs($rmmigrate_args);
             if ($rmmigrate_highlight_job_id === 0 && $rmmigrate_filter === 'failed' && !empty($rmmigrate_last_error['job_id'])) {

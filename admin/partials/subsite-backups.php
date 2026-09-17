@@ -8,9 +8,20 @@ $rmmigrate_archives_embedded = false;
 $rmmigrate_archives_tab = 'all';
 $rmmigrate_filter = 'all';
 $rmmigrate_args = array(
-    'limit'   => 50,
     'scope'   => Rmmigrate_Multisite_Scope::SCOPE_SUBSITE,
     'blog_id' => get_current_blog_id(),
+);
+$rmmigrate_backups_per_page = 25;
+$rmmigrate_backups_total = Rmmigrate_Job::count_jobs($rmmigrate_args);
+$rmmigrate_backups_total_pages = max(1, (int) ceil($rmmigrate_backups_total / $rmmigrate_backups_per_page));
+$rmmigrate_backups_page = max(1, min(Rmmigrate_Request_Input::get_int('paged', 1), $rmmigrate_backups_total_pages));
+$rmmigrate_args['limit'] = $rmmigrate_backups_per_page;
+$rmmigrate_args['offset'] = ($rmmigrate_backups_page - 1) * $rmmigrate_backups_per_page;
+$rmmigrate_pagination_base = add_query_arg(
+    array(
+        'page' => 'multisite-migrate-subsite-backups',
+    ),
+    admin_url('admin.php')
 );
 $rmmigrate_jobs = Rmmigrate_Job::list_jobs($rmmigrate_args);
 $rmmigrate_highlight_job_id = $rmmigrate_highlight_job_id ?? Rmmigrate_Request_Input::get_int('job_id');

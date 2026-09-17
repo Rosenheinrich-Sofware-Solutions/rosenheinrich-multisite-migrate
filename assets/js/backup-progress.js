@@ -180,12 +180,34 @@
         return labels.join('; ');
     }
 
-    function isCreateBlockedByActiveJob() {
-        if (running) {
-            return true;
+    function isVerifySuccessPage() {
+        try {
+            var params = new URLSearchParams(window.location.search);
+            return params.get('mm_verify') === '1';
+        } catch (e) {
+            return false;
         }
+    }
+
+    function hasLiveActiveJobBanner() {
         var $banner = $('#mm-active-job-banner');
         return $banner.length > 0 && !$banner.hasClass('mm-finished-job');
+    }
+
+    function serverReportsActiveJob() {
+        var rmmigrateAdmin = window.rmmigrateAdmin || {};
+        return !!(rmmigrateAdmin.activeJob && rmmigrateAdmin.activeJob.id);
+    }
+
+    function isCreateBlockedByActiveJob() {
+        var rmmigrateAdmin = window.rmmigrateAdmin || {};
+        if (running && !hasLiveActiveJobBanner() && !serverReportsActiveJob()) {
+            running = false;
+        }
+        if (running) {
+            return hasLiveActiveJobBanner();
+        }
+        return hasLiveActiveJobBanner() || serverReportsActiveJob();
     }
 
     function createBlockedMessage() {
@@ -415,6 +437,9 @@
     function reloadAfterBackupSuccess(jobId) {
         try {
             var url = new URL(window.location.href);
+            if (url.searchParams.get('mm_verify') === '1' && url.searchParams.get('job_id') === String(jobId)) {
+                return;
+            }
             url.searchParams.delete('create');
             if (jobId) {
                 url.searchParams.set('job_id', String(jobId));
@@ -559,6 +584,9 @@
         $('#multisite-migrate-start, #mm-quick-start-btn').prop('disabled', false);
         $('#mm-active-job-banner').addClass('mm-finished-job').css('position', 'relative');
         if (ok) {
+            if (isVerifySuccessPage()) {
+                return;
+            }
             lastDisplayedPercent = 100;
             updateProgress(100, message || t('backupComplete', 'Backup complete'));
             finishListJobStatus(true);
@@ -876,6 +904,9 @@
     }
 
     function resumeBackupProgress(forcedJobId) {
+        if (isVerifySuccessPage()) {
+            return false;
+        }
         var id = forcedJobId || (rmmigrateAdmin.activeJob && rmmigrateAdmin.activeJob.id) || getJobIdFromUrl();
         if (!id) {
             return false;
@@ -1191,7 +1222,9 @@
 
     updateBulkDeleteButton();
 
-    resumeActiveJob();
+    if (!isVerifySuccessPage()) {
+        resumeActiveJob();
+    }
 
     if (rmmigrateAdmin.activeJob && rmmigrateAdmin.activeJob.workerStaleWarning && rmmigrateAdminUI.syncWorkerStaleBanner) {
         rmmigrateAdminUI.syncWorkerStaleBanner({ worker_stale_hint: true });
@@ -1207,7 +1240,7 @@
                 window.scrollTo(0, 0);
             }, 0);
         }
-        if (params.get('job_id') && !running) {
+        if (!isVerifySuccessPage() && params.get('job_id') && !running) {
             resumeBackupProgress(parseInt(params.get('job_id'), 10) || null);
         }
     } catch (e) {

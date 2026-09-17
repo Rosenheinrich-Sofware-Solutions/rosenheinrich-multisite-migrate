@@ -355,6 +355,7 @@ final class Rmmigrate_Telemetry
                 'install_id'     => $install_id,
                 'site_hash'      => self::site_hash(),
                 'product_build'  => self::product_build(),
+                'plugin_version' => defined('RMMIGRATE_VERSION') ? (string) RMMIGRATE_VERSION : '',
                 'events'         => $events,
             )),
         ));
