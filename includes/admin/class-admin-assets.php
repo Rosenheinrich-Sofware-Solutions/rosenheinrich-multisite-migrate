@@ -294,6 +294,7 @@ class Rmmigrate_Admin_Assets
         $safe_max = $server_max > 0
             ? min((int) max(131072, (int) floor($server_max / 2)), $server_max)
             : 524288;
+        $max_safe_chunk = class_exists('Rmmigrate_Extract_Engine') ? Rmmigrate_Extract_Engine::BLOCKING_SAFE_BYTES : 20971520;
 
         $localize = array(
             'ajaxUrl'             => admin_url('admin-ajax.php'),
@@ -311,8 +312,9 @@ class Rmmigrate_Admin_Assets
             'confirmDeleteBulk' => __('Delete the selected backups?', 'rosenheinrich-multisite-migrate'),
             'deletingBackup'  => __('Deleting…', 'rosenheinrich-multisite-migrate'),
             'importChunkSize' => (int) min(
-                (int) ($settings['import_chunk_size'] ?? 524288),
-                $safe_max
+                (int) ($settings['import_chunk_size'] ?? 2097152),
+                $safe_max,
+                $max_safe_chunk
             ),
             'topologyDestination' => array(
                 'is_multisite'          => is_multisite(),

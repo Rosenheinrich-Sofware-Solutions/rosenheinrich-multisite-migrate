@@ -345,7 +345,8 @@ class Rmmigrate_Settings
             // archive_mode + include_wp_core: set only via backup wizard (last-used).
             $merged = array_merge($merged, self::archive_settings_from_post($post, $current));
         } elseif ($section === 'import') {
-            $merged['import_chunk_size'] = max(1048576, (int) ($post['import_chunk_size'] ?? 2097152));
+            $max_chunk_cap = class_exists('Rmmigrate_Extract_Engine') ? Rmmigrate_Extract_Engine::BLOCKING_SAFE_BYTES : 20971520;
+            $merged['import_chunk_size'] = max(1048576, min($max_chunk_cap, (int) ($post['import_chunk_size'] ?? 2097152)));
             $merged['sql_import_chunk_bytes'] = max(262144, min(4194304, (int) ($post['sql_import_chunk_bytes'] ?? ($current['sql_import_chunk_bytes'] ?? 1048576))));
         } elseif ($section === 'database') {
             // exclude_log_tables: set only via backup wizard (last-used).

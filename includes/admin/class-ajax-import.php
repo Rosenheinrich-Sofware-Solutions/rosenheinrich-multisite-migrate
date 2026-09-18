@@ -175,11 +175,10 @@ class Rmmigrate_Ajax_Import
         }
         if (strlen($chunk) > Rmmigrate_Extract_Engine::BLOCKING_SAFE_BYTES) {
             $msg = __('Chunk exceeds maximum allowed size.', 'rosenheinrich-multisite-migrate');
-            self::log_operation_failure('import', $msg, 0, $err_ctx);
             wp_send_json_error(array(
                 'message'  => $msg,
                 'downsize' => true,
-                'logged'   => true,
+                'logged'   => false,
             ), 400);
         }
 

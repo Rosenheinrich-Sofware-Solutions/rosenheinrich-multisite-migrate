@@ -2,6 +2,13 @@
 
     'use strict';
 
+    var MAX_SAFE_CHUNK_BYTES = 20971520; // 20 MB ceiling (matching BLOCKING_SAFE_BYTES)
+
+    function downsizeChunkSize(current) {
+        var halved = Math.max(65536, Math.floor(current / 2));
+        return halved >= MAX_SAFE_CHUNK_BYTES ? Math.floor(MAX_SAFE_CHUNK_BYTES / 2) : halved;
+    }
+
     function t(key, fallback) {
         return rmmigrateAdminUI.i18n(key, fallback);
     }
@@ -62,7 +69,7 @@
         var progressWrap = $('#mm-import-chunk-progress');
         var dropzone = $('#mm-import-dropzone');
         var leadText = $('.mm-import-source-lead');
-        var chunkSize = rmmigrateAdmin.importChunkSize || 1048576;
+        var chunkSize = Math.min(rmmigrateAdmin.importChunkSize || 1048576, MAX_SAFE_CHUNK_BYTES);
         var totalChunks = Math.max(1, Math.ceil(file.size / chunkSize));
         var uploadId = 'u' + Date.now();
         var chunkIndex = 0;
@@ -169,7 +176,7 @@
                 rmmigrateAdminUI.toast(t('importFailed', 'Import failed'), 'error');
                 return;
             }
-            var end = Math.min(start + chunkSize, file.size);
+            var end = Math.min(start + Math.min(chunkSize, MAX_SAFE_CHUNK_BYTES), file.size);
             var blob = file.slice(start, end);
             var isFinalChunk = (chunkIndex + 1 >= totalChunks) || (end >= file.size);
 
@@ -240,7 +247,7 @@
                     stopVerifyInterval();
                     if (chunkSize > 65536) {
                         var currentUploadedZero = start;
-                        chunkSize = Math.max(65536, Math.floor(chunkSize / 2));
+                        chunkSize = downsizeChunkSize(chunkSize);
                         totalChunks = Math.ceil(file.size / chunkSize);
                         chunkIndex = Math.floor(currentUploadedZero / chunkSize);
                         chunkRetries = 0;
@@ -258,7 +265,7 @@
                     stopVerifyInterval();
                     if (res && res.data && res.data.downsize && chunkSize > 65536) {
                         var currentUploaded = start;
-                        chunkSize = Math.max(65536, Math.floor(chunkSize / 2));
+                        chunkSize = downsizeChunkSize(chunkSize);
                         totalChunks = Math.ceil(file.size / chunkSize);
                         chunkIndex = Math.floor(currentUploaded / chunkSize);
                         chunkRetries = 0;
@@ -315,7 +322,7 @@
 
                 if (shouldDownsize && chunkSize > 65536) {
                     var currentUploaded = start;
-                    chunkSize = Math.max(65536, Math.floor(chunkSize / 2));
+                    chunkSize = downsizeChunkSize(chunkSize);
                     totalChunks = Math.ceil(file.size / chunkSize);
                     chunkIndex = Math.floor(currentUploaded / chunkSize);
                     chunkRetries = 0;
@@ -423,7 +430,7 @@
                     redirectToDone(res.data.job_id);
                 } else if ((res && res.data && res.data.downsize) || res === 0 || res === '0' || res === -1) {
                     stopVerifyInterval();
-                    chunkSize = Math.max(65536, Math.floor(chunkSize / 2));
+                    chunkSize = downsizeChunkSize(chunkSize);
                     totalChunks = Math.ceil(file.size / chunkSize);
                     maxImportPercent = 0;
                     chunkIndex = 0;
@@ -448,7 +455,7 @@
                 }
 
                 if (shouldDownsize && chunkSize > 65536) {
-                    chunkSize = Math.max(65536, Math.floor(chunkSize / 2));
+                    chunkSize = downsizeChunkSize(chunkSize);
                     totalChunks = Math.ceil(file.size / chunkSize);
                     maxImportPercent = 0;
                     chunkIndex = 0;
