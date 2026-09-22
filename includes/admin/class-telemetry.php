@@ -526,6 +526,9 @@ final class Rmmigrate_Telemetry
         if ($service_code === '' && $clean_message !== '') {
             $service_code = self::classify_error_category($clean_message);
         }
+        if ($service_code === Rmmigrate_Error_Codes::ACTIVE_JOB_CONFLICT) {
+            return;
+        }
         $phase = sanitize_key((string) ($context['phase'] ?? ''));
         if (self::should_skip_operation_error($job_id, $phase)) {
             return;

@@ -213,6 +213,8 @@ class Rmmigrate_Admin_Save
             exit;
         }
         Rmmigrate_Settings::save($merged);
+        Rmmigrate_Settings::clear_cache();
+        Rmmigrate_Schedules::heal_mismatched_next_runs();
         $url = Rmmigrate_Admin_Router::admin_url(
             'multisite-migrate-schedule',
             array('updated' => '1'),

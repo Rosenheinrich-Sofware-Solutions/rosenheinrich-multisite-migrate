@@ -595,6 +595,7 @@ class Rmmigrate_Snap_DB
         if ($offset > 0) {
             // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- Plugin jobs table; identifier via quote_identifier(); values use prepare().
             $rows = $wpdb->get_results(
+                // phpcs:ignore WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Dynamic WHERE params + LIMIT/OFFSET merged into variadic prepare.
                 $wpdb->prepare(
                     'SELECT * FROM ' . $table . ' WHERE ' . implode(' AND ', $where) . ' ORDER BY id DESC LIMIT %d OFFSET %d',
                     ...array_merge($params, array($limit, $offset))

@@ -123,13 +123,10 @@
             nonce: rmmigrateAdmin.nonce,
             allow: '1'
         }).then(function (res) {
-            if (!res || !res.success || !res.data) {
-                return fallbackSubscribe();
-            }
-            var data = res.data;
-            if (data.skipped) {
+            if (!res || !res.success || !res.data || !res.data.subscribeUrl) {
                 return $.Deferred().resolve().promise();
             }
+            var data = res.data;
             return postSubscribe(data.subscribeUrl, data.fields).then(function () {
                 return $.post(rmmigrateAdmin.ajaxUrl, {
                     action: 'rmmigrate_setup_wizard_newsletter_confirm',
@@ -138,8 +135,6 @@
             }).catch(function () {
                 return fallbackSubscribe();
             });
-        }).catch(function () {
-            return fallbackSubscribe();
         });
     }
 
@@ -189,15 +184,19 @@
         e.preventDefault();
         var target = archivesUrlFromButton(this);
         var $card = $('.mm-setup-optin');
-        var $btn = $(this);
-        if (!$card.hasClass('is-done') && !finishOptInInFlight) {
-            resolveFinishOptIn({ redirecting: true });
+        var optIn = ($card.hasClass('is-done') || finishOptInInFlight)
+            ? $.Deferred().resolve().promise()
+            : resolveFinishOptIn({ redirecting: true });
+        var left = false;
+        function leave() {
+            if (left) {
+                return;
+            }
+            left = true;
+            completeAndGo(target);
         }
-        if (!$btn.prop('disabled')) {
-            $card.addClass('is-submitting');
-            $btn.prop('disabled', true).attr('aria-busy', 'true');
-        }
-        completeAndGo(target);
+        optIn.always(leave);
+        window.setTimeout(leave, 16000);
     });
 
 }(jQuery));

@@ -482,16 +482,11 @@ class Rmmigrate_Setup_Wizard
 
         $state = self::get_state();
         if (empty($state['newsletter_pending'])) {
-            self::send_ajax_error(
-                esc_html__(
-                    'Newsletter opt-in is required before subscribing.',
-                    'rosenheinrich-multisite-migrate'
-                ),
-                403,
-                'system',
-                0,
-                array('phase' => 'setup_wizard_newsletter_fallback')
-            );
+            // Allow never stored consent (redirect aborted that request). Do not subscribe and do not log an operation error.
+            wp_send_json_success(array(
+                'ok'      => true,
+                'skipped' => true,
+            ));
         }
 
         $fields = self::newsletter_payload();

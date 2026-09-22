@@ -136,7 +136,12 @@
             }
             var action = String(opts.action || '').trim();
             var message = String(opts.message || '').trim();
+            var httpStatus = parseInt(opts.httpStatus, 10) || 0;
+            var phase = opts.phase || 'transport';
             if (action === '' || message === '' || action.indexOf('rmmigrate_') !== 0) {
+                return;
+            }
+            if (httpStatus < 1 && (phase === 'start' || phase === 'response' || phase === 'transport')) {
                 return;
             }
             $.post(admin.ajaxUrl, {
@@ -145,8 +150,8 @@
                 ajax_action: action,
                 message: message,
                 job_id: parseInt(opts.jobId, 10) || 0,
-                http_status: parseInt(opts.httpStatus, 10) || 0,
-                phase: opts.phase || 'transport'
+                http_status: httpStatus,
+                phase: phase
             });
         },
 

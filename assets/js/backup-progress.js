@@ -1043,9 +1043,6 @@
                 $btn.prop('disabled', false);
                 $('#mm-quick-start-btn').prop('disabled', false);
                 var startFailMsg = response.data && response.data.message ? response.data.message : t('failedToStartBackup', 'Failed to start backup');
-                if (rmmigrateAdminUI.reportJsonFail) {
-                    rmmigrateAdminUI.reportJsonFail('rmmigrate_start', startFailMsg, 'start');
-                }
                 rmmigrateAdminUI.toast(startFailMsg, 'error');
                 return;
             }
@@ -1057,14 +1054,14 @@
             running = false;
             $btn.prop('disabled', false);
             $('#mm-quick-start-btn').prop('disabled', false);
-            var msg = rmmigrateAdminUI.ajaxErrorMessage(xhr, t('requestFailed', 'Request failed'));
-            if (rmmigrateAdminUI.reportAjaxFailure) {
-                rmmigrateAdminUI.reportAjaxFailure({
-                    action: 'rmmigrate_start',
-                    message: msg,
-                    httpStatus: xhr && xhr.status ? xhr.status : 0,
-                    phase: 'start'
-                });
+            var msg = (xhr && xhr.responseJSON && xhr.responseJSON.data && xhr.responseJSON.data.message)
+                ? xhr.responseJSON.data.message
+                : '';
+            if (!msg && rmmigrateAdminUI.reportTransportFail) {
+                msg = rmmigrateAdminUI.reportTransportFail('rmmigrate_start', xhr, 'start', 0);
+            }
+            if (!msg) {
+                msg = rmmigrateAdminUI.ajaxErrorMessage(xhr, t('requestFailed', 'Request failed'));
             }
             rmmigrateAdminUI.toast(msg, 'error');
         });

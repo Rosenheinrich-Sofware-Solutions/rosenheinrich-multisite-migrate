@@ -210,6 +210,10 @@ class Rmmigrate_Ajax_Activity
             wp_send_json_success(array('skipped' => 'invalid'));
         }
 
+        if ($http_status < 1 && in_array($phase, array('start', 'response', 'transport'), true)) {
+            wp_send_json_success(array('skipped' => 'no_status'));
+        }
+
         $detail = $message;
         if ($http_status > 0) {
             $detail = sprintf(

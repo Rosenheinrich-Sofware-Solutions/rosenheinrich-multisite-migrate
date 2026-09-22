@@ -16,12 +16,15 @@ $rmmigrate_pricing_url = Rmmigrate_Capabilities::pricing_url();
 if (is_multisite() && !$rmmigrate_is_network) {
     $rmmigrate_blog_rows = Rmmigrate_Schedules::for_blog($rmmigrate_settings, (int) get_current_blog_id());
     $rmmigrate_schedule = $rmmigrate_blog_rows[0];
-    $rmmigrate_next_run = !empty($rmmigrate_schedule['enabled']) ? (int) ($rmmigrate_schedule['next_run'] ?? 0) : 0;
+    $rmmigrate_next_run = Rmmigrate_Schedules::display_next_run_timestamp($rmmigrate_schedule);
 } else {
     $rmmigrate_schedule = Rmmigrate_Schedules::network_schedule($rmmigrate_settings);
-    $rmmigrate_next_run = Rmmigrate_Schedules::earliest_next_run($rmmigrate_settings);
+    $rmmigrate_next_run = Rmmigrate_Schedules::earliest_display_next_run($rmmigrate_settings);
 }
 $rmmigrate_row_id = (string) ($rmmigrate_schedule['id'] ?? Rmmigrate_Schedules::new_id());
+$rmmigrate_subsite_schedule_elsewhere = ($rmmigrate_is_network || !is_multisite())
+    && empty($rmmigrate_schedule['enabled'])
+    && Rmmigrate_Schedules::has_enabled_subsite_schedule($rmmigrate_settings);
 ?>
 <div class="mm-schedules-page">
 <form method="post" action="<?php echo esc_url($rmmigrate_save_url); ?>" class="mm-schedules-form" id="mm-schedules-form">
@@ -46,6 +49,12 @@ $rmmigrate_row_id = (string) ($rmmigrate_schedule['id'] ?? Rmmigrate_Schedules::
             </div>
         </header>
     </section>
+
+    <?php if ($rmmigrate_subsite_schedule_elsewhere) : ?>
+    <div class="notice notice-info inline">
+        <p><?php esc_html_e('An enabled per-site schedule is configured on a subsite. Network Admin edits the network schedule below; open Schedules on that subsite to change its local schedule.', 'rosenheinrich-multisite-migrate'); ?></p>
+    </div>
+    <?php endif; ?>
 
     <div id="mm-schedules-body" class="mm-schedules-list">
         <?php include RMMIGRATE_PATH . 'admin/partials/schedule-row.php'; ?>

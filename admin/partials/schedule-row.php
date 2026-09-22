@@ -23,7 +23,7 @@ $rmmigrate_row_blog_id = (int) ($rmmigrate_schedule['blog_id'] ?? 0);
 if ($rmmigrate_row_scope === Rmmigrate_Multisite_Scope::SCOPE_SUBSITE && $rmmigrate_row_blog_id <= 0 && $rmmigrate_schedule_sites !== array()) {
     $rmmigrate_row_blog_id = (int) $rmmigrate_schedule_sites[0]['id'];
 }
-$rmmigrate_next = (int) ($rmmigrate_schedule['next_run'] ?? 0);
+$rmmigrate_next = Rmmigrate_Schedules::display_next_run_timestamp($rmmigrate_schedule);
 $rmmigrate_prefix = 'schedules[' . $rmmigrate_row_id . ']';
 $rmmigrate_hour_24 = (int) ($rmmigrate_schedule['hour'] ?? 3);
 $rmmigrate_minute = max(0, min(59, (int) ($rmmigrate_schedule['minute'] ?? 0)));
@@ -144,7 +144,7 @@ $rmmigrate_show_network_scope = is_multisite() && !empty($rmmigrate_is_network);
         <span class="mm-schedule-card__label"><?php esc_html_e('Next run', 'rosenheinrich-multisite-migrate'); ?></span>
         <span class="mm-schedule-next-run<?php echo !empty($rmmigrate_schedule['enabled']) ? ' is-active' : ' is-off'; ?>">
             <?php
-            if (!empty($rmmigrate_schedule['enabled']) && $rmmigrate_next > 0) {
+            if ($rmmigrate_next > 0) {
                 echo esc_html(wp_date('Y-m-d g:i a', $rmmigrate_next));
             } else {
                 esc_html_e('Not scheduled', 'rosenheinrich-multisite-migrate');

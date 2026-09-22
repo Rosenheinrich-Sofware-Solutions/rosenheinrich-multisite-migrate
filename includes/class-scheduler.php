@@ -83,6 +83,10 @@ class Rmmigrate_Scheduler
 
         Rmmigrate_Job::recover_stale_active();
 
+        if (Rmmigrate_Schedules::heal_mismatched_next_runs()) {
+            Rmmigrate_Settings::clear_cache();
+        }
+
         $settings = Rmmigrate_Schedules::normalize(Rmmigrate_Settings::get());
         if (!Rmmigrate_Schedules::has_enabled($settings)) {
             return;

@@ -515,13 +515,112 @@ class Rmmigrate_Schedules
     }
 
     /**
+     * Timestamp for UI when a schedule is enabled (falls back to computed next slot).
+     *
+     * @param array<string,mixed> $schedule
+     */
+    public static function display_next_run_timestamp(array $schedule): int
+    {
+        if (empty($schedule['enabled'])) {
+            return 0;
+        }
+        $next = (int) ($schedule['next_run'] ?? 0);
+        if ($next > 0) {
+            return $next;
+        }
+
+        return self::compute_next_run_strictly_future($schedule);
+    }
+
+    /**
+     * @param array<string,mixed> $settings
+     */
+    public static function earliest_display_next_run(array $settings): int
+    {
+        $earliest = 0;
+        foreach ($settings['schedules'] ?? array() as $schedule) {
+            if (!is_array($schedule) || empty($schedule['enabled'])) {
+                continue;
+            }
+            $next = self::display_next_run_timestamp($schedule);
+            if ($next <= 0) {
+                continue;
+            }
+            if ($earliest === 0 || $next < $earliest) {
+                $earliest = $next;
+            }
+        }
+
+        return $earliest;
+    }
+
+    /**
+     * When Free settings have no enabled schedule, import enabled local rows from
+     * rmmigrate_pro_settings (Pro deactivation / dual-edition handoff). Does not
+     * reference Pro classes so wp.org Free stays self-contained.
+     */
+    public static function maybe_reclaim_local_schedules_from_legacy_storage(): bool
+    {
+        $settings = self::normalize(Rmmigrate_Settings::get());
+        if (self::has_enabled($settings)) {
+            return false;
+        }
+
+        $legacy = get_site_option('rmmigrate_pro_settings', array());
+        if (!is_array($legacy)) {
+            return false;
+        }
+        $legacy_rows = $legacy['schedules'] ?? array();
+        if (!is_array($legacy_rows) || $legacy_rows === array()) {
+            return false;
+        }
+
+        $import = array();
+        foreach ($legacy_rows as $row) {
+            if (!is_array($row) || empty($row['enabled'])) {
+                continue;
+            }
+            if ((string) ($row['destination'] ?? 'local') !== 'local') {
+                continue;
+            }
+            $import[] = self::sanitize_schedule($row, $settings);
+        }
+        if ($import === array()) {
+            return false;
+        }
+
+        $combined = array();
+        foreach ($settings['schedules'] as $row) {
+            if (is_array($row)) {
+                $combined[] = $row;
+            }
+        }
+        foreach ($import as $row) {
+            $combined[] = $row;
+        }
+
+        $settings['schedules'] = self::enforce_one_per_context($combined, $settings);
+        foreach ($settings['schedules'] as $index => $schedule) {
+            if (empty($schedule['enabled'])) {
+                continue;
+            }
+            $settings['schedules'][$index]['next_run'] = self::compute_next_run_strictly_future($schedule);
+        }
+
+        Rmmigrate_Settings::save($settings);
+        Rmmigrate_Settings::clear_cache();
+
+        return true;
+    }
+
+    /**
      * Recompute next_run when stored timestamp disagrees with schedule wall-clock.
      * Persists when anything changes. Safe to call from cron/admin.
      */
     public static function heal_mismatched_next_runs(): bool
     {
+        $changed = self::maybe_reclaim_local_schedules_from_legacy_storage();
         $settings = self::normalize(Rmmigrate_Settings::get());
-        $changed = false;
         foreach ($settings['schedules'] as $index => $schedule) {
             if (empty($schedule['enabled'])) {
                 continue;
@@ -538,9 +637,30 @@ class Rmmigrate_Schedules
         }
         if ($changed) {
             Rmmigrate_Settings::save($settings);
+            Rmmigrate_Settings::clear_cache();
         }
 
         return $changed;
+    }
+
+    /**
+     * @param array<string,mixed> $settings
+     */
+    public static function has_enabled_subsite_schedule(array $settings): bool
+    {
+        $settings = self::normalize($settings);
+        foreach ($settings['schedules'] as $schedule) {
+            if (empty($schedule['enabled'])) {
+                continue;
+            }
+            $blog_id = (int) ($schedule['blog_id'] ?? 0);
+            $scope = (string) ($schedule['scope'] ?? '');
+            if ($blog_id > 0 || $scope === Rmmigrate_Multisite_Scope::SCOPE_SUBSITE) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
