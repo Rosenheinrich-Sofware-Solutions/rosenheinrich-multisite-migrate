@@ -242,7 +242,7 @@ Backup and restore run as background-style chunked jobs. They are designed not t
 = 1.2.12 – 2026-09-21 =
 * Automatic cleanup of deleted backup records and improved archive table display.
 
-Older entries are in changelog.txt, which ships with the plugin, and the full history is published at https://multisitemigrate.rosenheinrich.com/changelog/.
+Older entries are in changelog.txt, which ships with the plugin, and the full history is published at [https://multisitemigrate.rosenheinrich.com/changelog/](https://multisitemigrate.rosenheinrich.com/changelog/).
 
 == Upgrade Notice ==
 
