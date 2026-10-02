@@ -9,6 +9,8 @@ if ( ! defined( 'ABSPATH' ) ) {
  * Keep behavior aligned with installer/lib/extract-engine.php.
  */
 
+require_once __DIR__ . '/path-safety-core.php';
+
 class Rmmigrate_Extract_Engine
 {
     public const ENGINE_AUTO        = 'auto';

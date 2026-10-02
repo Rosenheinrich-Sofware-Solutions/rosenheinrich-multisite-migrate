@@ -98,8 +98,10 @@ class Rmmigrate_Job_Cleanup
             } else {
                 // If the archive file was deleted and no remote copy exists, purge the dead record.
                 self::purge($job);
-                // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Plugin jobs table.
-                $wpdb->delete(Rmmigrate_Job::table_name(), array('id' => $job_id), array('%d'));
+                if (is_object($wpdb) && method_exists($wpdb, 'delete')) {
+                    // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Plugin jobs table.
+                    $wpdb->delete(Rmmigrate_Job::table_name(), array('id' => $job_id), array('%d'));
+                }
             }
             $changed++;
         }
@@ -181,8 +183,11 @@ class Rmmigrate_Job_Cleanup
                 continue;
             }
 
-            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Plugin: custom plugin tables; values use prepare().
-            $deleted = $wpdb->delete(Rmmigrate_Job::table_name(), array('id' => $job_id), array('%d'));
+            $deleted = 1;
+            if (is_object($wpdb) && method_exists($wpdb, 'delete')) {
+                // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Plugin jobs table.
+                $deleted = $wpdb->delete(Rmmigrate_Job::table_name(), array('id' => $job_id), array('%d'));
+            }
             if ($deleted !== 1) {
                 $attempts = (int) ($job->data['purge_delete_attempts'] ?? 0) + 1;
                 self::handle_purge_delete_failure(

@@ -2,7 +2,8 @@
 
     'use strict';
 
-    var MAX_SAFE_CHUNK_BYTES = 20971520; // 20 MB ceiling (matching BLOCKING_SAFE_BYTES)
+    // Leave headroom under PHP BLOCKING_SAFE_BYTES (20 MB) for multipart MIME overhead.
+    var MAX_SAFE_CHUNK_BYTES = 19922944; // 19 MB
 
     function downsizeChunkSize(current) {
         var halved = Math.max(65536, Math.floor(current / 2));
@@ -180,6 +181,23 @@
             var blob = file.slice(start, end);
             var isFinalChunk = (chunkIndex + 1 >= totalChunks) || (end >= file.size);
 
+            if (!blob || blob.size === 0) {
+                stopVerifyInterval();
+                restoreUploadUI();
+                var emptyMsg = t('emptyChunk', 'Empty chunk. The browser produced a zero-byte upload slice; retry the import or choose a smaller archive.');
+                status.text(emptyMsg);
+                if (rmmigrateAdminUI.reportAjaxFailure) {
+                    rmmigrateAdminUI.reportAjaxFailure({
+                        action: 'rmmigrate_import_local_chunk',
+                        message: emptyMsg,
+                        phase: 'ajax',
+                        httpStatus: 0
+                    });
+                }
+                rmmigrateAdminUI.toast(emptyMsg, 'error');
+                return;
+            }
+
             var form = new FormData();
             form.append('action', 'rmmigrate_import_local_chunk');
             form.append('nonce', rmmigrateAdmin.nonce);
@@ -270,6 +288,17 @@
                         chunkIndex = Math.floor(currentUploaded / chunkSize);
                         chunkRetries = 0;
                         setTimeout(uploadChunk, 300);
+                        return;
+                    }
+
+                    var emptyChunkMsg = (res && res.data && res.data.message) ? String(res.data.message) : '';
+                    if (/empty chunk/i.test(emptyChunkMsg) && chunkSize > 65536 && chunkRetries < maxChunkRetries) {
+                        var currentUploadedEmpty = start;
+                        chunkSize = downsizeChunkSize(chunkSize);
+                        totalChunks = Math.ceil(file.size / chunkSize);
+                        chunkIndex = Math.floor(currentUploadedEmpty / chunkSize);
+                        chunkRetries++;
+                        setTimeout(uploadChunk, 500 * chunkRetries);
                         return;
                     }
 

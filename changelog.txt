@@ -1,3 +1,6 @@
+= 1.2.14 – 2026-10-02 =
+* Fix chunked import “Empty chunk” / “Chunk exceeds maximum allowed size” by preferring FormData $_FILES over php://input and reading upload temps natively.
+
 Changelog
 Full history: https://multisitemigrate.rosenheinrich.com/changelog/
 

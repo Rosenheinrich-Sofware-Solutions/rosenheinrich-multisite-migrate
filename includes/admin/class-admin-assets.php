@@ -294,7 +294,9 @@ class Rmmigrate_Admin_Assets
         $safe_max = $server_max > 0
             ? min((int) max(131072, (int) floor($server_max / 2)), $server_max)
             : 524288;
-        $max_safe_chunk = class_exists('Rmmigrate_Extract_Engine') ? Rmmigrate_Extract_Engine::BLOCKING_SAFE_BYTES : 20971520;
+        // Multipart FormData overhead must stay under BLOCKING_SAFE_BYTES on the wire.
+        $blocking_safe = class_exists('Rmmigrate_Extract_Engine') ? Rmmigrate_Extract_Engine::BLOCKING_SAFE_BYTES : 20971520;
+        $max_safe_chunk = max(1048576, $blocking_safe - 1048576); // 19 MB when ceiling is 20 MB
 
         $localize = array(
             'ajaxUrl'             => admin_url('admin-ajax.php'),

@@ -4,7 +4,7 @@ Tags: multisite, site-migration, wordpress-migration, migrate-wordpress, clone-s
 Requires at least: 6.2
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.2.13
+Stable tag: 1.2.14
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -241,6 +241,9 @@ Backup and restore run as background-style chunked jobs. They are designed not t
 
 == Changelog ==
 
+= 1.2.14 – 2026-10-02 =
+* Fix chunked import failures ("Empty chunk" / oversized chunk) by preferring FormData file parts over php://input.
+
 = 1.2.13 – 2026-09-22 =
 * Minor bug fixes.
 
@@ -250,6 +253,9 @@ Backup and restore run as background-style chunked jobs. They are designed not t
 Older entries are in changelog.txt, which ships with the plugin, and the full history is published at [https://multisitemigrate.rosenheinrich.com/changelog/](https://multisitemigrate.rosenheinrich.com/changelog/).
 
 == Upgrade Notice ==
+
+= 1.2.14 =
+Fix for chunked import Empty chunk / oversized chunk failures. Recommended update.
 
 = 1.2.13 =
 Minor bug fixes. Recommended update.

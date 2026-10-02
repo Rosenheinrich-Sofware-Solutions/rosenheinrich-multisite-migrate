@@ -565,6 +565,26 @@ class Rmmigrate_Filesystem
     }
 
     /**
+     * Read a PHP upload temp file without WP_Filesystem.
+     *
+     * FTP/SSH filesystem methods cannot see local upload temps under /tmp.
+     *
+     * @return string|false
+     */
+    public static function read_uploaded_temp(string $tmp_path)
+    {
+        if ($tmp_path === '' || !Rmmigrate_Request_Input::is_uploaded_tmp($tmp_path)) {
+            return false;
+        }
+        if (!is_readable($tmp_path)) {
+            return false;
+        }
+        // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- Plugin: native read for PHP upload temps.
+        $contents = file_get_contents($tmp_path);
+        return is_string($contents) ? $contents : false;
+    }
+
+    /**
      * Store a PHP upload temp file into a destination path.
      */
     public static function store_uploaded_file(string $tmp_path, string $destination): bool

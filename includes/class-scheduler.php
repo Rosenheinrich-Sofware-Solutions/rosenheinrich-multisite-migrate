@@ -83,10 +83,6 @@ class Rmmigrate_Scheduler
 
         Rmmigrate_Job::recover_stale_active();
 
-        if (Rmmigrate_Schedules::heal_mismatched_next_runs()) {
-            Rmmigrate_Settings::clear_cache();
-        }
-
         $settings = Rmmigrate_Schedules::normalize(Rmmigrate_Settings::get());
         if (!Rmmigrate_Schedules::has_enabled($settings)) {
             return;
@@ -118,6 +114,15 @@ class Rmmigrate_Scheduler
 
         if ($active !== null) {
             return;
+        }
+
+        if (Rmmigrate_Schedules::heal_mismatched_next_runs()) {
+            Rmmigrate_Settings::clear_cache();
+            $settings = Rmmigrate_Schedules::normalize(Rmmigrate_Settings::get());
+            $due = Rmmigrate_Schedules::due_schedules($settings);
+            if ($due === array()) {
+                return;
+            }
         }
 
         $schedule = $due[0];

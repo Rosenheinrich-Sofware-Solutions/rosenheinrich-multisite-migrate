@@ -236,9 +236,11 @@ class Rmmigrate_SQL_Importer
                 }
                 continue;
             }
-            if (!$in_string && $ch === '-' && $i + 1 < $len && $buffer[$i + 1] === '-') {
+            if (!$in_string && ($ch === '#' || ($ch === '-' && $i + 1 < $len && $buffer[$i + 1] === '-'))) {
                 $in_line_comment = true;
-                $i++;
+                if ($ch === '-') {
+                    $i++;
+                }
                 continue;
             }
             if (!$in_string && $ch === '/' && $i + 1 < $len && $buffer[$i + 1] === '*') {
@@ -272,7 +274,7 @@ class Rmmigrate_SQL_Importer
             if ($i >= $len) {
                 break;
             }
-            if ($trim[$i] === '-' && $i + 1 < $len && $trim[$i + 1] === '-') {
+            if ($trim[$i] === '#' || ($trim[$i] === '-' && $i + 1 < $len && $trim[$i + 1] === '-')) {
                 while ($i < $len && $trim[$i] !== "\n") {
                     $i++;
                 }
@@ -303,7 +305,7 @@ class Rmmigrate_SQL_Importer
         if ($this->is_set_statement($trim)) {
             return true;
         }
-        if (strpos($trim, '--') === 0 || strpos($trim, '/*') === 0) {
+        if (strpos($trim, '--') === 0 || strpos($trim, '/*') === 0 || strpos($trim, '#') === 0) {
             return false;
         }
         if (stripos($trim, 'RMMIGRATE_DB_EOF') !== false) {

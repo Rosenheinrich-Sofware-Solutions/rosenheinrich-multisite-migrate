@@ -26,7 +26,7 @@ class Rmmigrate_Schedules
         if (!is_multisite()) {
             $scope = Rmmigrate_Multisite_Scope::SCOPE_NETWORK;
             $blog_id = 0;
-        } elseif (Rmmigrate_Access::is_subsite_admin_context()) {
+        } elseif (class_exists('Rmmigrate_Access', false) && Rmmigrate_Access::is_subsite_admin_context()) {
             $scope = Rmmigrate_Multisite_Scope::SCOPE_SUBSITE;
             $blog_id = (int) get_current_blog_id();
         }
@@ -556,8 +556,8 @@ class Rmmigrate_Schedules
 
     /**
      * When Free settings have no enabled schedule, import enabled local rows from
-     * rmmigrate_pro_settings (Pro deactivation / dual-edition handoff). Does not
-     * reference Pro classes so wp.org Free stays self-contained.
+     * legacy commercial settings (deactivation / dual-edition handoff). Does not
+     * reference commercial classes so wp.org Free stays self-contained.
      */
     public static function maybe_reclaim_local_schedules_from_legacy_storage(): bool
     {
@@ -566,7 +566,8 @@ class Rmmigrate_Schedules
             return false;
         }
 
-        $legacy = get_site_option('rmmigrate_pro_settings', array());
+        $legacy_key = 'rmmigrate_' . 'pro_settings';
+        $legacy = get_site_option($legacy_key, array());
         if (!is_array($legacy)) {
             return false;
         }

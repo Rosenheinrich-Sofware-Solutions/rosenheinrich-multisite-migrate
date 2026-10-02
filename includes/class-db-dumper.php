@@ -1852,7 +1852,8 @@ class Rmmigrate_DB_Dumper
 
     private function append_eof_marker(): void
     {
-        Rmmigrate_Filesystem::put_contents($this->sql_path, "\n-- " . RMMIGRATE_DB_EOF . "\n", FILE_APPEND);
+        $eof = defined('RMMIGRATE_DB_EOF') ? RMMIGRATE_DB_EOF : 'RMMIGRATE_DB_EOF';
+        Rmmigrate_Filesystem::put_contents($this->sql_path, "\n-- " . $eof . "\n", FILE_APPEND);
     }
 
     private function should_exclude_revisions(): bool

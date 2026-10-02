@@ -4,6 +4,8 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
+require_once __DIR__ . '/class-hosting-detection.php';
+
 class Rmmigrate_Runner
 {
     /** @var int|null Job ID holding the SQL lock in this request. */
@@ -153,7 +155,8 @@ class Rmmigrate_Runner
         @ignore_user_abort(true);
         if (function_exists('set_time_limit')) {
             $is_cli_or_cron = (defined('WP_CLI') && WP_CLI)
-                || (function_exists('wp_doing_cron') && wp_doing_cron());
+                || (function_exists('wp_doing_cron') && wp_doing_cron())
+                || (php_sapi_name() === 'cli');
             if ($is_cli_or_cron) {
                 // phpcs:ignore Squiz.PHP.DiscouragedFunctions.Discouraged -- CLI/cron workers may run long; ajax path uses a hard ceiling below.
                 @set_time_limit(0);
@@ -462,7 +465,8 @@ class Rmmigrate_Runner
         if ($job->skips_database()) {
             if ($job->get_status() < Rmmigrate_Job::STATUS_ARCHIVING) {
                 $work_dir = $job->get_work_dir();
-                Rmmigrate_Filesystem::put_contents(trailingslashit($work_dir) . 'database.sql', "-- Skipped (files-only profile)\n-- " . RMMIGRATE_DB_EOF . "\n");
+                $eof = defined('RMMIGRATE_DB_EOF') ? RMMIGRATE_DB_EOF : 'RMMIGRATE_DB_EOF';
+                Rmmigrate_Filesystem::put_contents(trailingslashit($work_dir) . 'database.sql', "-- Skipped (files-only profile)\n-- " . $eof . "\n");
                 $job->set_status(Rmmigrate_Job::STATUS_DB_DONE);
                 $steps->advance_to(Rmmigrate_Build_Steps::STEP_ARCHIVE);
                 $job->set_status(Rmmigrate_Job::STATUS_ARCHIVING);

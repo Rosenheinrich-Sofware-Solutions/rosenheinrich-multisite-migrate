@@ -159,20 +159,7 @@ class Rmmigrate_Ajax_Import
         clearstatcache(true, $part_path);
         $expected_offset = Rmmigrate_Request_Input::post_int('expected_offset');
 
-        $chunk = Rmmigrate_Filesystem::read_request_body();
-        if (!is_string($chunk) || $chunk === '') {
-            $chunk = '';
-            $tmp = Rmmigrate_Request_Input::file_tmp_name('chunk');
-            if ($tmp !== '') {
-                $file_chunk = Rmmigrate_Filesystem::get_contents($tmp);
-                if (is_string($file_chunk) && $file_chunk !== '') {
-                    $chunk = $file_chunk;
-                }
-            }
-        }
-        if ($chunk === '') {
-            self::import_error(__('Empty chunk.', 'rosenheinrich-multisite-migrate'), $err_ctx);
-        }
+        $chunk = self::resolve_import_chunk_bytes($err_ctx);
         if (strlen($chunk) > Rmmigrate_Extract_Engine::BLOCKING_SAFE_BYTES) {
             $msg = __('Chunk exceeds maximum allowed size.', 'rosenheinrich-multisite-migrate');
             wp_send_json_error(array(
@@ -239,6 +226,111 @@ class Rmmigrate_Ajax_Import
             }
             self::import_error($e->getMessage(), array_merge($err_ctx, array('phase' => 'validate')));
         }
+    }
+
+    /**
+     * Resolve chunk bytes for import_local_chunk.
+     *
+     * Prefer $_FILES['chunk'] (browser FormData). Only fall back to php://input when
+     * the request is not multipart — reading php://input for multipart can yield the
+     * entire MIME body (boundaries + fields + file), which falsely trips the max-size
+     * guard or skips a valid uploaded temp file.
+     *
+     * @param array<string,mixed> $err_ctx
+     */
+    private static function resolve_import_chunk_bytes(array $err_ctx): string
+    {
+        // phpcs:ignore WordPress.Security.NonceVerification.Missing -- Nonce verified by import_local_chunk before this helper runs.
+        if (isset($_FILES['chunk']) && is_array($_FILES['chunk'])) {
+            // phpcs:ignore WordPress.Security.NonceVerification.Missing -- Nonce verified by caller.
+            $upload_error = isset($_FILES['chunk']['error']) ? (int) $_FILES['chunk']['error'] : UPLOAD_ERR_NO_FILE;
+
+            if (in_array($upload_error, array(UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE), true)) {
+                wp_send_json_error(array(
+                    'message'  => __('Chunk size exceeds server PHP limits. Reducing chunk size…', 'rosenheinrich-multisite-migrate'),
+                    'downsize' => true,
+                    'logged'   => false,
+                ), 400);
+            }
+
+            if ($upload_error === UPLOAD_ERR_PARTIAL) {
+                wp_send_json_error(array(
+                    'message'  => __('Chunk upload was truncated. Reducing chunk size…', 'rosenheinrich-multisite-migrate'),
+                    'downsize' => true,
+                    'logged'   => false,
+                ), 400);
+            }
+
+            if ($upload_error === UPLOAD_ERR_NO_FILE) {
+                self::import_error(
+                    __('Empty chunk. No file part received for this upload slice.', 'rosenheinrich-multisite-migrate'),
+                    array_merge($err_ctx, array('phase' => 'chunk', 'upload_error' => $upload_error))
+                );
+            }
+
+            if ($upload_error !== UPLOAD_ERR_OK) {
+                self::import_error(
+                    sprintf(
+                        /* translators: %d: PHP UPLOAD_ERR_* code */
+                        __('Chunk upload failed (error code %d).', 'rosenheinrich-multisite-migrate'),
+                        $upload_error
+                    ),
+                    array_merge($err_ctx, array('phase' => 'chunk', 'upload_error' => $upload_error))
+                );
+            }
+
+            $tmp = Rmmigrate_Request_Input::file_tmp_name('chunk');
+            if ($tmp === '') {
+                self::import_error(
+                    __('Empty chunk. Uploaded temp file was missing or rejected.', 'rosenheinrich-multisite-migrate'),
+                    array_merge($err_ctx, array('phase' => 'chunk', 'reason' => 'tmp_missing'))
+                );
+            }
+
+            // Native read: WP_Filesystem (FTP/SSH) cannot reliably read PHP upload temps.
+            $file_chunk = Rmmigrate_Filesystem::read_uploaded_temp($tmp);
+            if (!is_string($file_chunk) || $file_chunk === '') {
+                // phpcs:ignore WordPress.Security.NonceVerification.Missing -- Size is diagnostic only.
+                $declared = isset($_FILES['chunk']['size']) ? (int) $_FILES['chunk']['size'] : 0;
+                if ($declared === 0) {
+                    self::import_error(
+                        __('Empty chunk. Client sent a zero-byte upload slice.', 'rosenheinrich-multisite-migrate'),
+                        array_merge($err_ctx, array('phase' => 'chunk', 'reason' => 'zero_bytes'))
+                    );
+                }
+                self::import_error(
+                    __('Empty chunk. Could not read the uploaded slice from disk.', 'rosenheinrich-multisite-migrate'),
+                    array_merge($err_ctx, array('phase' => 'chunk', 'reason' => 'read_failed', 'declared_size' => $declared))
+                );
+            }
+
+            return $file_chunk;
+        }
+
+        $content_type = '';
+        if (isset($_SERVER['CONTENT_TYPE']) && is_string($_SERVER['CONTENT_TYPE'])) {
+            $content_type = strtolower(sanitize_text_field(wp_unslash($_SERVER['CONTENT_TYPE'])));
+        } elseif (isset($_SERVER['HTTP_CONTENT_TYPE']) && is_string($_SERVER['HTTP_CONTENT_TYPE'])) {
+            $content_type = strtolower(sanitize_text_field(wp_unslash($_SERVER['HTTP_CONTENT_TYPE'])));
+        }
+
+        if ($content_type !== '' && strpos($content_type, 'multipart/') === 0) {
+            // Multipart without $_FILES['chunk']: body was stripped or never parsed as a file.
+            self::import_error(
+                __('Empty chunk. Multipart upload arrived without a usable file part.', 'rosenheinrich-multisite-migrate'),
+                array_merge($err_ctx, array('phase' => 'chunk', 'reason' => 'multipart_missing_file'))
+            );
+        }
+
+        $chunk = Rmmigrate_Filesystem::read_request_body();
+        if (!is_string($chunk) || $chunk === '') {
+            self::import_error(
+                __('Empty chunk. No raw request body and no uploaded file part.', 'rosenheinrich-multisite-migrate'),
+                array_merge($err_ctx, array('phase' => 'chunk', 'reason' => 'body_empty'))
+            );
+        }
+
+        return $chunk;
     }
 
     /**
