@@ -11,6 +11,9 @@ class Rmmigrate_Archive_Encryption
     /** Plaintext bytes read per encrypt_slice chunk; also used for plain_offset math. */
     const PLAIN_CHUNK_SIZE = 1048576;
 
+    /** Upper bound for a single v2 ciphertext frame (hostile length headers). */
+    private const MAX_V2_FRAME_BYTES = 16777216;
+
     /** @var string|null */
     private static $runtime_passphrase = null;
 
@@ -55,7 +58,11 @@ class Rmmigrate_Archive_Encryption
             $in->close();
             return false;
         }
-        $out->write(Rmmigrate_Crypto_Core::v2_header($salt, $iterations));
+        if (!self::write_encrypted_output($out, Rmmigrate_Crypto_Core::v2_header($salt, $iterations))) {
+            $in->close();
+            $out->close();
+            return false;
+        }
 
         $chunk_index = 0;
         while (!$in->eof()) {
@@ -80,8 +87,12 @@ class Rmmigrate_Archive_Encryption
                 $out->close();
                 return false;
             }
-            $out->write(pack('N', strlen($blob)));
-            $out->write($blob);
+            if (!self::write_encrypted_output($out, pack('N', strlen($blob)))
+                || !self::write_encrypted_output($out, $blob)) {
+                $in->close();
+                $out->close();
+                return false;
+            }
             $chunk_index++;
         }
 
@@ -104,6 +115,14 @@ class Rmmigrate_Archive_Encryption
             $plain_offset = 0;
         }
 
+        $source_size = (int) Rmmigrate_Filesystem::filesize($source);
+        if ($source_size >= 0 && $plain_offset >= $source_size && Rmmigrate_Filesystem::exists($dest)) {
+            return array(
+                'done'         => true,
+                'plain_offset' => $plain_offset,
+            );
+        }
+
         if ($plain_offset === 0) {
             if (Rmmigrate_Filesystem::exists($dest)) {
                 Rmmigrate_Filesystem::delete($dest);
@@ -115,7 +134,9 @@ class Rmmigrate_Archive_Encryption
             if ($out === false) {
                 return null;
             }
-            $out->write(Rmmigrate_Crypto_Core::v2_header($salt, $iterations));
+            if (!self::write_encrypted_output($out, Rmmigrate_Crypto_Core::v2_header($salt, $iterations))) {
+                return null;
+            }
             $chunk_index = 0;
         } else {
             $probe = Rmmigrate_Filesystem::open($dest, 'rb');
@@ -152,6 +173,13 @@ class Rmmigrate_Archive_Encryption
             }
             $chunk_index = self::count_v2_chunks_before_offset($dest, $truncate_to);
             $plain_offset = $chunk_index * self::PLAIN_CHUNK_SIZE;
+            if ($source_size >= 0 && $plain_offset >= $source_size) {
+                $out->close();
+                return array(
+                    'done'         => true,
+                    'plain_offset' => $source_size,
+                );
+            }
         }
 
         $in = Rmmigrate_Filesystem::open($source, 'rb');
@@ -159,8 +187,10 @@ class Rmmigrate_Archive_Encryption
             $out->close();
             return null;
         }
-        if ($plain_offset > 0) {
-            $in->seek($plain_offset);
+        if ($plain_offset > 0 && $in->seek($plain_offset) !== 0) {
+            $in->close();
+            $out->close();
+            return null;
         }
 
         $start = microtime(true);
@@ -186,8 +216,12 @@ class Rmmigrate_Archive_Encryption
                 $out->close();
                 return null;
             }
-            $out->write(pack('N', strlen($blob)));
-            $out->write($blob);
+            if (!self::write_encrypted_output($out, pack('N', strlen($blob)))
+                || !self::write_encrypted_output($out, $blob)) {
+                $in->close();
+                $out->close();
+                return null;
+            }
             $plain_offset = (int) $in->tell();
             $chunk_index++;
         }
@@ -287,7 +321,10 @@ class Rmmigrate_Archive_Encryption
             }
         }
 
-        $in->seek($byte_offset);
+        if ($in->seek($byte_offset) !== 0) {
+            $in->close();
+            return null;
+        }
 
         $out = Rmmigrate_Filesystem::open($dest, 'ab');
         if ($out === false) {
@@ -309,7 +346,11 @@ class Rmmigrate_Archive_Encryption
                 $failed = true;
                 break;
             }
-            $len = unpack('N', $len_header)[1];
+            $len = (int) unpack('N', $len_header)[1];
+            if ($len <= 0 || $len > self::MAX_V2_FRAME_BYTES) {
+                $failed = true;
+                break;
+            }
             $blob = $in->read($len);
             if ($blob === false || strlen($blob) < $len) {
                 $failed = true;
@@ -326,7 +367,11 @@ class Rmmigrate_Archive_Encryption
                 $failed = true;
                 break;
             }
-            $out->write($plain);
+            $written = $out->write($plain);
+            if ($written === false || $written !== strlen($plain)) {
+                $failed = true;
+                break;
+            }
             $byte_offset = (int) $in->tell();
             $chunk_index++;
         }
@@ -448,7 +493,10 @@ class Rmmigrate_Archive_Encryption
             if ($plain === false) {
                 return false;
             }
-            $out->write($plain);
+            $written = $out->write($plain);
+            if ($written === false || $written !== strlen($plain)) {
+                return false;
+            }
             $chunk_index++;
         }
         return true;
@@ -481,7 +529,10 @@ class Rmmigrate_Archive_Encryption
         if ($in === false) {
             return $header_size;
         }
-        $in->seek($header_size);
+        if ($in->seek($header_size) !== 0) {
+            $in->close();
+            return $header_size;
+        }
 
         $offset = $header_size;
         $count = 0;
@@ -491,7 +542,9 @@ class Rmmigrate_Archive_Encryption
                 break;
             }
             $len = (int) unpack('N', $len_header)[1];
-            $in->seek($len, SEEK_CUR);
+            if ($len <= 0 || $len > self::MAX_V2_FRAME_BYTES || $in->seek($len, SEEK_CUR) !== 0) {
+                break;
+            }
             $offset = (int) $in->tell();
             $count++;
         }
@@ -519,7 +572,10 @@ class Rmmigrate_Archive_Encryption
         if ($in === false) {
             return null;
         }
-        $in->seek($header_size);
+        if ($in->seek($header_size) !== 0) {
+            $in->close();
+            return null;
+        }
 
         $plain_bytes = 0;
         $chunk_index = 0;
@@ -532,7 +588,7 @@ class Rmmigrate_Archive_Encryption
                 return null;
             }
             $len = (int) unpack('N', $len_header)[1];
-            if ($chunk_start + 4 + $len > $byte_offset) {
+            if ($len <= 0 || $len > self::MAX_V2_FRAME_BYTES || $chunk_start + 4 + $len > $byte_offset) {
                 break;
             }
             $blob = $in->read($len);
@@ -574,7 +630,10 @@ class Rmmigrate_Archive_Encryption
         if ($in === false) {
             return array('count' => 0, 'offset' => $header_size);
         }
-        $in->seek($header_size);
+        if ($in->seek($header_size) !== 0) {
+            $in->close();
+            return array('count' => 0, 'offset' => $header_size);
+        }
 
         $count = 0;
         $offset = $header_size;
@@ -586,10 +645,12 @@ class Rmmigrate_Archive_Encryption
             }
             $len = (int) unpack('N', $len_header)[1];
             $chunk_end = $chunk_start + 4 + $len;
-            if ($chunk_end > $byte_offset) {
+            if ($len <= 0 || $len > self::MAX_V2_FRAME_BYTES || $chunk_end > $byte_offset) {
                 break;
             }
-            $in->seek($len, SEEK_CUR);
+            if ($in->seek($len, SEEK_CUR) !== 0) {
+                break;
+            }
             $offset = $chunk_end;
             $count++;
         }
@@ -630,7 +691,10 @@ class Rmmigrate_Archive_Encryption
             if ($plain === false) {
                 return false;
             }
-            $out->write($plain);
+            $written = $out->write($plain);
+            if ($written === false || $written !== strlen($plain)) {
+                return false;
+            }
             $iv = substr(hash('sha256', $iv . $encrypted, true), 0, 16);
         }
         return true;
@@ -641,6 +705,18 @@ class Rmmigrate_Archive_Encryption
         if (!class_exists('Rmmigrate_Crypto_Core')) {
             require_once __DIR__ . '/shared/crypto-core.php';
         }
+    }
+
+    /**
+     * @param Rmmigrate_Filesystem_Stream $out
+     */
+    private static function write_encrypted_output($out, string $data): bool
+    {
+        if ($data === '') {
+            return true;
+        }
+        $written = $out->write($data);
+        return $written !== false && $written === strlen($data);
     }
 
     /**

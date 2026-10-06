@@ -1157,6 +1157,24 @@ class Rmmigrate_DB_Dumper
         return $groups;
     }
 
+    /**
+     * @param Rmmigrate_Filesystem_Stream $fh
+     */
+    private function write_php_export_sql($fh, string $sql): void
+    {
+        if ($sql === '') {
+            return;
+        }
+        if ($fh->write($sql) === false) {
+            $fh->close();
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+            throw Rmmigrate_Job_Exception::raise(
+                'sql_export_failed',
+                esc_html__('Could not write database export.', 'rosenheinrich-multisite-migrate')
+            );
+        }
+    }
+
     private function run_php_creates(int $budget_sec): bool
     {
         $db = $this->job->get_progress()['database'] ?? array();
@@ -1172,7 +1190,7 @@ class Rmmigrate_DB_Dumper
         }
 
         if ($create_index === 0) {
-            $fh->write("-- Multisite Migrate SQL export\nSET NAMES utf8mb4;\nSET foreign_key_checks = 0;\n\n");
+            $this->write_php_export_sql($fh, "-- Multisite Migrate SQL export\nSET NAMES utf8mb4;\nSET foreign_key_checks = 0;\n\n");
         }
 
         while ($create_index < $total && (microtime(true) - $start) < $budget_sec) {
@@ -1182,7 +1200,10 @@ class Rmmigrate_DB_Dumper
             $quoted_table = Rmmigrate_Snap_DB::quote_identifier($table);
             $create = Rmmigrate_Snap_DB::get_show_create_table_row($table);
             if ($create && isset($create[1])) {
-                $fh->write('DROP TABLE IF EXISTS ' . $quoted_table . ";\n" . $create[1] . ";\n\n");
+                $this->write_php_export_sql(
+                    $fh,
+                    'DROP TABLE IF EXISTS ' . $quoted_table . ";\n" . $create[1] . ";\n\n"
+                );
             }
             $create_index++;
         }
@@ -1370,7 +1391,7 @@ class Rmmigrate_DB_Dumper
 
             if (!empty($all_values) && ($current_query_size + $val_len + 2) > $max_query_size) {
                 $buffer .= 'INSERT IGNORE INTO ' . $quoted_table . ' (`' . implode('`,`', $cols) . '`) VALUES ' . implode(',', $all_values) . ";\n";
-                $fh->write($buffer);
+                $this->write_php_export_sql($fh, $buffer);
                 $current_sql_bytes += strlen($buffer);
                 $buffer = '';
                 $all_values = array();
@@ -1413,7 +1434,7 @@ class Rmmigrate_DB_Dumper
                     $current_query_size = 0;
                 }
                 if ($buffer !== '') {
-                    $fh->write($buffer);
+                    $this->write_php_export_sql($fh, $buffer);
                     $current_sql_bytes += strlen($buffer);
                     $buffer = '';
                 }
@@ -1445,7 +1466,7 @@ class Rmmigrate_DB_Dumper
             $buffer .= 'INSERT IGNORE INTO ' . $quoted_table . ' (`' . implode('`,`', $cols) . '`) VALUES ' . implode(',', $all_values) . ";\n";
         }
         if ($buffer !== '') {
-            $fh->write($buffer);
+            $this->write_php_export_sql($fh, $buffer);
         }
 
         if (!$has_rows) {

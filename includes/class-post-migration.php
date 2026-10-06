@@ -79,6 +79,8 @@ class Rmmigrate_Post_Migration
             Rmmigrate_Activator::ensure_schema();
         }
 
+        self::maybe_upgrade_wp_database();
+
         /**
          * Fires after a migration may have changed the site URL. A separate paid
          * edition can hook this to re-validate any remote service binding; the
@@ -86,4 +88,38 @@ class Rmmigrate_Post_Migration
          */
         do_action('rmmigrate_revalidate_after_migration');
     }
+
+    /**
+     * If the imported DB has an older schema than the current WordPress install,
+     * execute WordPress core schema upgrade so the user is not greeted by
+     * the "Database Update Required" screen on the next wp-admin visit.
+     */
+    public static function maybe_upgrade_wp_database(): void
+    {
+        global $wp_db_version;
+        if (!isset($wp_db_version)) {
+            if (defined('ABSPATH') && file_exists(ABSPATH . 'wp-includes/version.php')) {
+                require ABSPATH . 'wp-includes/version.php';
+            }
+        }
+        if (!isset($wp_db_version)) {
+            return;
+        }
+
+        $current_db_version = (int) get_option('db_version', 0);
+        if ($current_db_version > 0 && $current_db_version < (int) $wp_db_version) {
+            if (function_exists('wp_upgrade')) {
+                wp_upgrade();
+                return;
+            }
+            $upgrade_file = defined('ABSPATH') ? (ABSPATH . 'wp-admin/includes/upgrade.php') : '';
+            if ($upgrade_file !== '' && file_exists($upgrade_file)) {
+                require_once $upgrade_file;
+                if (function_exists('wp_upgrade')) {
+                    wp_upgrade();
+                }
+            }
+        }
+    }
 }
+

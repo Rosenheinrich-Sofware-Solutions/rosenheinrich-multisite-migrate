@@ -439,7 +439,8 @@ class Rmmigrate_Zip_Extract_Core
             if ( $chunk === '' ) {
                 break;
             }
-            if ( $dest_stream->write( $chunk ) === false ) {
+            $written = $dest_stream->write( $chunk );
+            if ( $written === false || $written !== strlen( $chunk ) ) {
                 $dest_stream->close();
                 self::raise_pipeline(
                     Rmmigrate_Error_Codes::EXTRACT_FAILED,

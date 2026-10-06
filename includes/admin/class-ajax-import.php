@@ -348,6 +348,10 @@ class Rmmigrate_Ajax_Import
 
         clearstatcache(true, $part_path);
         $current_size = (int) @filesize($part_path);
+        if ($chunk_index > 0 && $expected_offset <= 0) {
+            Rmmigrate_Filesystem::release_lock($fh);
+            return 'offset_mismatch';
+        }
         if ($chunk_index > 0 && $expected_offset > 0) {
             if ($current_size > $expected_offset) {
                 // Duplicate chunk retry or stale bytes after connection timeout: truncate back to expected_offset.

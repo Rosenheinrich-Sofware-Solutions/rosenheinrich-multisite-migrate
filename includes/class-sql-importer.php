@@ -71,7 +71,13 @@ class Rmmigrate_SQL_Importer
                 esc_html__('Cannot read database.sql.', 'rosenheinrich-multisite-migrate')
             );
         }
-        $handle->seek($offset);
+        if ($handle->seek($offset) !== 0) {
+            $handle->close();
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+            throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::DATABASE_SQL_UNREADABLE),
+                esc_html__('Cannot read database.sql.', 'rosenheinrich-multisite-migrate')
+            );
+        }
 
         $start = microtime(true);
         $executed = 0;

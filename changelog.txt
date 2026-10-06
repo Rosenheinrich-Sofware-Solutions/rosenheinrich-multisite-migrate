@@ -1,3 +1,7 @@
+= 1.2.15 – 2026-10-06 =
+* Fix DAF restore extract failures ("Invalid DAF archive entry" / daf_corrupt) when fread returns short reads on network or buffered filesystems.
+* Harden chunked import resume (expected_offset), URL range downloads, and peer transfer chunk offsets.
+
 = 1.2.14 – 2026-10-02 =
 * Fix chunked import “Empty chunk” / “Chunk exceeds maximum allowed size” by preferring FormData $_FILES over php://input and reading upload temps natively.
 

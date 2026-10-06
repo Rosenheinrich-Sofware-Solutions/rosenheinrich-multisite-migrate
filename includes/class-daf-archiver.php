@@ -130,8 +130,14 @@ class Rmmigrate_Daf_Archiver
                 esc_html__('Cannot open DAF archive for writing.', 'rosenheinrich-multisite-migrate')
             );
         }
-        
-        fseek($fh, $byte_checkpoint);
+        if (fseek($fh, $byte_checkpoint) !== 0) {
+            Rmmigrate_Filesystem::fclose_raw($fh);
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+            throw Rmmigrate_Job_Exception::raise(
+                sanitize_key(Rmmigrate_Error_Codes::EXTRACT_FAILED),
+                esc_html__('Cannot resume DAF archive at saved byte offset.', 'rosenheinrich-multisite-migrate')
+            );
+        }
 
         $can_compress = function_exists('gzdeflate');
         $last_hb = microtime(true);
@@ -226,7 +232,14 @@ class Rmmigrate_Daf_Archiver
             }
 
             if ($source_offset > 0) {
-                fseek($data_fp, $source_offset);
+                if (fseek($data_fp, $source_offset) !== 0) {
+                    Rmmigrate_Filesystem::fclose_raw($data_fp);
+                    // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+                    throw Rmmigrate_Job_Exception::raise(
+                        sanitize_key(Rmmigrate_Error_Codes::EXTRACT_FAILED),
+                        esc_html__('Cannot resume backup source file at saved offset.', 'rosenheinrich-multisite-migrate')
+                    );
+                }
             }
 
             $entry_ok = true;

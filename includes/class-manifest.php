@@ -518,7 +518,7 @@ class Rmmigrate_Manifest
                     }
                     if ($want) {
                         $blob = $block_comp > 0 ? $fh->read($block_comp) : '';
-                        if ($blob === false) {
+                        if ($blob === false || strlen($blob) < $block_comp) {
                             break 2;
                         }
                         $out = $block_flag === 1 ? gzinflate($blob) : $blob;
@@ -530,7 +530,9 @@ class Rmmigrate_Manifest
                             break 2;
                         }
                     } else {
-                        $fh->seek($block_comp, SEEK_CUR);
+                        if ($fh->seek($block_comp, SEEK_CUR) !== 0) {
+                            break 2;
+                        }
                     }
                     $bytes_done += $block_uncomp;
                 }

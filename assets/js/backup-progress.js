@@ -133,8 +133,18 @@
 
     function buildCreateReview() {
         var $wizard = getCreateWizard();
-        var profile = $wizard.find('#rosenheinrich-multisite-migratefile option:selected').text();
-        var archiveFormat = $wizard.find('#mm-archive-mode option:selected').text();
+        var $profileSelect = $wizard.find('#multisite-migrate-profile, #rosenheinrich-multisite-migratefile');
+        var profile = $.trim($profileSelect.find('option:selected').text());
+        if (!profile && $profileSelect.length) {
+            profile = $.trim($profileSelect.find('option').first().text());
+        }
+        if (!profile) {
+            profile = t('profileFull', 'Full (database + files)');
+        }
+        var archiveFormat = $.trim($wizard.find('#mm-archive-mode option:selected').text());
+        if (!archiveFormat) {
+            archiveFormat = $.trim($wizard.find('#mm-archive-mode option').first().text()) || 'DAF — Resumable (Recommended)';
+        }
         var dest = t('destLocal', 'Local — on this server');
         var wpCore = $wizard.find('#mm-include-wp-core').is(':checked') ? t('yes', 'Yes') : t('no', 'No');
         var scope = getScope();
@@ -1030,7 +1040,7 @@
             scope: getScope(),
             excluded_blogs: getExcludedBlogs(),
             included_blogs: getIncludedBlogs(),
-            backup_profile: $('#rosenheinrich-multisite-migratefile').val() || 'full',
+            backup_profile: ($('#multisite-migrate-profile').val() || $('#rosenheinrich-multisite-migratefile').val() || 'full'),
             archive_mode: $('#mm-archive-mode').val() || '',
             custom_paths: $('#mm-custom-paths').val() || '',
             exclude_tables: $('#mm-exclude-tables').val() || '',
@@ -1101,7 +1111,7 @@
         $('#mm-subsite-exclude').toggleClass('mm-hidden', scope !== 'network_filtered');
     });
 
-    $('#rosenheinrich-multisite-migratefile').on('change', function () {
+    $('#multisite-migrate-profile, #rosenheinrich-multisite-migratefile').on('change', function () {
         $('#mm-custom-paths-wrap').toggleClass('mm-hidden', $(this).val() !== 'custom');
     });
 

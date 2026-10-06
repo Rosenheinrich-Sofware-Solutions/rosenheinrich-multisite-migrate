@@ -46,9 +46,22 @@ final class Rmmigrate_Filesystem_Stream
         if (!$this->ensure_read_handle()) {
             return false;
         }
-        $data = Rmmigrate_Filesystem::fread_raw($this->read_handle, $length);
-        if ($data === false) {
-            return false;
+        // fread() may return less than requested even before EOF (stream buffers,
+        // AV locks, network FS). Loop like Daf_Archiver source reads so large DAF
+        // blocks are not misclassified as "Invalid DAF archive entry."
+        $data = '';
+        while (strlen($data) < $length) {
+            $part = Rmmigrate_Filesystem::fread_raw($this->read_handle, $length - strlen($data));
+            if ($part === false) {
+                if ($data !== '') {
+                    $this->position += strlen($data);
+                }
+                return $data === '' ? false : $data;
+            }
+            if ($part === '') {
+                break;
+            }
+            $data .= $part;
         }
         $this->position += strlen($data);
         return $data;
@@ -81,12 +94,20 @@ final class Rmmigrate_Filesystem_Stream
         }
 
         if (strpos($this->mode, 'a') !== false) {
-            if (file_put_contents($this->path, $data, FILE_APPEND) === false) {
+            // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen -- Plugin: centralized filesystem gateway.
+            $fh = @fopen($this->path, 'ab');
+            if ($fh === false) {
+                return false;
+            }
+            $written = Rmmigrate_Filesystem::fwrite_raw($fh, $data);
+            // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Plugin: centralized filesystem gateway.
+            fclose($fh);
+            if ($written === false || $written !== $len) {
                 return false;
             }
             clearstatcache(true, $this->path);
             $this->position = (int) filesize($this->path);
-            return $len;
+            return $written;
         }
 
         // Mid-file write: use native fopen/fseek/fwrite to avoid loading the
@@ -98,14 +119,24 @@ final class Rmmigrate_Filesystem_Stream
         if ($fh === false) {
             return false;
         }
-        fseek($fh, $this->position);
-        // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fwrite -- Plugin: centralized filesystem gateway.
-        $written = fwrite($fh, $data);
-        // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Plugin: centralized filesystem gateway.
-        fclose($fh);
-        if ($written === false || $written === 0) {
+        if (fseek($fh, $this->position) !== 0) {
+            // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Plugin: centralized filesystem gateway.
+            fclose($fh);
             return false;
         }
+        $written = 0;
+        while ($written < $len) {
+            // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fwrite -- Plugin: centralized filesystem gateway.
+            $part = fwrite($fh, substr($data, $written));
+            if ($part === false || $part === 0) {
+                // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Plugin: centralized filesystem gateway.
+                fclose($fh);
+                return false;
+            }
+            $written += $part;
+        }
+        // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Plugin: centralized filesystem gateway.
+        fclose($fh);
         $this->position += $written;
         return $written;
     }
@@ -145,11 +176,11 @@ final class Rmmigrate_Filesystem_Stream
             return -1;
         }
 
-        $this->position = $target;
-
-        if (is_resource($this->read_handle) && fseek($this->read_handle, $this->position) !== 0) {
+        if (is_resource($this->read_handle) && fseek($this->read_handle, $target) !== 0) {
             return -1;
         }
+
+        $this->position = $target;
 
         return 0;
     }
@@ -403,12 +434,14 @@ class Rmmigrate_Filesystem
             if (flock($fh, LOCK_EX | LOCK_NB)) {
                 ftruncate($fh, 0);
                 rewind($fh);
-                // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fwrite -- Plugin: centralized filesystem gateway.
-                $written = fwrite($fh, $data);
+                $written = self::fwrite_raw($fh, $data);
                 flock($fh, LOCK_UN);
                 // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Plugin: centralized filesystem gateway.
                 fclose($fh);
-                return $written === false ? false : (int) $written;
+                if ($written === false || $written !== strlen($data)) {
+                    return false;
+                }
+                return (int) $written;
             }
             // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Plugin: centralized filesystem gateway.
             fclose($fh);
@@ -455,7 +488,11 @@ class Rmmigrate_Filesystem
         // Buffering the entire file into memory causes fatal memory exhaustion for large DB exports.
         // We must use native PHP file_put_contents for appending.
         if ($flags & FILE_APPEND) {
-            return file_put_contents($path, $data, $flags);
+            $bytes = file_put_contents($path, $data, $flags);
+            if ($bytes === false || $bytes !== strlen($data)) {
+                return false;
+            }
+            return (int) $bytes;
         }
 
         $fs = self::fs();
@@ -990,8 +1027,20 @@ class Rmmigrate_Filesystem
         if (!is_resource($handle)) {
             return false;
         }
-        // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fwrite -- Plugin: centralized filesystem gateway.
-        return fwrite($handle, $data);
+        $len = strlen($data);
+        if ($len === 0) {
+            return 0;
+        }
+        $written = 0;
+        while ($written < $len) {
+            // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fwrite -- Plugin: centralized filesystem gateway.
+            $part = fwrite($handle, substr($data, $written));
+            if ($part === false || $part === 0) {
+                return false;
+            }
+            $written += $part;
+        }
+        return $written;
     }
 
     /**

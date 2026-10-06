@@ -202,10 +202,19 @@ class Rmmigrate_Zip_Archiver
                     $skipped_large++;
                 } else {
                     if (!$zip->addFile($item['path'], $item['archive'])) {
-                        Rmmigrate_Logger::log(sprintf('Failed to queue archive file: %s', $item['path']));
-                    } else {
-                        $added++;
+                        // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+                        throw Rmmigrate_Job_Exception::raise(
+                            sanitize_key(Rmmigrate_Error_Codes::ARCHIVE_VALIDATION_FAILED),
+                            esc_html(
+                                sprintf(
+                                    /* translators: %s: absolute file path */
+                                    __('Cannot add a file to the backup archive: %s', 'rosenheinrich-multisite-migrate'),
+                                    $item['path']
+                                )
+                            )
+                        );
                     }
+                    $added++;
                 }
             }
             $file_index++;

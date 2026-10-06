@@ -184,7 +184,11 @@ class Rmmigrate_Archive_Extractor
         if ($byte_offset < 8) {
             $byte_offset = 8;
         }
-        $fh->seek($byte_offset);
+        if ($fh->seek($byte_offset) !== 0) {
+            $fh->close();
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+            throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::EXTRACT_FAILED), esc_html__('Cannot read DAF archive.', 'rosenheinrich-multisite-migrate'));
+        }
 
         $start = microtime(true);
         $entries = (int) ($extract['entry_count'] ?? 0);
@@ -278,7 +282,11 @@ class Rmmigrate_Archive_Extractor
             }
 
             // v3 block extraction (resumable at block boundaries).
-            $fh->seek((int) $partial['block_offset']);
+            if ($fh->seek((int) $partial['block_offset']) !== 0) {
+                $fh->close();
+                // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+                throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::EXTRACT_FAILED), esc_html__('Cannot read DAF archive.', 'rosenheinrich-multisite-migrate'));
+            }
             $dest = $partial['dest'];
             $bytes_done = (int) $partial['bytes_done'];
             $uncomp_len = (int) $partial['uncomp_len'];
@@ -345,7 +353,11 @@ class Rmmigrate_Archive_Extractor
                 }
 
                 if ($dest === null) {
-                    $fh->seek($block_comp, SEEK_CUR);
+                    if ($fh->seek($block_comp, SEEK_CUR) !== 0) {
+                        $fh->close();
+                        // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+                        throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::DAF_CORRUPT), esc_html__('Invalid DAF archive entry.', 'rosenheinrich-multisite-migrate'));
+                    }
                 } else {
                     $blob = $block_comp > 0 ? $fh->read($block_comp) : '';
                     if ($blob === false || strlen($blob) < $block_comp) {
@@ -377,7 +389,9 @@ class Rmmigrate_Archive_Extractor
                     $write_chunk = $timeouts > 0 ? 524288 : strlen($out);
                     $out_len = strlen($out);
                     for ($off = 0; $off < $out_len; $off += $write_chunk) {
-                        if ($out_fh->write(substr($out, $off, $write_chunk)) === false) {
+                        $slice = substr($out, $off, $write_chunk);
+                        $written = $out_fh->write($slice);
+                        if ($written === false || $written !== strlen($slice)) {
                             $out_fh->close();
                             $fh->close();
                             // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.

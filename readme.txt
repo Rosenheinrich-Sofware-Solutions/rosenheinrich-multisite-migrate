@@ -4,7 +4,7 @@ Tags: multisite, site-migration, wordpress-migration, migrate-wordpress, clone-s
 Requires at least: 6.2
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.2.14
+Stable tag: 1.2.15
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -241,6 +241,11 @@ Backup and restore run as background-style chunked jobs. They are designed not t
 
 == Changelog ==
 
+= 1.2.15 – 2026-10-06 =
+* Fix DAF restore extract failures ("Invalid DAF archive entry") when short fread reads occur on network or buffered filesystems.
+* Harden chunked import resume, URL byte-range downloads, and peer transfer chunk offsets.
+* Harden filesystem append and exclusive writes so short fwrite results fail instead of silently truncating archives.
+
 = 1.2.14 – 2026-10-02 =
 * Fix chunked import failures ("Empty chunk" / oversized chunk) by preferring FormData file parts over php://input.
 
@@ -253,6 +258,9 @@ Backup and restore run as background-style chunked jobs. They are designed not t
 Older entries are in changelog.txt, which ships with the plugin, and the full history is published at [https://multisitemigrate.rosenheinrich.com/changelog/](https://multisitemigrate.rosenheinrich.com/changelog/).
 
 == Upgrade Notice ==
+
+= 1.2.15 =
+Fix for DAF restore extract "Invalid DAF archive entry" on network imports. Recommended update.
 
 = 1.2.14 =
 Fix for chunked import Empty chunk / oversized chunk failures. Recommended update.
