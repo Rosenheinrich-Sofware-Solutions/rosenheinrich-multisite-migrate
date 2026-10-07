@@ -144,7 +144,7 @@ The free plugin does not phone home by default. It may contact external services
 
 = Rosenheinrich portal (multisitemigrate.rosenheinrich.com) =
 
-* **Usage telemetry (opt-in):** setup wizard or Settings → Privacy. Sends a pseudonymous install ID, site hash (not your URL), plugin/WordPress/PHP versions, wizard progress, and sanitized backup/import/restore outcomes — never backup files or database content.
+* **Usage telemetry (opt-in):** setup wizard or Settings → Privacy. Sends a pseudonymous install ID, site hash (not your URL), plugin/WordPress/PHP versions, wizard progress, and sanitized backup/import/restore outcomes — never backup files or database content. If you opted in, a one-time anonymous uninstall signal may be recorded when the plugin is deleted.
 * **Product emails (opt-in):** setup wizard only. Sends your admin email, name, site URL, site title, and version info to subscribe you to product updates.
 * **Feedback (explicit submit):** in-plugin feedback or deactivate survey. Sends your message, rating/reason, versions, and site hash; optional contact email on deactivate only.
 

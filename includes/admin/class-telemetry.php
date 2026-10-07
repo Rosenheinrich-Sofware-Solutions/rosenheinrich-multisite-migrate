@@ -137,6 +137,54 @@ final class Rmmigrate_Telemetry
         );
     }
 
+    public static function uninstall_url(): string
+    {
+        $base = Rmmigrate_Capabilities::PRICING_BASE_URL;
+
+        return (string) apply_filters(
+            'rmmigrate_telemetry_uninstall_url',
+            $base . '/wp-json/multisite-migrate-portal/v1/telemetry/uninstall'
+        );
+    }
+
+    /**
+     * Consent-gated one-time uninstall beacon (called from uninstall.php before option wipe).
+     */
+    public static function send_uninstall_beacon(): void
+    {
+        if (!self::has_consent()) {
+            return;
+        }
+
+        $state      = self::get_state();
+        $install_id = isset($state['install_id']) ? (string) $state['install_id'] : '';
+        if (strlen($install_id) !== 64 || !ctype_xdigit($install_id)) {
+            return;
+        }
+
+        if (!function_exists('wp_remote_post')) {
+            return;
+        }
+
+        $site_hash = self::site_hash();
+        $payload   = array(
+            'install_id'     => $install_id,
+            'site_hash'      => $site_hash,
+            'product_build'  => self::product_build(),
+            'plugin_version' => defined('RMMIGRATE_VERSION') ? (string) RMMIGRATE_VERSION : '',
+        );
+
+        wp_remote_post(
+            self::uninstall_url(),
+            array(
+                'timeout'  => 2,
+                'blocking' => true,
+                'headers'  => array('Content-Type' => 'application/json'),
+                'body'     => (string) wp_json_encode($payload),
+            )
+        );
+    }
+
     /**
      * @param array<string,mixed> $props
      */
@@ -506,6 +554,10 @@ final class Rmmigrate_Telemetry
             array(
                 'title' => __('Environment snapshot', 'rosenheinrich-multisite-migrate'),
                 'detail' => __('WordPress, PHP, and hosting basics so we can prioritize compatibility work.', 'rosenheinrich-multisite-migrate'),
+            ),
+            array(
+                'title' => __('Uninstall signal', 'rosenheinrich-multisite-migrate'),
+                'detail' => __('If you opted in, a one-time anonymous uninstall signal when the plugin is deleted.', 'rosenheinrich-multisite-migrate'),
             ),
         );
     }

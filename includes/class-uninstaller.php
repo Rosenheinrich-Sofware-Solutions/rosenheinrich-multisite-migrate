@@ -93,8 +93,64 @@ class Rmmigrate_Uninstaller
 
     public static function run(): void
     {
+        self::maybe_send_uninstall_beacon();
         self::apply_cleanup(self::get_plan());
         delete_site_option(self::PLAN_OPTION);
+    }
+
+    /**
+     * Consent-gated uninstall beacon before options are wiped (wp.org Guideline 7).
+     */
+    private static function maybe_send_uninstall_beacon(): void
+    {
+        if (class_exists('Rmmigrate_Telemetry', false) && method_exists('Rmmigrate_Telemetry', 'send_uninstall_beacon')) {
+            Rmmigrate_Telemetry::send_uninstall_beacon();
+            return;
+        }
+
+        if (!function_exists('wp_remote_post') || !function_exists('get_site_option')) {
+            return;
+        }
+
+        $state = get_site_option('rmmigrate_telemetry', array());
+        if (!is_array($state) || ($state['consent'] ?? '') !== 'granted') {
+            return;
+        }
+
+        $install_id = isset($state['install_id']) ? (string) $state['install_id'] : '';
+        if (strlen($install_id) !== 64 || !ctype_xdigit($install_id)) {
+            return;
+        }
+
+        $base = 'https://multisitemigrate.rosenheinrich.com';
+        if (class_exists('Rmmigrate_Capabilities', false)) {
+            $base = Rmmigrate_Capabilities::PRICING_BASE_URL;
+        }
+
+        $url = (string) apply_filters(
+            'rmmigrate_telemetry_uninstall_url',
+            $base . '/wp-json/multisite-migrate-portal/v1/telemetry/uninstall'
+        );
+
+        $salt      = defined('AUTH_SALT') ? AUTH_SALT : 'rmmigrate';
+        $site_hash = hash('sha256', home_url('/') . '|' . $salt);
+
+        wp_remote_post(
+            $url,
+            array(
+                'timeout'  => 2,
+                'blocking' => true,
+                'headers'  => array('Content-Type' => 'application/json'),
+                'body'     => (string) wp_json_encode(
+                    array(
+                        'install_id'     => $install_id,
+                        'site_hash'      => $site_hash,
+                        'product_build'  => 'free',
+                        'plugin_version' => defined('RMMIGRATE_VERSION') ? (string) RMMIGRATE_VERSION : '',
+                    )
+                ),
+            )
+        );
     }
 
     public static function resolve_storage_dir(): string
