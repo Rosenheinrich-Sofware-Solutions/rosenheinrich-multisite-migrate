@@ -146,7 +146,7 @@ class Rmmigrate_Uninstaller
                         'install_id'     => $install_id,
                         'site_hash'      => $site_hash,
                         'product_build'  => 'free',
-                        'plugin_version' => defined('RMMIGRATE_VERSION') ? (string) RMMIGRATE_VERSION : '',
+                        'plugin_version' => self::installed_plugin_version(),
                     )
                 ),
             )
@@ -230,8 +230,10 @@ class Rmmigrate_Uninstaller
 
     private static function clear_maintenance(): void
     {
-        delete_site_option('rmmigrate_maintenance');
-        delete_option('rmmigrate_maintenance');
+        if (!self::commercial_plugin_remains_installed()) {
+            delete_site_option('rmmigrate_maintenance');
+            delete_option('rmmigrate_maintenance');
+        }
         $maintenance_file = (defined('ABSPATH') ? ABSPATH : '') . '.maintenance';
         if ($maintenance_file !== '.maintenance' && file_exists($maintenance_file)) {
             wp_delete_file($maintenance_file);
@@ -240,6 +242,8 @@ class Rmmigrate_Uninstaller
 
     private static function clear_crons(): void
     {
+        $peer_installed = self::commercial_plugin_remains_installed();
+
         wp_clear_scheduled_hook('rmmigrate_worker_cron');
         wp_clear_scheduled_hook('rmmigrate_purge_deletes');
         wp_clear_scheduled_hook('rmmigrate_deferred_hosting_detect');
@@ -249,6 +253,11 @@ class Rmmigrate_Uninstaller
         wp_clear_scheduled_hook('rmmigrate_daily_telemetry_snapshot');
         wp_clear_scheduled_hook('rmmigrate_telemetry_snapshot_oneshot');
         wp_clear_scheduled_hook('rmmigrate_oauth_purge_tokens');
+
+        if ($peer_installed) {
+            return;
+        }
+
         wp_clear_scheduled_hook('rmmigrate_pro_worker_cron');
         wp_clear_scheduled_hook('rmmigrate_pro_staging_push_cron');
         wp_clear_scheduled_hook('rmmigrate_pro_remote_import_cron');
@@ -260,49 +269,288 @@ class Rmmigrate_Uninstaller
         wp_clear_scheduled_hook('rmmigrate_pro_telemetry_snapshot_oneshot');
     }
 
-
-    private static function delete_settings(): void
+    public static function installed_plugin_version(): string
     {
-        $site_options = array(
+        if (defined('RMMIGRATE_VERSION')) {
+            return (string) RMMIGRATE_VERSION;
+        }
+
+        $main_file = dirname(__DIR__) . '/multisite-migrate.php';
+        if (!is_readable($main_file)) {
+            return '';
+        }
+
+        if (!function_exists('get_file_data')) {
+            if (!defined('ABSPATH')) {
+                return '';
+            }
+            require_once ABSPATH . 'wp-admin/includes/plugin.php';
+        }
+
+        if (!function_exists('get_file_data')) {
+            return '';
+        }
+
+        $data = get_file_data($main_file, array('Version' => 'Version'), false);
+
+        $version = isset($data['Version']) ? (string) $data['Version'] : '';
+
+        return function_exists('sanitize_text_field') ? sanitize_text_field($version) : trim($version);
+    }
+
+    /**
+     * @return list<string>
+     */
+    private static function known_free_plugin_basenames(): array
+    {
+        return array(
+            'rosenheinrich-multisite-migrate/multisite-migrate.php',
+            'multisite-migrate/multisite-migrate.php',
+        );
+    }
+
+    /**
+     * @return list<string>
+     */
+    private static function installed_plugin_basenames(): array
+    {
+        if (!function_exists('get_plugins')) {
+            if (!defined('ABSPATH') || !is_file(ABSPATH . 'wp-admin/includes/plugin.php')) {
+                return array();
+            }
+            require_once ABSPATH . 'wp-admin/includes/plugin.php';
+        }
+
+        if (!function_exists('get_plugins')) {
+            return array();
+        }
+
+        return array_keys(get_plugins());
+    }
+
+    private static function plugin_file_is_installed(string $basename): bool
+    {
+        if ($basename === '') {
+            return false;
+        }
+
+        if (defined('WP_PLUGIN_DIR') && is_file(WP_PLUGIN_DIR . '/' . $basename)) {
+            return true;
+        }
+
+        return in_array($basename, self::installed_plugin_basenames(), true);
+    }
+
+    private static function commercial_plugin_remains_installed(): bool
+    {
+        $known_commercial = array(
+            'multisite-migrate-pro/multisite-migrate.php',
+        );
+        foreach ($known_commercial as $basename) {
+            if (self::plugin_file_is_installed($basename)) {
+                return true;
+            }
+        }
+
+        $free_basenames = self::known_free_plugin_basenames();
+        foreach (self::installed_plugin_basenames() as $basename) {
+            if (in_array($basename, $free_basenames, true)) {
+                continue;
+            }
+            if (preg_match('#/multisite-migrate\.php$#', $basename) === 1) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Shared engine options Pro still needs when Free is removed but Pro remains on disk.
+     *
+     * @return list<string>
+     */
+    private static function shared_site_options_when_peer_installed(): array
+    {
+        return array(
             'rmmigrate_settings',
-            'rmmigrate_setup_wizard',
-            'rmmigrate_setup_wizard_state',
-            'rmmigrate_pending_setup',
-            'rmmigrate_setup_wizard_completed_emitted',
-            'rmmigrate_pro_settings',
-            'rmmigrate_pro_setup_wizard',
-            'rmmigrate_pro_setup_wizard_state',
-            'rmmigrate_pro_pending_setup',
-            'rmmigrate_pro_setup_wizard_completed_emitted',
-            'rmmigrate_pending_welcome',
-            'rmmigrate_free_welcome_version',
+            'rmmigrate_maintenance',
+            'rmmigrate_backup_root_failed',
+            'rmmigrate_pro_backup_root_failed',
+            'rmmigrate_oauth_flush_rewrite',
+            'rmmigrate_oauth_db_version',
+            'rmmigrate_db_version',
+            'rmmigrate_log_site_token',
             'rmmigrate_hosting_status',
             'rmmigrate_last_error',
             'rmmigrate_recent_errors',
             'rmmigrate_migration_notice',
             'rmmigrate_recover_point_job_id',
             'rmmigrate_recover_point_deployed_at',
+        );
+    }
+
+    /**
+     * @return list<string>
+     */
+    private static function site_options_for_deletion(bool $peer_installed): array
+    {
+        $free_only = array(
+            'rmmigrate_setup_wizard',
+            'rmmigrate_setup_wizard_state',
+            'rmmigrate_pending_setup',
+            'rmmigrate_setup_wizard_completed_emitted',
+            'rmmigrate_pending_welcome',
+            'rmmigrate_free_welcome_version',
             'rmmigrate_upgrade_notice',
             'rmmigrate_dismiss_multisite_upgrade',
             'rmmigrate_first_activated_at',
-            'rmmigrate_maintenance',
             'rmmigrate_telemetry',
             'rmmigrate_telemetry_queue',
             'rmmigrate_uninstall_plan',
-            'rmmigrate_pro_uninstall_plan',
-            'rmmigrate_backup_root_failed',
-            'rmmigrate_pro_backup_root_failed',
-            'rmmigrate_oauth_flush_rewrite',
-            'rmmigrate_pro_gdrive_tokens',
-            'rmmigrate_pro_gdrive_folder_id',
-            'rmmigrate_pro_license_data',
-            'rmmigrate_pro_staging_sites',
-            'rmmigrate_pro_dropbox_tokens',
-            'rmmigrate_pro_last_tick',
-            'rmmigrate_pro_schedule_blocked_since',
-            'rmmigrate_pro_schedule_fail_count',
-            'rmmigrate_pro_merged_free_schedule',
         );
+
+        if ($peer_installed) {
+            return $free_only;
+        }
+
+        return array_merge(
+            $free_only,
+            self::shared_site_options_when_peer_installed(),
+            array(
+                'rmmigrate_pro_settings',
+                'rmmigrate_pro_setup_wizard',
+                'rmmigrate_pro_setup_wizard_state',
+                'rmmigrate_pro_pending_setup',
+                'rmmigrate_pro_setup_wizard_completed_emitted',
+                'rmmigrate_pro_uninstall_plan',
+                'rmmigrate_pro_gdrive_tokens',
+                'rmmigrate_pro_gdrive_folder_id',
+                'rmmigrate_pro_license_data',
+                'rmmigrate_pro_staging_sites',
+                'rmmigrate_pro_dropbox_tokens',
+                'rmmigrate_pro_last_tick',
+                'rmmigrate_pro_schedule_blocked_since',
+                'rmmigrate_pro_schedule_fail_count',
+                'rmmigrate_pro_merged_free_schedule',
+            )
+        );
+    }
+
+    /**
+     * @return list<string>
+     */
+    private static function transients_for_deletion(bool $peer_installed): array
+    {
+        $free_transients = array(
+            'rmmigrate_lock',
+            'rmmigrate_migration_notice',
+            'rmmigrate_preflight',
+        );
+
+        if ($peer_installed) {
+            return $free_transients;
+        }
+
+        return array_merge(
+            $free_transients,
+            array(
+                'rmmigrate_pro_lock',
+                'rmmigrate_pro_migration_notice',
+                'rmmigrate_pro_preflight',
+                'rmmigrate_pro_split_state',
+                'rmmigrate_pro_staging_push_active',
+            )
+        );
+    }
+
+    private static function delete_scoped_option_wildcards(bool $peer_installed): void
+    {
+        global $wpdb;
+
+        if ($peer_installed) {
+            $wpdb->query(
+                $wpdb->prepare(
+                    "DELETE FROM {$wpdb->usermeta} WHERE meta_key LIKE %s AND meta_key NOT LIKE %s",
+                    $wpdb->esc_like('rmmigrate_') . '%',
+                    $wpdb->esc_like('rmmigrate_pro_') . '%'
+                )
+            );
+
+            if (is_multisite() && isset($wpdb->sitemeta)) {
+                $wpdb->query(
+                    $wpdb->prepare(
+                        "DELETE FROM {$wpdb->sitemeta} WHERE (meta_key LIKE %s AND meta_key NOT LIKE %s) OR (meta_key LIKE %s AND meta_key NOT LIKE %s) OR (meta_key LIKE %s AND meta_key NOT LIKE %s)",
+                        $wpdb->esc_like('rmmigrate_') . '%',
+                        $wpdb->esc_like('rmmigrate_pro_') . '%',
+                        $wpdb->esc_like('_site_transient_rmmigrate_') . '%',
+                        $wpdb->esc_like('_site_transient_rmmigrate_pro_') . '%',
+                        $wpdb->esc_like('_site_transient_timeout_rmmigrate_') . '%',
+                        $wpdb->esc_like('_site_transient_timeout_rmmigrate_pro_') . '%'
+                    )
+                );
+            }
+
+            if (isset($wpdb->options)) {
+                $preserve = self::shared_site_options_when_peer_installed();
+                $not_in   = '';
+                if ($preserve !== array()) {
+                    $quoted = array();
+                    foreach ($preserve as $name) {
+                        $quoted[] = "'" . esc_sql($name) . "'";
+                    }
+                    $not_in = ' AND option_name NOT IN (' . implode(',', $quoted) . ')';
+                }
+                $wpdb->query(
+                    $wpdb->prepare(
+                        "DELETE FROM {$wpdb->options} WHERE ((option_name LIKE %s AND option_name NOT LIKE %s) OR (option_name LIKE %s AND option_name NOT LIKE %s) OR (option_name LIKE %s AND option_name NOT LIKE %s))" . $not_in,
+                        $wpdb->esc_like('rmmigrate_') . '%',
+                        $wpdb->esc_like('rmmigrate_pro_') . '%',
+                        $wpdb->esc_like('_transient_rmmigrate_') . '%',
+                        $wpdb->esc_like('_transient_rmmigrate_pro_') . '%',
+                        $wpdb->esc_like('_transient_timeout_rmmigrate_') . '%',
+                        $wpdb->esc_like('_transient_timeout_rmmigrate_pro_') . '%'
+                    )
+                );
+            }
+
+            return;
+        }
+
+        $wpdb->query(
+            $wpdb->prepare(
+                "DELETE FROM {$wpdb->usermeta} WHERE meta_key LIKE %s",
+                $wpdb->esc_like('rmmigrate_') . '%'
+            )
+        );
+
+        if (is_multisite() && isset($wpdb->sitemeta)) {
+            $wpdb->query(
+                $wpdb->prepare(
+                    "DELETE FROM {$wpdb->sitemeta} WHERE meta_key LIKE %s OR meta_key LIKE %s OR meta_key LIKE %s",
+                    $wpdb->esc_like('rmmigrate_') . '%',
+                    $wpdb->esc_like('_site_transient_rmmigrate_') . '%',
+                    $wpdb->esc_like('_site_transient_timeout_rmmigrate_') . '%'
+                )
+            );
+        }
+
+        if (isset($wpdb->options)) {
+            $wpdb->query(
+                $wpdb->prepare(
+                    "DELETE FROM {$wpdb->options} WHERE option_name LIKE %s OR option_name LIKE %s OR option_name LIKE %s",
+                    $wpdb->esc_like('rmmigrate_') . '%',
+                    $wpdb->esc_like('_transient_rmmigrate_') . '%',
+                    $wpdb->esc_like('_transient_timeout_rmmigrate_') . '%'
+                )
+            );
+        }
+    }
+
+    private static function delete_settings(): void
+    {
+        $peer_installed = self::commercial_plugin_remains_installed();
+        $site_options   = self::site_options_for_deletion($peer_installed);
 
         foreach ($site_options as $option_name) {
             delete_site_option($option_name);
@@ -332,53 +580,18 @@ class Rmmigrate_Uninstaller
             }
         }
 
-        $transients = array(
-            'rmmigrate_lock',
-            'rmmigrate_migration_notice',
-            'rmmigrate_preflight',
-            'rmmigrate_pro_lock',
-            'rmmigrate_pro_migration_notice',
-            'rmmigrate_pro_preflight',
-            'rmmigrate_pro_split_state',
-            'rmmigrate_pro_staging_push_active',
-        );
-
-        foreach ($transients as $transient_name) {
+        foreach (self::transients_for_deletion($peer_installed) as $transient_name) {
             delete_transient($transient_name);
             delete_site_transient($transient_name);
         }
 
+        self::delete_scoped_option_wildcards($peer_installed);
+
+        if ($peer_installed) {
+            return;
+        }
+
         global $wpdb;
-
-        // Wildcard cleanup across usermeta, sitemeta, and options
-        $wpdb->query(
-            $wpdb->prepare(
-                "DELETE FROM {$wpdb->usermeta} WHERE meta_key LIKE %s",
-                $wpdb->esc_like('rmmigrate_') . '%'
-            )
-        );
-
-        if (is_multisite() && isset($wpdb->sitemeta)) {
-            $wpdb->query(
-                $wpdb->prepare(
-                    "DELETE FROM {$wpdb->sitemeta} WHERE meta_key LIKE %s OR meta_key LIKE %s OR meta_key LIKE %s",
-                    $wpdb->esc_like('rmmigrate_') . '%',
-                    $wpdb->esc_like('_site_transient_rmmigrate_') . '%',
-                    $wpdb->esc_like('_site_transient_timeout_rmmigrate_') . '%'
-                )
-            );
-        }
-
-        if (isset($wpdb->options)) {
-            $wpdb->query(
-                $wpdb->prepare(
-                    "DELETE FROM {$wpdb->options} WHERE option_name LIKE %s OR option_name LIKE %s OR option_name LIKE %s",
-                    $wpdb->esc_like('rmmigrate_') . '%',
-                    $wpdb->esc_like('_transient_rmmigrate_') . '%',
-                    $wpdb->esc_like('_transient_timeout_rmmigrate_') . '%'
-                )
-            );
-        }
 
         $snap_db_file = dirname(__DIR__) . '/includes/class-snap-db.php';
         if (!class_exists('Rmmigrate_Snap_DB', false) && is_file($snap_db_file)) {

@@ -117,6 +117,64 @@ final class Rmmigrate_Telemetry
         return 'free';
     }
 
+    public static function plugin_version(): string
+    {
+        if (defined('RMMIGRATE_VERSION')) {
+            return (string) RMMIGRATE_VERSION;
+        }
+
+        return self::read_plugin_version_from_header();
+    }
+
+    private static function read_plugin_version_from_header(): string
+    {
+        $main_file = self::plugin_main_file();
+        if ($main_file === '' || !is_readable($main_file)) {
+            return '';
+        }
+
+        if (!function_exists('get_file_data')) {
+            if (!defined('ABSPATH')) {
+                return '';
+            }
+            require_once ABSPATH . 'wp-admin/includes/plugin.php';
+        }
+
+        if (!function_exists('get_file_data')) {
+            return '';
+        }
+
+        $data = get_file_data($main_file, array('Version' => 'Version'), false);
+
+        $version = isset($data['Version']) ? (string) $data['Version'] : '';
+
+        return function_exists('sanitize_text_field') ? sanitize_text_field($version) : trim($version);
+    }
+
+    private static function plugin_main_file(): string
+    {
+        if (defined('RMMIGRATE_PATH') && RMMIGRATE_PATH !== '') {
+            return RMMIGRATE_PATH . 'multisite-migrate.php';
+        }
+
+        return dirname(dirname(__DIR__)) . '/multisite-migrate.php';
+    }
+
+    /**
+     * @param array<int,array<string,mixed>> $events
+     * @return array<string,mixed>
+     */
+    private static function events_batch_body(array $events): array
+    {
+        return array(
+            'install_id'     => self::ensure_install_id(),
+            'site_hash'      => self::site_hash(),
+            'product_build'  => self::product_build(),
+            'plugin_version' => self::plugin_version(),
+            'events'         => $events,
+        );
+    }
+
     public static function register_url(): string
     {
         $base = Rmmigrate_Capabilities::PRICING_BASE_URL;
@@ -193,7 +251,7 @@ final class Rmmigrate_Telemetry
             'install_id'     => $install_id,
             'site_hash'      => self::site_hash(),
             'product_build'  => self::product_build(),
-            'plugin_version' => defined('RMMIGRATE_VERSION') ? (string) RMMIGRATE_VERSION : '',
+            'plugin_version' => self::plugin_version(),
         );
 
         wp_remote_post(
@@ -421,13 +479,7 @@ final class Rmmigrate_Telemetry
         $response = wp_remote_post(self::events_url(), array(
             'timeout' => 15,
             'headers' => array('Content-Type' => 'application/json'),
-            'body'    => wp_json_encode(array(
-                'install_id'     => $install_id,
-                'site_hash'      => self::site_hash(),
-                'product_build'  => self::product_build(),
-                'plugin_version' => defined('RMMIGRATE_VERSION') ? (string) RMMIGRATE_VERSION : '',
-                'events'         => $events,
-            )),
+            'body'    => wp_json_encode(self::events_batch_body($events)),
         ));
 
         if (is_wp_error($response)) {
@@ -762,7 +814,7 @@ final class Rmmigrate_Telemetry
             'install_id'       => self::ensure_install_id(),
             'site_hash'        => self::site_hash(),
             'product_build'    => self::product_build(),
-            'plugin_version'   => defined('RMMIGRATE_VERSION') ? (string) RMMIGRATE_VERSION : '',
+            'plugin_version'   => self::plugin_version(),
             'wp_version'       => (string) $wp_version,
             'php_version'      => PHP_VERSION,
             'locale'           => (string) determine_locale(),
@@ -945,12 +997,7 @@ final class Rmmigrate_Telemetry
         $response = wp_remote_post(self::events_url(), array(
             'timeout' => 15,
             'headers' => array('Content-Type' => 'application/json'),
-            'body'    => wp_json_encode(array(
-                'install_id'    => $install_id,
-                'site_hash'     => self::site_hash(),
-                'product_build' => self::product_build(),
-                'events'        => $events,
-            )),
+            'body'    => wp_json_encode(self::events_batch_body($events)),
         ));
 
         if (is_wp_error($response)) {
