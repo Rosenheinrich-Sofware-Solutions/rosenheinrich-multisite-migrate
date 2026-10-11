@@ -28,8 +28,6 @@
 
     }
 
-
-
     function redirectToDone(jobId) {
         $(window).off('beforeunload.mmImport');
         var doneUrl = importDoneUrl();
@@ -41,12 +39,10 @@
         window.location.href = doneUrl;
     }
 
-
-
-
-
     function formatBytes(bytes) {
-        if (!bytes || bytes <= 0) return '0 B';
+        if (!bytes || bytes <= 0) {
+return '0 B';
+        }
         var k = 1024;
         var sizes = ['B', 'KB', 'MB', 'GB'];
         var i = Math.floor(Math.log(bytes) / Math.log(k));
@@ -451,7 +447,8 @@
                 if (typeof res === 'string') {
                     try {
                         res = JSON.parse(res);
-                    } catch (e) {}
+                    } catch (e) {
+}
                 }
                 if (res && res.success && res.data && res.data.job_id) {
                     stopVerifyInterval();
@@ -513,8 +510,6 @@
         uploadChunk();
     }
 
-
-
     $('#mm-import-local-file').on('change', function () {
 
         if (this.files[0]) {
@@ -525,8 +520,6 @@
         }
 
     });
-
-
 
     $('#mm-import-dropzone').on('click', function () {
 
@@ -552,37 +545,11 @@
 
     });
 
-
-
     $('#mm-import-browse').on('click', function (e) {
 
         e.stopPropagation();
 
     });
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
     (function initMigrationGuide() {
         var $guide = $('.mm-migration-guide');

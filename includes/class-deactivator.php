@@ -26,6 +26,72 @@ class Rmmigrate_Deactivator
         delete_site_option('rmmigrate_maintenance');
         delete_option('rmmigrate_maintenance');
         self::remove_owned_maintenance_file();
+        self::maybe_send_deactivate_beacon();
+    }
+
+    private static function maybe_send_deactivate_beacon(): void
+    {
+        if (self::sibling_commercial_remains_active()) {
+            return;
+        }
+
+        if (class_exists('Rmmigrate_Telemetry', false) && method_exists('Rmmigrate_Telemetry', 'send_deactivate_beacon')) {
+            Rmmigrate_Telemetry::send_deactivate_beacon();
+            return;
+        }
+
+        if (!defined('RMMIGRATE_PATH')) {
+            return;
+        }
+
+        $telemetry_file = RMMIGRATE_PATH . 'includes/admin/class-telemetry.php';
+        if (!is_file($telemetry_file)) {
+            return;
+        }
+        require_once $telemetry_file;
+        if (class_exists('Rmmigrate_Telemetry', false) && method_exists('Rmmigrate_Telemetry', 'send_deactivate_beacon')) {
+            Rmmigrate_Telemetry::send_deactivate_beacon();
+        }
+    }
+
+    private static function sibling_commercial_remains_active(): bool
+    {
+        if (class_exists('Rmmigrate_Pro_Edition_Exclusion', false)) {
+            return Rmmigrate_Pro_Edition_Exclusion::commercial_is_active_early();
+        }
+
+        $free_basenames = array(
+            'rosenheinrich-multisite-migrate/multisite-migrate.php',
+            'multisite-migrate/multisite-migrate.php',
+        );
+
+        $listed = get_option('active_plugins', array());
+        if (!is_array($listed)) {
+            $listed = array();
+        }
+        foreach ($listed as $plugin) {
+            if (!is_string($plugin) || in_array($plugin, $free_basenames, true)) {
+                continue;
+            }
+            if (preg_match('#/multisite-migrate\.php$#', $plugin) === 1) {
+                return true;
+            }
+        }
+
+        $sitewide = get_site_option('active_sitewide_plugins', array());
+        if (!is_array($sitewide)) {
+            return false;
+        }
+        foreach (array_keys($sitewide) as $plugin) {
+            if (!is_string($plugin) || in_array($plugin, $free_basenames, true)) {
+                continue;
+            }
+            if (preg_match('#/multisite-migrate\.php$#', $plugin) === 1) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static function remove_owned_maintenance_file(): void

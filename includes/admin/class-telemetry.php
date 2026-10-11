@@ -147,10 +147,33 @@ final class Rmmigrate_Telemetry
         );
     }
 
+    public static function deactivate_url(): string
+    {
+        $base = Rmmigrate_Capabilities::PRICING_BASE_URL;
+
+        return (string) apply_filters(
+            'rmmigrate_telemetry_deactivate_url',
+            $base . '/wp-json/multisite-migrate-portal/v1/telemetry/deactivate'
+        );
+    }
+
+    /**
+     * Consent-gated deactivate beacon (deactivation hook; never blocks deactivate).
+     */
+    public static function send_deactivate_beacon(): void
+    {
+        self::send_lifecycle_beacon(self::deactivate_url());
+    }
+
     /**
      * Consent-gated one-time uninstall beacon (called from uninstall.php before option wipe).
      */
     public static function send_uninstall_beacon(): void
+    {
+        self::send_lifecycle_beacon(self::uninstall_url());
+    }
+
+    private static function send_lifecycle_beacon(string $url): void
     {
         if (!self::has_consent()) {
             return;
@@ -166,19 +189,18 @@ final class Rmmigrate_Telemetry
             return;
         }
 
-        $site_hash = self::site_hash();
-        $payload   = array(
+        $payload = array(
             'install_id'     => $install_id,
-            'site_hash'      => $site_hash,
+            'site_hash'      => self::site_hash(),
             'product_build'  => self::product_build(),
             'plugin_version' => defined('RMMIGRATE_VERSION') ? (string) RMMIGRATE_VERSION : '',
         );
 
         wp_remote_post(
-            self::uninstall_url(),
+            $url,
             array(
                 'timeout'  => 2,
-                'blocking' => true,
+                'blocking' => false,
                 'headers'  => array('Content-Type' => 'application/json'),
                 'body'     => (string) wp_json_encode($payload),
             )
@@ -556,8 +578,8 @@ final class Rmmigrate_Telemetry
                 'detail' => __('WordPress, PHP, and hosting basics so we can prioritize compatibility work.', 'rosenheinrich-multisite-migrate'),
             ),
             array(
-                'title' => __('Uninstall signal', 'rosenheinrich-multisite-migrate'),
-                'detail' => __('If you opted in, a one-time anonymous uninstall signal when the plugin is deleted.', 'rosenheinrich-multisite-migrate'),
+                'title' => __('Lifecycle signals', 'rosenheinrich-multisite-migrate'),
+                'detail' => __('If you opted in, anonymous deactivation and uninstall signals when the plugin is deactivated or deleted (non-blocking).', 'rosenheinrich-multisite-migrate'),
             ),
         );
     }
@@ -1073,9 +1095,7 @@ final class Rmmigrate_Telemetry
             $num *= 1024;
         } elseif ($unit === 'k') {
             $num /= 1024;
-        } elseif ($unit === 'm') {
-            // already MB
-        } else {
+        } elseif ($unit !== 'm') {
             // No unit suffix: the value is raw bytes.
             $num /= 1048576;
         }

@@ -695,7 +695,9 @@
 							}
 						}
 						var mm = items.filter(function (item) {
-							if (!item) return false;
+							if (!item) {
+return false;
+                            }
 							if (typeof item === 'string') {
 								return item.indexOf('multisite-migrate') === 0;
 							}

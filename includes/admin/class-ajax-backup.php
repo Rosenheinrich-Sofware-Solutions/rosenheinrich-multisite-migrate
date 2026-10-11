@@ -323,5 +323,4 @@ class Rmmigrate_Ajax_Backup
         ));
         wp_send_json_success($result);
     }
-
 }

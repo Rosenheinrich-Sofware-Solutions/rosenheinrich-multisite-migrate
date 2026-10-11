@@ -345,10 +345,8 @@ class Rmmigrate_DB_Dumper
             if (defined('PHP_BINARY') && PHP_BINARY) {
                 $candidates[] = str_replace('\\', '/', dirname(PHP_BINARY) . '/../mysql/bin/mysqldump.exe');
             }
-        } else {
-            if (defined('PHP_BINARY') && PHP_BINARY) {
+        } elseif (defined('PHP_BINARY') && PHP_BINARY) {
                 $candidates[] = dirname(PHP_BINARY) . '/../mysql/bin/mysqldump';
-            }
         }
 
         foreach ($candidates as $candidate) {
@@ -385,7 +383,7 @@ class Rmmigrate_DB_Dumper
                     'mysqldump_data_start_bytes' => $data_start,
                     'mysqldump_data_batch_size'  => 0,
                     'phase'                      => 'mysqldump',
-                )));
+                ),));
                 return false;
             }
 
@@ -431,7 +429,7 @@ class Rmmigrate_DB_Dumper
                 'mysqldump_data_start_bytes' => $data_start,
                 'mysqldump_data_batch_size'  => 0,
                 'phase'                      => 'mysqldump',
-            )));
+            ),));
             return false;
         }
 
@@ -517,7 +515,7 @@ class Rmmigrate_DB_Dumper
                 $this->job->update_progress(array('database' => array(
                     'mysqldump_data_batch_size' => $next_batch,
                     'mysqldump_data_mode'       => 'batched',
-                )));
+                ),));
                 return false;
             }
 
@@ -546,7 +544,7 @@ class Rmmigrate_DB_Dumper
             'mysqldump_data_batch_size' => $batch_size,
             'mysqldump_data_mode'       => 'batched',
             'phase'                     => 'mysqldump',
-        )));
+        ),));
 
         return false;
     }
@@ -580,7 +578,7 @@ class Rmmigrate_DB_Dumper
             $this->job->update_progress(array('database' => array(
                 'mysqldump_data_mode'      => 'batched',
                 'mysqldump_data_batch_size' => $this->initial_mysqldump_data_batch_size($tables, 0),
-            )));
+            ),));
             return false;
         }
 
@@ -600,7 +598,7 @@ class Rmmigrate_DB_Dumper
             'mysqldump_table_index' => $total,
             'mysqldump_data_mode'   => 'bulk',
             'phase'                 => 'mysqldump',
-        )));
+        ),));
 
         return false;
     }
@@ -704,7 +702,7 @@ class Rmmigrate_DB_Dumper
         $this->job->update_progress(array('database' => array(
             'mysqldump_table_index' => $index + 1,
             'phase'                 => 'mysqldump',
-        )));
+        ),));
         return false;
     }
 
@@ -834,10 +832,10 @@ class Rmmigrate_DB_Dumper
             }
 
             $descriptors = array(
-            0 => array('pipe', 'r'),
-            1 => array('pipe', 'w'),
-            2 => array('pipe', 'w'),
-        );
+				0 => array('pipe', 'r'),
+				1 => array('pipe', 'w'),
+				2 => array('pipe', 'w'),
+			);
         $process = Rmmigrate_Process::open($cmd, $descriptors, $pipes, null, null, array('bypass_shell' => true));
         if (!is_resource($process)) {
             Rmmigrate_Logger::log('mysqldump failed: proc_open unavailable or disabled');
@@ -1122,7 +1120,7 @@ class Rmmigrate_DB_Dumper
             'mysqldump_hybrid_php'   => true,
             'mysqldump_phase'        => 'data',
             'mysqldump_table_index'  => $index,
-        )));
+        ),));
 
         return false;
     }
@@ -1213,7 +1211,7 @@ class Rmmigrate_DB_Dumper
         $this->job->update_progress(array('database' => array(
             'create_index' => $create_index,
             'phase'        => 'creates',
-        )));
+        ),));
 
         return $create_index >= $total;
     }
@@ -1246,14 +1244,14 @@ class Rmmigrate_DB_Dumper
         $rows_done = (int) ($db['rows_done'] ?? 0);
         $table_rows_done = (int) ($db['table_rows_done'] ?? 0);
         $max_query_size = self::insert_query_limit();
-        
+
         // Calculate exact free memory to adapt batch size (Target 10% of free memory, max 4MB)
         $mem_limit_str = ini_get('memory_limit');
         $mem_limit = ($mem_limit_str === '-1' || !$mem_limit_str) ? (256 * 1024 * 1024) : wp_convert_hr_to_bytes($mem_limit_str);
         $mem_usage = memory_get_usage(true);
         $free_memory = max(1024 * 1024, $mem_limit - $mem_usage); // Assume at least 1MB free to avoid division by zero
         $target_batch_bytes = min(4 * 1024 * 1024, (int) floor($free_memory * 0.10));
-        
+
         $avg_row_length = max(1, (int) ($table_meta['avg_row_length'] ?? 1024));
         // Scale batch size dynamically up to 5000 rows, strictly bound by the 4MB / 10% free memory budget
         $batch_size = max(1, min(5000, (int) floor($target_batch_bytes / $avg_row_length)));
@@ -1446,7 +1444,7 @@ class Rmmigrate_DB_Dumper
                     'pk_offset'         => $pk_offset,
                     'rows_done'         => $rows_done,
                     'table_rows_done'   => $table_rows_done,
-                )));
+                ),));
                 $this->backup_db_progress();
                 $fh->close();
                 $this->sync_sql_bytes_written();

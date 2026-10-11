@@ -5,4 +5,4 @@ if (!defined('ABSPATH')) {
 }
 
 ?>
-<?php include RMMIGRATE_PATH . 'admin/partials/activity-log.php'; ?>
+<?php include RMMIGRATE_PATH . 'admin/partials/activity-log.php';

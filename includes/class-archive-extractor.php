@@ -432,5 +432,4 @@ class Rmmigrate_Archive_Extractor
 
         return $done;
     }
-
 }

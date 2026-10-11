@@ -201,7 +201,7 @@ class Rmmigrate_Daf_Archiver
             if ($source_offset <= 0) {
                 // MMIGDAF3 entry header: [uint32 path_len][path][uint8 flag][uint64 uncomp_len]
                 // followed by a sequence of independently-(de)compressed blocks:
-                //   [uint8 block_flag][uint32 comp_len][uint32 block_uncomp_len][comp_len bytes]
+                // [uint8 block_flag][uint32 comp_len][uint32 block_uncomp_len][comp_len bytes]
                 // block_flag 1 = deflate, 0 = stored. Carrying each block's uncompressed
                 // size lets the reader resume and skip at block boundaries without
                 // inflating, which is what makes huge entries restorable across slices.
@@ -269,7 +269,7 @@ class Rmmigrate_Daf_Archiver
                         'byte_offset'         => (int) ftell($fh),
                         'entry_source_offset' => $uncompressed_len - $remaining,
                         'entry_total_bytes'   => (int) $uncompressed_len,
-                    )));
+                    ),));
                 }
                 // fread() returns at most one stream chunk (often 8 KB) per call, so
                 // loop until a full BLOCK_BYTES buffer is collected. Otherwise blocks
@@ -355,7 +355,7 @@ class Rmmigrate_Daf_Archiver
                     'entry_total_bytes'    => (int) $uncompressed_len,
                     'skipped_large'        => (int) ($archive['skipped_large'] ?? 0),
                     'skipped_unreadable'   => (int) ($archive['skipped_unreadable'] ?? 0),
-                )));
+                ),));
                 return false;
             }
 
@@ -410,7 +410,7 @@ class Rmmigrate_Daf_Archiver
             'entry_total_bytes'   => $preserve_entry_resume ? $resume_entry_total_bytes : 0,
             'skipped_large'       => (int) ($archive['skipped_large'] ?? 0),
             'skipped_unreadable'  => (int) ($archive['skipped_unreadable'] ?? 0),
-        )));
+        ),));
 
         if ($file_index >= $total) {
             self::verify_finalized_archive($daf_path, $byte_offset);
@@ -538,5 +538,4 @@ class Rmmigrate_Daf_Archiver
         $decoded = json_decode($raw, true);
         return is_array($decoded) ? $decoded : array();
     }
-
 }

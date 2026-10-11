@@ -248,6 +248,7 @@ class Rmmigrate_Snap_DB
     }
     /**
      * Executes an unbuffered query using mysqli if available, otherwise falls back to wpdb.
+     *
      * @return mysqli_result|array<int,array<string,mixed>>|false
      */
     public static function unbuffered_query(string $query)

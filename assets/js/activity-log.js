@@ -144,7 +144,8 @@
             var filename = ctx.filename || ctx.file_name || '';
             if (!filename && entry.message) {
                 var m = entry.message.match(/"([^"]+\.(?:zip|daf|venc))"/i);
-                if (m) { filename = m[1]; }
+                if (m) {
+filename = m[1]; }
             }
             var uploadId = ctx.upload_id || ctx.import_id || entry.upload_id || '';
 

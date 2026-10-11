@@ -96,6 +96,7 @@
 .mm-schedules-hero__actions {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: var(--mm-space-2);
     flex-shrink: 0;
 }
@@ -356,6 +357,10 @@
 .mm-schedule-row[data-interval="monthly"] .mm-schedule-ampm,
 .mm-schedule-row[data-interval="monthly"] .mm-schedule-time-sep {
     display: inline-block;
+}
+
+.mm-schedule-row:not([data-interval="monthly"]) .mm-schedule-dom {
+    display: none !important;
 }
 
 .mm-schedule-card__scope-panel {

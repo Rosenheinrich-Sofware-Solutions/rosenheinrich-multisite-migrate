@@ -369,6 +369,7 @@
 
     /**
      * Apply progress without regressing the bar (avoids 0% flash on sparse/race polls).
+     *
      * @return {boolean} false when payload should be ignored
      */
     function applyProgressFromData(data, opts) {
@@ -602,7 +603,8 @@
             finishListJobStatus(true);
             $('#mm-active-job-title').text(t('backupComplete', 'Backup complete'));
             var successJobId = jobId || ($('#mm-active-job-banner').data('job-id') || null);
-            var go = function () { reloadAfterBackupSuccess(successJobId); };
+            var go = function () {
+ reloadAfterBackupSuccess(successJobId); };
             if (window.rmmigrateFeedback && typeof window.rmmigrateFeedback.maybePrompt === 'function') {
                 window.rmmigrateFeedback.maybePrompt({
                     context: 'backup_success',
@@ -630,7 +632,8 @@
         $('#mm-active-job-text').text(msg).css('color', '#d63638');
         $('#mm-active-job-fill').css('background-color', '#d63638');
         finishListJobStatus(false);
-        setTimeout(function () { reloadWithoutJobId(); }, 3000);
+        setTimeout(function () {
+ reloadWithoutJobId(); }, 3000);
     }
 
     function handleTerminalStatus(data) {

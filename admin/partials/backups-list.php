@@ -246,14 +246,14 @@ $rmmigrate_pagination_base = $rmmigrate_pagination_base ?? add_query_arg(
                     </th>
                     <?php endif; ?>
 
-                    <td data-label="<?php /* translators: %s: timezone label */ echo esc_attr(sprintf(__('Date (%s)', 'rosenheinrich-multisite-migrate'), Rmmigrate_Time::tz_label())); ?>"><?php 
+                    <td data-label="<?php /* translators: %s: timezone label */ echo esc_attr(sprintf(__('Date (%s)', 'rosenheinrich-multisite-migrate'), Rmmigrate_Time::tz_label())); ?>"><?php
                         $rmmigrate_job_date = current(array_filter(array($rmmigrate_job->data['completed_at'] ?? '', $rmmigrate_job->data['created_at'] ?? '')));
-                        echo esc_html($rmmigrate_job_date ? Rmmigrate_Time::local((string) $rmmigrate_job_date) : ''); 
+                        echo esc_html($rmmigrate_job_date ? Rmmigrate_Time::local((string) $rmmigrate_job_date) : '');
                     ?></td>
 
                     <td data-label="<?php echo esc_attr(__('Type', 'rosenheinrich-multisite-migrate')); ?>"><?php echo esc_html($rmmigrate_job->get_display_job_type()); ?></td>
 
-                    <td data-label="<?php echo esc_attr(__('Format', 'rosenheinrich-multisite-migrate')); ?>"><?php 
+                    <td data-label="<?php echo esc_attr(__('Format', 'rosenheinrich-multisite-migrate')); ?>"><?php
                         $rmmigrate_job_format = strtoupper($rmmigrate_job->get_progress()['archive']['format'] ?? '');
                         if ($rmmigrate_job_format === '') {
                             $rmmigrate_mm_path = Rmmigrate_Runner::resolve_local_path($rmmigrate_job);
@@ -324,10 +324,10 @@ $rmmigrate_pagination_base = $rmmigrate_pagination_base ?? add_query_arg(
                                 <?php if (!empty($rmmigrate_job->data['local_path'])) : ?>
                                 <span class="mm-action-item">
                                     <a href="<?php echo esc_url(add_query_arg(array(
-                                        'action' => 'rmmigrate_download',
-                                        'job_id' => $rmmigrate_job->get_id(),
-                                        'nonce'  => wp_create_nonce('rmmigrate_admin'),
-                                    ), admin_url('admin-ajax.php'))); ?>"><?php esc_html_e('Download Archive', 'rosenheinrich-multisite-migrate'); ?></a>
+	'action' => 'rmmigrate_download',
+	'job_id' => $rmmigrate_job->get_id(),
+	'nonce'  => wp_create_nonce('rmmigrate_admin'),
+), admin_url('admin-ajax.php'))); ?>"><?php esc_html_e('Download Archive', 'rosenheinrich-multisite-migrate'); ?></a>
                                 </span>
                                 <?php endif; ?>
                                 <span class="mm-action-item">

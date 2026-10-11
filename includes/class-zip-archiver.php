@@ -243,7 +243,7 @@ class Rmmigrate_Zip_Archiver
         $this->job->update_progress(array('archive' => array(
             'file_index'    => $file_index,
             'skipped_large' => $skipped_large,
-        )));
+        ),));
 
         if ($file_index >= $total) {
             $rel = 'jobs/' . $this->job->get_id() . '/' . basename($zip_path);
@@ -326,5 +326,4 @@ class Rmmigrate_Zip_Archiver
 
         return $queue;
     }
-
 }

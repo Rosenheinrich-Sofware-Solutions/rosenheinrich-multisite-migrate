@@ -529,10 +529,8 @@ class Rmmigrate_Manifest
                         if (strlen($assembled) > 8 * 1024 * 1024) {
                             break 2;
                         }
-                    } else {
-                        if ($fh->seek($block_comp, SEEK_CUR) !== 0) {
+                    } elseif ($fh->seek($block_comp, SEEK_CUR) !== 0) {
                             break 2;
-                        }
                     }
                     $bytes_done += $block_uncomp;
                 }

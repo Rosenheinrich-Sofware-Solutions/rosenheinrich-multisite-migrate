@@ -602,7 +602,8 @@
                 hideRestoreCancelActions();
                 $('#mm-active-job-banner, #mm-restore-progress').hide();
                 var successJobId = jobId;
-                var go = function () { reloadAfterRestoreSuccess(successJobId); };
+                var go = function () {
+ reloadAfterRestoreSuccess(successJobId); };
                 if (window.rmmigrateFeedback && typeof window.rmmigrateFeedback.maybePrompt === 'function') {
                     window.rmmigrateFeedback.maybePrompt({
                         context: 'restore_success',

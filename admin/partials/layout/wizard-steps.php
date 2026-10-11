@@ -17,7 +17,8 @@ $rmmigrate_wizard_aria_label = $rmmigrate_wizard_aria_label ?? __('Setup steps',
             $rmmigrate_wizard_step_classes[] = 'is-done';
         }
         echo esc_attr(implode(' ', $rmmigrate_wizard_step_classes));
-        ?>"<?php if ($rmmigrate_wizard_current_step === $rmmigrate_step['slug']) : ?> aria-current="step"<?php endif; ?>>
+        ?>"<?php if ($rmmigrate_wizard_current_step === $rmmigrate_step['slug']) :
+?> aria-current="step"<?php endif; ?>>
             <?php echo esc_html($rmmigrate_step['label']); ?>
         </li>
     <?php endforeach; ?>

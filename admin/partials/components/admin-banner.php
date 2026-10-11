@@ -132,7 +132,8 @@ $rmmigrate_banner_classes = trim(
                         ? $rmmigrate_banner_action['attrs']
                         : array();
                     ?>
-                    <a class="<?php echo esc_attr(trim($rmmigrate_action_class)); ?>" href="<?php echo esc_url($rmmigrate_action_url); ?>"<?php if (!empty($rmmigrate_banner_action['external'])) : ?> target="_blank" rel="<?php echo esc_attr($rmmigrate_action_rel); ?>"<?php endif; ?><?php
+                    <a class="<?php echo esc_attr(trim($rmmigrate_action_class)); ?>" href="<?php echo esc_url($rmmigrate_action_url); ?>"<?php if (!empty($rmmigrate_banner_action['external'])) :
+?> target="_blank" rel="<?php echo esc_attr($rmmigrate_action_rel); ?>"<?php endif; ?><?php
                     foreach ($rmmigrate_action_attrs as $rmmigrate_attr_key => $rmmigrate_attr_val) {
                         if (!is_string($rmmigrate_attr_key) || $rmmigrate_attr_key === '') {
                             continue;

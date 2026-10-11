@@ -586,7 +586,7 @@ class Rmmigrate_Runner
         ));
 
         if ($job->get_status() !== Rmmigrate_Job::STATUS_COMPLETE) {
-            $archive_path = Rmmigrate_Runner::resolve_local_path($job);
+            $archive_path = self::resolve_local_path($job);
             if ($archive_path !== '' && Rmmigrate_Filesystem::exists($archive_path)) {
                 $ext = strtolower(pathinfo($archive_path, PATHINFO_EXTENSION));
                 if ($ext === 'zip') {
@@ -1314,7 +1314,7 @@ class Rmmigrate_Runner
         }
         $registered = true;
         self::$reserved_memory = str_repeat(' ', 2 * 1024 * 1024); // Reserve 2MB for fatal error handling
-        
+
         register_shutdown_function(static function () {
             self::$reserved_memory = null; // Free the reserved memory immediately
 
@@ -1337,10 +1337,10 @@ class Rmmigrate_Runner
                     $fatal_message = (string) ($error['message'] ?? 'unknown');
                     $fatal_file = (string) ($error['file'] ?? 'unknown');
                     $fatal_line = (string) ($error['line'] ?? '0');
-                    
+
                     Rmmigrate_Logger::log("Fatal Error: {$fatal_message}");
                     Rmmigrate_Logger::log("Location: {$fatal_file} on line {$fatal_line}");
-                    
+
                     $progress = $job->get_progress();
                     Rmmigrate_Logger::log(self::format_crash_state_message($job, $progress));
 
@@ -1592,5 +1592,4 @@ class Rmmigrate_Runner
     {
         return self::SQL_LOCK_PREFIX . $job_id;
     }
-
 }

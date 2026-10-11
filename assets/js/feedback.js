@@ -373,6 +373,7 @@
     window.rmmigrateFeedback = {
         maybePrompt: maybePrompt,
         open: openDialog,
-        close: function () { closeDialog(false); }
+        close: function () {
+ closeDialog(false); }
     };
 }(jQuery));

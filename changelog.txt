@@ -1,3 +1,9 @@
+= 1.2.16 – 2026-10-11 =
+* Improved mobile layout on admin screens (action buttons wrap correctly, larger tap targets).
+* Show the schedule day-of-month field only for monthly schedules.
+* Improved verify-restore banner and data tables on small screens.
+* Small improvements and bug fixes.
+
 = 1.2.15 – 2026-10-06 =
 * Fix DAF restore extract failures ("Invalid DAF archive entry" / daf_corrupt) when fread returns short reads on network or buffered filesystems.
 * Harden chunked import resume (expected_offset), URL range downloads, and peer transfer chunk offsets.

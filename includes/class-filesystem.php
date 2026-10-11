@@ -924,10 +924,8 @@ class Rmmigrate_Filesystem
                 if (!self::delete_directory($path)) {
                     return false;
                 }
-            } else {
-                if (!self::delete($path)) {
+            } elseif (!self::delete($path)) {
                     return false;
-                }
             }
         }
         // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_rmdir -- Plugin: centralized filesystem gateway.

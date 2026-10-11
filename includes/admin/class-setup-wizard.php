@@ -341,7 +341,6 @@ class Rmmigrate_Setup_Wizard
         );
         wp_safe_redirect($rmmigrate_setup_url);
         exit;
-
     }
 
     public static function ajax_skip(): void

@@ -23,4 +23,3 @@ $rmmigrate_archives_embedded = true;
 
 include RMMIGRATE_PATH . 'admin/partials/backups-list.php';
 include RMMIGRATE_PATH . 'admin/partials/activity-detail-modal.php';
-

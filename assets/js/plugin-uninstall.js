@@ -81,6 +81,7 @@
 
     /**
      * Optional deactivate survey — separate DOM/names from keep/remove data UI.
+     *
      * @return {{$el: JQuery, read: function(): {reason: string, message: string}}}
      */
     function buildDeactivateSurvey() {

@@ -709,7 +709,9 @@ class Rmmigrate_Multisite_Scope
             }
         }
 
-        return $this->exclude_paths_cache = array_values(array_unique($excludes));
+        $this->exclude_paths_cache = array_values(array_unique($excludes));
+
+        return $this->exclude_paths_cache;
     }
 
     /**

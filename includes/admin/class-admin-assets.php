@@ -509,4 +509,3 @@ class Rmmigrate_Admin_Assets
         );
     }
 }
-

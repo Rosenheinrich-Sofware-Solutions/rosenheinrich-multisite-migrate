@@ -18,9 +18,9 @@ class Rmmigrate_Settings
             'db_mode'                   => 'auto',
             'db_insert_query_limit'     => 131072,
             'sql_import_chunk_bytes'    => 1048576,
-        'exclude_log_tables'        => true,
-        'exclude_revisions'         => false,
-        'default_exclude_tables'    => array(),
+			'exclude_log_tables'        => true,
+			'exclude_revisions'         => false,
+			'default_exclude_tables'    => array(),
             'archive_mode'              => 'daf',
             'include_wp_core'           => false,
             'encrypt_archives'          => false,
@@ -212,12 +212,21 @@ class Rmmigrate_Settings
         if (!isset($merged['exclude_paths']) || !is_array($merged['exclude_paths'])) {
             $merged['exclude_paths'] = array();
         }
-        if (class_exists('Rmmigrate_Schedules', false)) {
+        // Normalize only when the full schedule stack is present (activate/boot may load Settings earlier).
+        $schedules_normalized = false;
+        if (class_exists('Rmmigrate_Schedules', false)
+            && class_exists('Rmmigrate_Multisite_Scope', false)
+        ) {
             $merged = Rmmigrate_Schedules::normalize($merged);
+            $schedules_normalized = true;
         }
 
-        self::$cache = $merged;
-        return self::$cache;
+        // Do not cache unnormalized schedules — next get() after stack loads must sanitize.
+        if ($schedules_normalized || empty($merged['schedules'])) {
+            self::$cache = $merged;
+        }
+
+        return $merged;
     }
 
     public static function clear_cache(): void
@@ -239,11 +248,18 @@ class Rmmigrate_Settings
             $merged[$secret_key] = $current[$secret_key] ?? '';
         }
         if (!empty($merged[$secret_key]) && strpos($merged[$secret_key], 'enc:') !== 0) {
-            $merged[$secret_key] = 'enc:' . Rmmigrate_Crypto::encrypt($merged[$secret_key]);
+            if (class_exists('Rmmigrate_Crypto', false)) {
+                $merged[$secret_key] = 'enc:' . Rmmigrate_Crypto::encrypt($merged[$secret_key]);
+            } else {
+                // Never persist plaintext when Crypto is not loaded yet.
+                $merged[$secret_key] = $current[$secret_key] ?? '';
+            }
         }
 
         update_site_option(self::OPTION_KEY, $merged);
-        if (self::hosting_relevant_changed($prev, $merged)) {
+        if (self::hosting_relevant_changed($prev, $merged)
+            && class_exists('Rmmigrate_Hosting_Detection', false)
+        ) {
             delete_site_option(Rmmigrate_Hosting_Detection::OPTION_KEY);
         }
 

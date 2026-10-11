@@ -47,6 +47,7 @@
 
         /**
          * Re-snapshot focusables on an active overlay release handle.
+         *
          * @param {Function} releaseHandle return value of bindOverlayA11y
          */
         refreshTrap: function (releaseHandle) {
@@ -57,6 +58,7 @@
 
         /**
          * Bind Escape + focus trap + focus return for an overlay.
+         *
          * @return {Function} releaseAll (also has .refreshTrap)
          */
         bindOverlayA11y: function (opts) {
@@ -266,6 +268,7 @@
          * Disable click target(s) while work runs.
          * work(release) may call release() itself and/or return a jQuery/Promise
          * that settles → auto-release. Returns false if already busy.
+         *
          * @param {JQuery|Element|string} targets
          * @param {function(Function=): (*|undefined)} work
          * @param {{keepDisabled?: boolean}} [opts]

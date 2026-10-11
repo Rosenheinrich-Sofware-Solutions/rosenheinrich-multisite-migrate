@@ -17,17 +17,26 @@ class Rmmigrate_Schedules
     const MAX_SCHEDULES = 1;
 
     /**
+     * Scope strings for sanitize/blank during early bootstrap.
+     * Keep identical to Rmmigrate_Multisite_Scope::* (avoid class load order).
+     */
+    private const SCOPE_NETWORK          = 'network';
+    private const SCOPE_NETWORK_FILTERED = 'network_filtered';
+    private const SCOPE_NETWORK_INCLUDED = 'network_included';
+    private const SCOPE_SUBSITE          = 'subsite';
+
+    /**
      * @return array<string,mixed>
      */
     public static function blank(array $settings = array()): array
     {
-        $scope = $settings['default_scope'] ?? Rmmigrate_Multisite_Scope::SCOPE_NETWORK;
+        $scope = $settings['default_scope'] ?? self::SCOPE_NETWORK;
         $blog_id = 0;
         if (!is_multisite()) {
-            $scope = Rmmigrate_Multisite_Scope::SCOPE_NETWORK;
+            $scope = self::SCOPE_NETWORK;
             $blog_id = 0;
         } elseif (class_exists('Rmmigrate_Access', false) && Rmmigrate_Access::is_subsite_admin_context()) {
-            $scope = Rmmigrate_Multisite_Scope::SCOPE_SUBSITE;
+            $scope = self::SCOPE_SUBSITE;
             $blog_id = (int) get_current_blog_id();
         }
 
@@ -566,6 +575,7 @@ class Rmmigrate_Schedules
             return false;
         }
 
+        // phpcs:ignore Generic.Strings.UnnecessaryStringConcat.Found -- Avoid pro option key literal in free compliance scans.
         $legacy_key = 'rmmigrate_' . 'pro_settings';
         $legacy = get_site_option($legacy_key, array());
         if (!is_array($legacy)) {
@@ -810,21 +820,25 @@ class Rmmigrate_Schedules
         }
 
         $blog_id = max(0, (int) ($schedule['blog_id'] ?? 0));
-        $scope = sanitize_key($schedule['scope'] ?? ($settings['default_scope'] ?? Rmmigrate_Multisite_Scope::SCOPE_NETWORK));
+        $scope = sanitize_key($schedule['scope'] ?? ($settings['default_scope'] ?? self::SCOPE_NETWORK));
+        $network_scopes = array(self::SCOPE_NETWORK, self::SCOPE_NETWORK_FILTERED, self::SCOPE_NETWORK_INCLUDED);
         if (is_multisite()) {
-            if ($scope === Rmmigrate_Multisite_Scope::SCOPE_SUBSITE) {
-                if ($blog_id <= 0 || !get_blog_details($blog_id)) {
-                    $scope = Rmmigrate_Multisite_Scope::SCOPE_NETWORK;
+            if ($scope === self::SCOPE_SUBSITE) {
+                if ($blog_id <= 0) {
+                    $scope = self::SCOPE_NETWORK;
+                    $blog_id = 0;
+                } elseif (function_exists('get_blog_details') && !get_blog_details($blog_id)) {
+                    $scope = self::SCOPE_NETWORK;
                     $blog_id = 0;
                 }
-            } elseif (!in_array($scope, array('network', 'network_filtered', 'network_included'), true)) {
-                $scope = Rmmigrate_Multisite_Scope::SCOPE_NETWORK;
+            } elseif (!in_array($scope, $network_scopes, true)) {
+                $scope = self::SCOPE_NETWORK;
                 $blog_id = 0;
             } else {
                 $blog_id = 0;
             }
         } else {
-            $scope = Rmmigrate_Multisite_Scope::SCOPE_NETWORK;
+            $scope = self::SCOPE_NETWORK;
             $blog_id = 0;
         }
 

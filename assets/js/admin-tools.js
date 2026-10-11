@@ -11,7 +11,6 @@
         }
     }
 
-
     function setToolStatus($el, message, state) {
         if (!$el || !$el.length) {
             return;
@@ -304,7 +303,8 @@ function formatInstallCleanupSize(bytes) {
                 } else {
                     $status.text(res.data.message);
                     if (res.data.reload) {
-                        setTimeout(function () { window.location.reload(); }, 800);
+                        setTimeout(function () {
+ window.location.reload(); }, 800);
                     }
                 }
             }).fail(function (xhr) {

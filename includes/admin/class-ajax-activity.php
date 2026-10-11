@@ -22,7 +22,7 @@ class Rmmigrate_Ajax_Activity
 
         $entry_id = Rmmigrate_Request_Input::post_key('entry_id');
         $job_id = (int) Rmmigrate_Request_Input::post_key('job_id');
-        
+
         $entry = null;
         if ($entry_id !== '') {
             $entry = Rmmigrate_Activity_Log::get_entry($entry_id);
@@ -78,7 +78,7 @@ class Rmmigrate_Ajax_Activity
                 // Job deleted, but we have an activity entry. Proceed without job data.
             } else {
                 self::assert_job_access($job);
-                
+
                 if ($entry === null) {
                     $entry = array(
                         'time'    => $job->data['completed_at'] ?? $job->data['updated_at'] ?? gmdate('c'),
