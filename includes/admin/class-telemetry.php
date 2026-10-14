@@ -166,11 +166,15 @@ final class Rmmigrate_Telemetry
      */
     private static function events_batch_body(array $events): array
     {
+        global $wp_version;
+
         return array(
             'install_id'     => self::ensure_install_id(),
             'site_hash'      => self::site_hash(),
             'product_build'  => self::product_build(),
             'plugin_version' => self::plugin_version(),
+            'wp_version'     => (string) $wp_version,
+            'php_version'    => PHP_VERSION,
             'events'         => $events,
         );
     }
@@ -662,7 +666,7 @@ final class Rmmigrate_Telemetry
         if (!self::claim_operation_error_emission($operation, $job_id, $service_code, $phase, $clean_message)) {
             return;
         }
-        self::record_event('operation_error', array(
+        $props = array(
             'operation'      => $operation,
             'outcome'        => 'failed',
             'error_code'     => ($service_code !== '' && $service_code !== 'unknown')
@@ -673,7 +677,38 @@ final class Rmmigrate_Telemetry
             'service_code'   => $service_code,
             'job_id'         => max(0, $job_id),
             'plugin_version' => defined('RMMIGRATE_VERSION') ? (string) RMMIGRATE_VERSION : '',
-        ));
+            'php_version'    => PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION,
+        );
+
+        $diag_keys = array(
+            'http_status',
+            'ajax_action',
+            'chunk_bytes',
+            'chunk_reject_reason',
+            'upload_max_bytes',
+            'post_max_bytes',
+            'wp_max_upload_bytes',
+            'recommended_chunk_bytes',
+            'chunk_limit_factor',
+            'upload_error',
+            'declared_size',
+            'reason',
+        );
+        foreach ($diag_keys as $key) {
+            if (!array_key_exists($key, $context)) {
+                continue;
+            }
+            $value = $context[$key];
+            if (is_int($value) || is_float($value)) {
+                $props[$key] = $value;
+                continue;
+            }
+            if (is_string($value) && $value !== '') {
+                $props[$key] = sanitize_text_field($value);
+            }
+        }
+
+        self::record_event('operation_error', $props);
     }
 
     /**

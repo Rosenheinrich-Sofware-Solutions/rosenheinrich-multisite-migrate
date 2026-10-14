@@ -418,6 +418,23 @@ trait Rmmigrate_Ajax_Base
      */
     private static function import_error(string $message, array $context = array()): void
     {
+        if (
+            ($context['source'] ?? '') === 'local_chunk'
+            || ($context['phase'] ?? '') === 'chunk'
+        ) {
+            $attempted = (int) ($context['chunk_bytes'] ?? 0);
+            if ($attempted <= 0 && isset($_FILES['chunk']['size'])) {
+                // phpcs:ignore WordPress.Security.NonceVerification.Missing -- Diagnostic only; nonce verified by chunk handler.
+                $attempted = (int) $_FILES['chunk']['size'];
+            }
+            $reason = sanitize_key((string) ($context['reason'] ?? $context['chunk_reject_reason'] ?? ''));
+            if (class_exists('Rmmigrate_Import_Upload_Limits')) {
+                $context = array_merge(
+                    Rmmigrate_Import_Upload_Limits::telemetry_fields($attempted, $reason),
+                    $context
+                );
+            }
+        }
         self::send_ajax_error($message, 400, 'import', 0, $context);
     }
 

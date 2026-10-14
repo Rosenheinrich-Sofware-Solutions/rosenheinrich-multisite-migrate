@@ -290,13 +290,12 @@ class Rmmigrate_Admin_Assets
             }
         }
 
-        $server_max = (int) wp_max_upload_size();
-        $safe_max = $server_max > 0
-            ? min((int) max(131072, (int) floor($server_max / 2)), $server_max)
-            : 524288;
-        // Multipart FormData overhead must stay under BLOCKING_SAFE_BYTES on the wire.
-        $blocking_safe = class_exists('Rmmigrate_Extract_Engine') ? Rmmigrate_Extract_Engine::BLOCKING_SAFE_BYTES : 20971520;
-        $max_safe_chunk = max(1048576, $blocking_safe - 1048576); // 19 MB when ceiling is 20 MB
+        $import_limits = class_exists('Rmmigrate_Import_Upload_Limits')
+            ? Rmmigrate_Import_Upload_Limits::limits()
+            : array('recommended_chunk_bytes' => 1048576);
+        $import_chunk_size = class_exists('Rmmigrate_Import_Upload_Limits')
+            ? Rmmigrate_Import_Upload_Limits::recommended_chunk_bytes((int) ($settings['import_chunk_size'] ?? 2097152))
+            : (int) ($settings['import_chunk_size'] ?? 2097152);
 
         $localize = array(
             'ajaxUrl'             => admin_url('admin-ajax.php'),
@@ -313,10 +312,15 @@ class Rmmigrate_Admin_Assets
             'confirmDelete'   => __('Delete this backup?', 'rosenheinrich-multisite-migrate'),
             'confirmDeleteBulk' => __('Delete the selected backups?', 'rosenheinrich-multisite-migrate'),
             'deletingBackup'  => __('Deleting…', 'rosenheinrich-multisite-migrate'),
-            'importChunkSize' => (int) min(
-                (int) ($settings['import_chunk_size'] ?? 2097152),
-                $safe_max,
-                $max_safe_chunk
+            'importChunkSize' => (int) $import_chunk_size,
+            'importChunkMinBytes' => class_exists('Rmmigrate_Import_Upload_Limits')
+                ? Rmmigrate_Import_Upload_Limits::MIN_CHUNK_BYTES
+                : 65536,
+            'importUploadLimits' => array(
+                'recommendedChunkBytes' => (int) ($import_limits['recommended_chunk_bytes'] ?? $import_chunk_size),
+                'uploadMaxBytes'        => (int) ($import_limits['upload_max_bytes'] ?? 0),
+                'postMaxBytes'          => (int) ($import_limits['post_max_bytes'] ?? 0),
+                'limitingFactor'        => sanitize_key((string) ($import_limits['limiting_factor'] ?? '')),
             ),
             'topologyDestination' => array(
                 'is_multisite'          => is_multisite(),

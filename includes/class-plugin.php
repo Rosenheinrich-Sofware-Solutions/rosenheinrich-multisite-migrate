@@ -97,6 +97,7 @@ final class Rmmigrate_Plugin
         require_once $includes . 'class-install-cleanup.php';
         require_once $includes . 'class-safety-snapshot.php';
         require_once $includes . 'class-health.php';
+        require_once $includes . 'class-import-upload-limits.php';
         require_once $includes . 'class-diagnostic-export.php';
         require_once $includes . 'shared/extract-engine.php';
         require_once $includes . 'shared/zip-extract-core.php';

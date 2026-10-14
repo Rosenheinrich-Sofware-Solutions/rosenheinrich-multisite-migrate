@@ -4,10 +4,27 @@
 
     // Leave headroom under PHP BLOCKING_SAFE_BYTES (20 MB) for multipart MIME overhead.
     var MAX_SAFE_CHUNK_BYTES = 19922944; // 19 MB
+    var MIN_CHUNK_BYTES = rmmigrateAdmin.importChunkMinBytes || 65536;
+    var SERVER_RECOMMENDED_CHUNK = (rmmigrateAdmin.importUploadLimits && rmmigrateAdmin.importUploadLimits.recommendedChunkBytes)
+        ? parseInt(rmmigrateAdmin.importUploadLimits.recommendedChunkBytes, 10)
+        : 0;
 
     function downsizeChunkSize(current) {
-        var halved = Math.max(65536, Math.floor(current / 2));
-        return halved >= MAX_SAFE_CHUNK_BYTES ? Math.floor(MAX_SAFE_CHUNK_BYTES / 2) : halved;
+        var halved = Math.max(MIN_CHUNK_BYTES, Math.floor(current / 2));
+        if (halved >= MAX_SAFE_CHUNK_BYTES) {
+            halved = Math.floor(MAX_SAFE_CHUNK_BYTES / 2);
+        }
+        if (SERVER_RECOMMENDED_CHUNK > MIN_CHUNK_BYTES && SERVER_RECOMMENDED_CHUNK < current) {
+            return Math.max(MIN_CHUNK_BYTES, Math.min(halved, SERVER_RECOMMENDED_CHUNK));
+        }
+        return halved;
+    }
+
+    function chunkSizeAfterDownsize(current, resData) {
+        if (resData && resData.chunk_bytes && parseInt(resData.chunk_bytes, 10) > 0) {
+            return Math.max(MIN_CHUNK_BYTES, Math.min(current, parseInt(resData.chunk_bytes, 10)));
+        }
+        return downsizeChunkSize(current);
     }
 
     function t(key, fallback) {
@@ -259,7 +276,7 @@ return '0 B';
 
                 if (res === 0 || res === '0' || res === -1 || res === '-1') {
                     stopVerifyInterval();
-                    if (chunkSize > 65536) {
+                    if (chunkSize > MIN_CHUNK_BYTES) {
                         var currentUploadedZero = start;
                         chunkSize = downsizeChunkSize(chunkSize);
                         totalChunks = Math.ceil(file.size / chunkSize);
@@ -277,9 +294,9 @@ return '0 B';
 
                 if (!res || res.success === false) {
                     stopVerifyInterval();
-                    if (res && res.data && res.data.downsize && chunkSize > 65536) {
+                    if (res && res.data && res.data.downsize && chunkSize > MIN_CHUNK_BYTES) {
                         var currentUploaded = start;
-                        chunkSize = downsizeChunkSize(chunkSize);
+                        chunkSize = chunkSizeAfterDownsize(chunkSize, res.data);
                         totalChunks = Math.ceil(file.size / chunkSize);
                         chunkIndex = Math.floor(currentUploaded / chunkSize);
                         chunkRetries = 0;
@@ -288,9 +305,9 @@ return '0 B';
                     }
 
                     var emptyChunkMsg = (res && res.data && res.data.message) ? String(res.data.message) : '';
-                    if (/empty chunk/i.test(emptyChunkMsg) && chunkSize > 65536 && chunkRetries < maxChunkRetries) {
+                    if (/empty chunk/i.test(emptyChunkMsg) && chunkSize > MIN_CHUNK_BYTES && chunkRetries < maxChunkRetries) {
                         var currentUploadedEmpty = start;
-                        chunkSize = downsizeChunkSize(chunkSize);
+                        chunkSize = chunkSizeAfterDownsize(chunkSize, res && res.data ? res.data : null);
                         totalChunks = Math.ceil(file.size / chunkSize);
                         chunkIndex = Math.floor(currentUploadedEmpty / chunkSize);
                         chunkRetries++;
@@ -345,9 +362,9 @@ return '0 B';
                     shouldDownsize = true;
                 }
 
-                if (shouldDownsize && chunkSize > 65536) {
+                if (shouldDownsize && chunkSize > MIN_CHUNK_BYTES) {
                     var currentUploaded = start;
-                    chunkSize = downsizeChunkSize(chunkSize);
+                    chunkSize = chunkSizeAfterDownsize(chunkSize, resData);
                     totalChunks = Math.ceil(file.size / chunkSize);
                     chunkIndex = Math.floor(currentUploaded / chunkSize);
                     chunkRetries = 0;
@@ -480,8 +497,8 @@ return '0 B';
                     shouldDownsize = true;
                 }
 
-                if (shouldDownsize && chunkSize > 65536) {
-                    chunkSize = downsizeChunkSize(chunkSize);
+                if (shouldDownsize && chunkSize > MIN_CHUNK_BYTES) {
+                    chunkSize = chunkSizeAfterDownsize(chunkSize, resData);
                     totalChunks = Math.ceil(file.size / chunkSize);
                     maxImportPercent = 0;
                     chunkIndex = 0;
