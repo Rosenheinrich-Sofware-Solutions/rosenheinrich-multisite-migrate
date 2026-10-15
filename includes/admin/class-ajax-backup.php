@@ -72,10 +72,10 @@ class Rmmigrate_Ajax_Backup
         self::assert_network_management();
         $error = Rmmigrate_Job::resolve_admin_last_error(is_network_admin());
         if ((string) ($error['message'] ?? '') === '') {
-            wp_send_json_error(array('message' => __('Nothing to dismiss.', 'rosenheinrich-multisite-migrate')), 400);
+            wp_send_json_success(array('dismissed' => false));
         }
         delete_site_option('rmmigrate_last_error');
-        wp_send_json_success();
+        wp_send_json_success(array('dismissed' => true));
     }
 
     public static function start_backup(): void

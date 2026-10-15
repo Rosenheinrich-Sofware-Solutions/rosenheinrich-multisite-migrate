@@ -464,6 +464,62 @@ class Rmmigrate_Uninstaller
         );
     }
 
+    private static function delete_peer_coexistence_options_wildcards(): void
+    {
+        global $wpdb;
+
+        $preserve = self::shared_site_options_when_peer_installed();
+        $like_rmmigrate = $wpdb->esc_like('rmmigrate_') . '%';
+        $like_not_pro   = $wpdb->esc_like('rmmigrate_pro_') . '%';
+        $like_transient = $wpdb->esc_like('_transient_rmmigrate_') . '%';
+        $like_transient_not_pro = $wpdb->esc_like('_transient_rmmigrate_pro_') . '%';
+        $like_transient_timeout = $wpdb->esc_like('_transient_timeout_rmmigrate_') . '%';
+        $like_transient_timeout_not_pro = $wpdb->esc_like('_transient_timeout_rmmigrate_pro_') . '%';
+
+        if ($preserve === array()) {
+            $wpdb->query(
+                $wpdb->prepare(
+                    "DELETE FROM {$wpdb->options} WHERE ((option_name LIKE %s AND option_name NOT LIKE %s) OR (option_name LIKE %s AND option_name NOT LIKE %s) OR (option_name LIKE %s AND option_name NOT LIKE %s))",
+                    $like_rmmigrate,
+                    $like_not_pro,
+                    $like_transient,
+                    $like_transient_not_pro,
+                    $like_transient_timeout,
+                    $like_transient_timeout_not_pro
+                )
+            );
+
+            return;
+        }
+
+        // NOT IN placeholder count must match shared_site_options_when_peer_installed().
+        $wpdb->query(
+            $wpdb->prepare(
+                "DELETE FROM {$wpdb->options} WHERE ((option_name LIKE %s AND option_name NOT LIKE %s) OR (option_name LIKE %s AND option_name NOT LIKE %s) OR (option_name LIKE %s AND option_name NOT LIKE %s)) AND option_name NOT IN (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                $like_rmmigrate,
+                $like_not_pro,
+                $like_transient,
+                $like_transient_not_pro,
+                $like_transient_timeout,
+                $like_transient_timeout_not_pro,
+                $preserve[0],
+                $preserve[1],
+                $preserve[2],
+                $preserve[3],
+                $preserve[4],
+                $preserve[5],
+                $preserve[6],
+                $preserve[7],
+                $preserve[8],
+                $preserve[9],
+                $preserve[10],
+                $preserve[11],
+                $preserve[12],
+                $preserve[13]
+            )
+        );
+    }
+
     private static function delete_scoped_option_wildcards(bool $peer_installed): void
     {
         global $wpdb;
@@ -492,26 +548,7 @@ class Rmmigrate_Uninstaller
             }
 
             if (isset($wpdb->options)) {
-                $preserve = self::shared_site_options_when_peer_installed();
-                $not_in   = '';
-                if ($preserve !== array()) {
-                    $quoted = array();
-                    foreach ($preserve as $name) {
-                        $quoted[] = "'" . esc_sql($name) . "'";
-                    }
-                    $not_in = ' AND option_name NOT IN (' . implode(',', $quoted) . ')';
-                }
-                $wpdb->query(
-                    $wpdb->prepare(
-                        "DELETE FROM {$wpdb->options} WHERE ((option_name LIKE %s AND option_name NOT LIKE %s) OR (option_name LIKE %s AND option_name NOT LIKE %s) OR (option_name LIKE %s AND option_name NOT LIKE %s))" . $not_in,
-                        $wpdb->esc_like('rmmigrate_') . '%',
-                        $wpdb->esc_like('rmmigrate_pro_') . '%',
-                        $wpdb->esc_like('_transient_rmmigrate_') . '%',
-                        $wpdb->esc_like('_transient_rmmigrate_pro_') . '%',
-                        $wpdb->esc_like('_transient_timeout_rmmigrate_') . '%',
-                        $wpdb->esc_like('_transient_timeout_rmmigrate_pro_') . '%'
-                    )
-                );
+                self::delete_peer_coexistence_options_wildcards();
             }
 
             return;

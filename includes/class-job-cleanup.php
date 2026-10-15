@@ -290,7 +290,28 @@ class Rmmigrate_Job_Cleanup
             return;
         }
 
+        self::purge_incomplete_backup_files($job);
+    }
+
+    /**
+     * Remove partial on-disk backup data after a failed build so later jobs are not starved of disk or locks.
+     */
+    public static function purge_failed_backup_artifacts(Rmmigrate_Job $job): void
+    {
+        if ($job->get_job_type() !== Rmmigrate_Job::JOB_TYPE_BACKUP) {
+            return;
+        }
+        if ($job->get_status() !== Rmmigrate_Job::STATUS_ERROR) {
+            return;
+        }
+
+        self::purge_incomplete_backup_files($job);
+    }
+
+    private static function purge_incomplete_backup_files(Rmmigrate_Job $job): void
+    {
         Rmmigrate_Local_Storage::delete_job_files($job);
+        $job->save_fields(array('local_path' => '', 'file_size' => 0));
         Rmmigrate_Runner::force_release_lock($job->get_id());
         self::clear_transients($job->get_id());
         self::unschedule_worker($job->get_id());

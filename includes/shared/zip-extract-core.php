@@ -130,7 +130,12 @@ class Rmmigrate_Zip_Extract_Core
                 }
             }
 
-            $name = (string) $zip->getNameIndex( $zip_index );
+            try {
+                $name = Rmmigrate_Extract_Engine::assert_zip_entry_index_safe( $zip, $zip_index, $extract_dir );
+            } catch ( Rmmigrate_Job_Exception $e ) {
+                $zip->close();
+                throw $e;
+            }
             if ( $name === '' ) {
                 $zip_index++;
                 $zip_entry_bytes = 0;
@@ -143,17 +148,17 @@ class Rmmigrate_Zip_Extract_Core
                 continue;
             }
 
-            if ( substr( $name, -1 ) === '/' ) {
-                $zip_index++;
-                $zip_entry_bytes = 0;
-                continue;
-            }
-
             $dest = Rmmigrate_Path_Safety_Core::resolve_extract_dest( $extract_dir, $name );
             if ( $dest === null ) {
-                $zip_index++;
-                $zip_entry_bytes = 0;
-                continue;
+                $zip->close();
+                self::raise_pipeline(
+                    Rmmigrate_Error_Codes::EXTRACT_FAILED,
+                    sprintf(
+                        /* translators: %s: zip entry path */
+                        __( 'Archive entry "%s" is not safe to extract.', 'rosenheinrich-multisite-migrate' ),
+                        $name
+                    )
+                );
             }
 
             $stat = $zip->statIndex( $zip_index );
@@ -207,7 +212,11 @@ class Rmmigrate_Zip_Extract_Core
                     $zip->close();
                     self::raise_pipeline(
                         Rmmigrate_Error_Codes::EXTRACT_FAILED,
-                        __('Cannot read a file from the backup archive.', 'rosenheinrich-multisite-migrate')
+                        sprintf(
+                            /* translators: %s: zip entry path */
+                            __( 'Cannot read archive entry: %s', 'rosenheinrich-multisite-migrate' ),
+                            $name
+                        )
                     );
                 }
 

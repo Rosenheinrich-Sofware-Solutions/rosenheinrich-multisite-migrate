@@ -337,10 +337,11 @@ class Rmmigrate_Ajax_Import
     private static function send_import_chunk_downsize(string $message, array $err_ctx = array()): void
     {
         $attempted = 0;
-        // phpcs:ignore WordPress.Security.NonceVerification.Missing -- Diagnostic only; nonce verified by chunk handler.
+        // phpcs:disable WordPress.Security.NonceVerification.Missing -- Upload size telemetry only; import_local_chunk() calls verify_request() after early limit checks.
         if (isset($_FILES['chunk']['size'])) {
             $attempted = (int) $_FILES['chunk']['size'];
         }
+        // phpcs:enable WordPress.Security.NonceVerification.Missing
         if ($attempted <= 0 && isset($_SERVER['CONTENT_LENGTH'])) {
             $attempted = max(0, (int) $_SERVER['CONTENT_LENGTH'] - Rmmigrate_Import_Upload_Limits::MULTIPART_OVERHEAD_BYTES);
         }

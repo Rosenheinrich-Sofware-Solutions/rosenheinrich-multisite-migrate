@@ -19,6 +19,10 @@ class Rmmigrate_Upgrader
 
         Rmmigrate_Activator::ensure_schema();
 
+        if (class_exists('Rmmigrate_Plugin', false)) {
+            Rmmigrate_Plugin::ensure_backup_root();
+        }
+
         // Seed opaque system token for new installs / new system logs; never delete legacy logs.
         Rmmigrate_Activity_Log::site_log_token();
 

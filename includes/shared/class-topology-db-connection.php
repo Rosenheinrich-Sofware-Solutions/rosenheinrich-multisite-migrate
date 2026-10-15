@@ -155,6 +155,7 @@ final class Rmmigrate_Topology_Db_Connection
      */
     public static function list_all_tables(PDO $pdo): array
     {
+        // phpcs:disable WordPress.DB.RestrictedClasses.mysql__PDO -- Injected topology PDO for peer DB table listing; wpdb is not used here.
         if (self::is_sqlite_pdo($pdo)) {
             $stmt = $pdo->query("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'");
             $rows = $stmt ? $stmt->fetchAll(PDO::FETCH_NUM) : array();
@@ -162,6 +163,7 @@ final class Rmmigrate_Topology_Db_Connection
             $stmt = $pdo->query('SHOW TABLES');
             $rows = $stmt ? $stmt->fetchAll(PDO::FETCH_NUM) : array();
         }
+        // phpcs:enable WordPress.DB.RestrictedClasses.mysql__PDO
 
         $tables = array();
         foreach ($rows as $row) {
@@ -177,6 +179,7 @@ final class Rmmigrate_Topology_Db_Connection
     private static function is_sqlite_pdo(PDO $pdo): bool
     {
         try {
+            // phpcs:ignore WordPress.DB.RestrictedClasses.mysql__PDO -- Driver probe on injected topology PDO connection.
             return (string) $pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'sqlite';
         } catch (Throwable $e) {
             unset($e);

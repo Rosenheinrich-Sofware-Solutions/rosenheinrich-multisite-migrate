@@ -85,6 +85,7 @@ final class Rmmigrate_Plugin
         require_once $includes . 'class-snap-db.php';
         require_once $includes . 'class-mu-legacy.php';
         require_once $includes . 'class-db-dumper.php';
+        require_once $includes . 'class-zip-archive-errors.php';
         require_once $includes . 'class-zip-archiver.php';
         require_once $includes . 'class-daf-archiver.php';
         require_once $includes . 'class-archive-factory.php';
@@ -105,6 +106,7 @@ final class Rmmigrate_Plugin
         require_once $includes . 'class-archive-extractor.php';
         require_once $includes . 'class-search-replace.php';
         require_once $includes . 'class-post-import-search-replace.php';
+        require_once $includes . 'class-sql-import-stream-parser.php';
         require_once $includes . 'class-sql-importer.php';
         require_once $includes . 'class-file-restorer.php';
         require_once $includes . 'class-backup-validator.php';
@@ -274,29 +276,17 @@ final class Rmmigrate_Plugin
             }
         }
 
-        $htaccess = $dir . '/.htaccess';
-        if (Rmmigrate_Engine_Config::storage_htaccess_enabled()) {
-            if (!Rmmigrate_Filesystem::exists($htaccess)) {
-                $rules = "<IfModule mod_authz_core.c>\n    Require all denied\n</IfModule>\n<IfModule !mod_authz_core.c>\n    Deny from all\n</IfModule>\n";
-                if (Rmmigrate_Filesystem::put_contents($htaccess, $rules) === false) {
-                    if (class_exists('Rmmigrate_Logger', false)) {
-                        Rmmigrate_Logger::log('Could not write backup storage .htaccess protection file.');
-                    }
-                    return false;
-                }
-            }
-        } elseif (Rmmigrate_Filesystem::exists($htaccess)) {
-            Rmmigrate_Filesystem::delete($htaccess);
+        if (!class_exists('Rmmigrate_Backup_Storage_Protection', false)) {
+            require_once RMMIGRATE_PATH . 'includes/class-backup-storage-protection.php';
         }
-        $index = $dir . '/index.php';
-        if (!Rmmigrate_Filesystem::exists($index)) {
-            if (Rmmigrate_Filesystem::put_contents($index, "<?php\nif (!defined('ABSPATH')) {\n    exit;\n}\n// Silence is golden.\n") === false) {
-                if (class_exists('Rmmigrate_Logger', false)) {
-                    Rmmigrate_Logger::log('Could not write backup storage index.php protection file.');
-                }
-                return false;
+        if (!Rmmigrate_Backup_Storage_Protection::ensure_protection_files($dir)) {
+            if (class_exists('Rmmigrate_Logger', false)) {
+                Rmmigrate_Logger::log('Could not write backup storage protection files (.htaccess, index.php, web.config).');
             }
+
+            return false;
         }
+
         return true;
     }
 }

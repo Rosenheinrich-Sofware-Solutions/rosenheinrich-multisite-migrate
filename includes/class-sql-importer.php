@@ -4,6 +4,8 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
+require_once __DIR__ . '/class-sql-import-stream-parser.php';
+
 class Rmmigrate_SQL_Importer
 {
     const BUFFER_FILE = 'import-buffer.dat';
@@ -55,6 +57,7 @@ class Rmmigrate_SQL_Importer
         if (!is_array($set_queries)) {
             $set_queries = array();
         }
+        $parser = new Rmmigrate_Sql_Import_Stream_Parser((string) ($import['sql_delimiter'] ?? ';'));
 
         if ($offset > 0 && $set_queries !== array()) {
             foreach ($set_queries as $set_sql) {
@@ -82,6 +85,9 @@ class Rmmigrate_SQL_Importer
         $start = microtime(true);
         $executed = 0;
 
+        $max_chunk_reads = (int) ($import['max_chunk_reads_per_slice'] ?? 0);
+        $chunk_reads = 0;
+
         try {
             while ((microtime(true) - $start) < $budget_sec) {
                 $chunk = $handle->read(Rmmigrate_Engine_Config::sql_import_chunk_bytes());
@@ -97,11 +103,12 @@ class Rmmigrate_SQL_Importer
                     $this->delete_buffer();
                     $this->job->update_progress(array(
                         'import' => array(
-                            'done'   => true,
-                            'method' => 'php',
-                            'rows'   => $rows_done + $executed,
-                            'offset' => $total_bytes,
-                            'total'  => $total_bytes,
+                            'done'          => true,
+                            'method'        => 'php',
+                            'rows'          => $rows_done + $executed,
+                            'offset'        => $total_bytes,
+                            'total'         => $total_bytes,
+                            'sql_delimiter' => $parser->delimiter(),
                         ),
                     ));
                     $this->commit_import_transaction();
@@ -109,40 +116,41 @@ class Rmmigrate_SQL_Importer
                 }
 
                 $buffer .= $chunk;
-                $scan_pos = 0;
-                while (($pos = $this->find_statement_end($buffer, $scan_pos)) !== false) {
-                    $statement = substr($buffer, $scan_pos, $pos - $scan_pos);
-                    $scan_pos = $pos + 1;
-                    $statement = trim($statement);
-                    if ($statement !== '' && $this->is_delimiter_directive($statement)) {
-                        continue;
-                    }
-                    if ($statement !== '' && $this->is_set_statement($statement)) {
+                $extracted = $parser->extract_completed_statements($buffer);
+                $buffer = $extracted['remainder'];
+                foreach ($extracted['statements'] as $statement) {
+                    if ($this->is_set_statement($statement)) {
                         $set_queries[] = $statement;
                     }
-                    if ($statement !== '' && $this->is_executable($statement)) {
+                    if ($this->is_executable($statement)) {
                         if (!$this->should_skip_statement($statement)) {
                             $this->execute_statement($statement);
                             $executed++;
                         }
                     }
                 }
-                if ($scan_pos > 0) {
-                    $buffer = substr($buffer, $scan_pos);
-                }
 
                 $offset = (int) $handle->tell();
+                $chunk_reads++;
+                if ($max_chunk_reads > 0 && $chunk_reads >= $max_chunk_reads) {
+                    break;
+                }
             }
 
             $handle->close();
             $this->save_buffer($buffer);
+            $import_progress = array(
+                'offset'        => $offset,
+                'total'         => $total_bytes,
+                'rows'          => $rows_done + $executed,
+                'set_queries'   => array_values(array_unique($set_queries)),
+                'sql_delimiter' => $parser->delimiter(),
+            );
+            if ($max_chunk_reads > 0) {
+                $import_progress['max_chunk_reads_per_slice'] = $max_chunk_reads;
+            }
             $this->job->update_progress(array(
-                'import' => array(
-                    'offset'      => $offset,
-                    'total'       => $total_bytes,
-                    'rows'        => $rows_done + $executed,
-                    'set_queries' => array_values(array_unique($set_queries)),
-                ),
+                'import' => $import_progress,
             ));
             $this->commit_import_transaction();
 
@@ -194,78 +202,16 @@ class Rmmigrate_SQL_Importer
         }
     }
 
+    /**
+     * @deprecated Use Rmmigrate_Sql_Import_Stream_Parser (kept for unit tests).
+     *
+     * @return int|false
+     */
     private function find_statement_end(string $buffer, int $start = 0)
     {
-        $len = strlen($buffer);
-        $in_string = false;
-        $quote = '';
-        $escaped = false;
-        $in_line_comment = false;
-        $in_block_comment = false;
+        $parser = new Rmmigrate_Sql_Import_Stream_Parser(';');
 
-        for ($i = max(0, $start); $i < $len; $i++) {
-            $ch = $buffer[$i];
-            if ($in_line_comment) {
-                if ($ch === "\n") {
-                    $in_line_comment = false;
-                }
-                continue;
-            }
-            if ($in_block_comment) {
-                if ($ch === '*' && $i + 1 < $len && $buffer[$i + 1] === '/') {
-                    $in_block_comment = false;
-                    $i++;
-                }
-                continue;
-            }
-            if ($in_string) {
-                if ($quote === '`') {
-                    if ($ch === '`') {
-                        if ($i + 1 < $len && $buffer[$i + 1] === '`') {
-                            $i++;
-                            continue;
-                        }
-                        $in_string = false;
-                    }
-                    continue;
-                }
-                if ($escaped) {
-                    $escaped = false;
-                    continue;
-                }
-                if ($ch === '\\') {
-                    $escaped = true;
-                    continue;
-                }
-                if ($ch === $quote) {
-                    $in_string = false;
-                }
-                continue;
-            }
-            if (!$in_string && ($ch === '#' || ($ch === '-' && $i + 1 < $len && $buffer[$i + 1] === '-'))) {
-                $in_line_comment = true;
-                if ($ch === '-') {
-                    $i++;
-                }
-                continue;
-            }
-            if (!$in_string && $ch === '/' && $i + 1 < $len && $buffer[$i + 1] === '*') {
-                $in_block_comment = true;
-                $i++;
-                continue;
-            }
-            if ($ch === "'" || $ch === '"' || $ch === '`') {
-                $in_string = true;
-                $quote = $ch;
-                $escaped = false;
-                continue;
-            }
-            if ($ch === ';') {
-                return $i;
-            }
-        }
-
-        return false;
+        return $parser->find_statement_end($buffer, $start);
     }
 
     private function strip_leading_sql_comments(string $statement): string
@@ -317,7 +263,7 @@ class Rmmigrate_SQL_Importer
         if (stripos($trim, 'RMMIGRATE_DB_EOF') !== false) {
             return false;
         }
-        if ($this->is_delimiter_directive($trim)) {
+        if (Rmmigrate_Sql_Import_Stream_Parser::parse_delimiter_directive($trim) !== null) {
             return false;
         }
         return true;
@@ -328,9 +274,12 @@ class Rmmigrate_SQL_Importer
         return (bool) preg_match('/^[\s\t]*(?:\/\*!\d+)?[\s\t]*SET[\s\t]/i', ltrim($statement));
     }
 
+    /**
+     * @deprecated Use Rmmigrate_Sql_Import_Stream_Parser::parse_delimiter_directive().
+     */
     private function is_delimiter_directive(string $statement): bool
     {
-        return (bool) preg_match('/^DELIMITER\s+/i', ltrim($statement));
+        return Rmmigrate_Sql_Import_Stream_Parser::parse_delimiter_directive($statement) !== null;
     }
 
     /**

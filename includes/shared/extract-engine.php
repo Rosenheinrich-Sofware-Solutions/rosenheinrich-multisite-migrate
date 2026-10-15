@@ -346,16 +346,12 @@ class Rmmigrate_Extract_Engine
         if ( $only_sql ) {
             $names_to_extract = array();
             for ( $i = 0; $i < $zip->numFiles; $i++ ) {
-                $name = (string) $zip->getNameIndex( $i );
-                if ( $name !== 'database.sql' && $name !== 'manifest.json' ) {
+                $name = self::assert_zip_entry_index_safe( $zip, $i, $dest );
+                if ( $name === '' ) {
                     continue;
                 }
-                if ( Rmmigrate_Path_Safety_Core::resolve_extract_dest( $dest, $name ) === null ) {
-                    $zip->close();
-                    // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
-                    throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::EXTRACT_FAILED),
-                        esc_html__('Archive contains an unsafe path.', 'rosenheinrich-multisite-migrate')
-                    );
+                if ( $name !== 'database.sql' && $name !== 'manifest.json' ) {
+                    continue;
                 }
                 $names_to_extract[] = $name;
             }
@@ -375,16 +371,9 @@ class Rmmigrate_Extract_Engine
             }
         } else {
             for ( $i = 0; $i < $zip->numFiles; $i++ ) {
-                $name = (string) $zip->getNameIndex( $i );
-                if ( $name === '' || substr( $name, -1 ) === '/' ) {
+                $name = self::assert_zip_entry_index_safe( $zip, $i, $dest );
+                if ( $name === '' ) {
                     continue;
-                }
-                if ( Rmmigrate_Path_Safety_Core::resolve_extract_dest( $dest, $name ) === null ) {
-                    $zip->close();
-                    // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
-                    throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::EXTRACT_FAILED),
-                        esc_html__('Archive contains an unsafe path.', 'rosenheinrich-multisite-migrate')
-                    );
                 }
                 if ( $zip->extractTo( $dest, array( $name ) ) === false ) {
                     $zip->close();
@@ -548,6 +537,57 @@ class Rmmigrate_Extract_Engine
 
 
     /**
+     * Validate one archive member before extractTo / streaming (fail closed).
+     *
+     * @return string Entry name when the member should be extracted; empty string for directory entries.
+     */
+    public static function assert_zip_entry_index_safe( ZipArchive $zip, int $index, string $extract_dir ): string
+    {
+        $name = (string) $zip->getNameIndex( $index );
+        if ( $name === '' || substr( $name, -1 ) === '/' ) {
+            return '';
+        }
+
+        $opsys = 0;
+        $external_attr = 0;
+        if ( $zip->getExternalAttributesIndex( $index, $opsys, $external_attr ) ) {
+            $opsys = (int) $opsys;
+            if ( $opsys === ZipArchive::OPSYS_UNIX ) {
+                $mode = ( (int) $external_attr >> 16 ) & 0xFFFF;
+                if ( ( $mode & 0170000 ) === 0120000 ) {
+                    // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+                    throw Rmmigrate_Job_Exception::raise(
+                        sanitize_key( Rmmigrate_Error_Codes::EXTRACT_FAILED ),
+                        esc_html(
+                            sprintf(
+                                /* translators: %s: zip entry path */
+                                __( 'Archive entry "%s" is a symlink and cannot be extracted.', 'rosenheinrich-multisite-migrate' ),
+                                $name
+                            )
+                        )
+                    );
+                }
+            }
+        }
+
+        if ( Rmmigrate_Path_Safety_Core::resolve_extract_dest( $extract_dir, $name ) === null ) {
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+            throw Rmmigrate_Job_Exception::raise(
+                sanitize_key( Rmmigrate_Error_Codes::EXTRACT_FAILED ),
+                esc_html(
+                    sprintf(
+                        /* translators: %s: zip entry path */
+                        __( 'Archive entry "%s" is not safe to extract.', 'rosenheinrich-multisite-migrate' ),
+                        $name
+                    )
+                )
+            );
+        }
+
+        return $name;
+    }
+
+    /**
      * Reject zip-slip entries before shell unzip writes outside $dest.
      */
     private static function assert_archive_entries_path_safe( string $archive, string $dest ): void
@@ -580,32 +620,7 @@ class Rmmigrate_Extract_Engine
         }
 
         for ( $i = 0; $i < $zip->numFiles; $i++ ) {
-            $name = (string) $zip->getNameIndex( $i );
-            if ( $name === '' || substr( $name, -1 ) === '/' ) {
-                continue;
-            }
-            $opsys = 0;
-            $external_attr = 0;
-            if ( $zip->getExternalAttributesIndex( $i, $opsys, $external_attr ) ) {
-                $opsys = (int) $opsys;
-                if ( $opsys === ZipArchive::OPSYS_UNIX ) {
-                    $mode = ( (int) $external_attr >> 16 ) & 0xFFFF;
-                    if ( ( $mode & 0170000 ) === 0120000 ) {
-                        $zip->close();
-                        // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
-                        throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::EXTRACT_FAILED),
-                            esc_html__('Archive contains a symlink entry.', 'rosenheinrich-multisite-migrate')
-                        );
-                    }
-                }
-            }
-            if ( Rmmigrate_Path_Safety_Core::resolve_extract_dest( $dest, $name ) === null ) {
-                $zip->close();
-                // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
-                throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::EXTRACT_FAILED),
-                    esc_html__('Archive contains an unsafe path.', 'rosenheinrich-multisite-migrate')
-                );
-            }
+            self::assert_zip_entry_index_safe( $zip, $i, $dest );
         }
         $zip->close();
     }

@@ -223,8 +223,17 @@ class Rmmigrate_Zip_Archiver
 
         Rmmigrate_Runner::touch_worker_lease($this->job->get_id());
         if ($zip->close() !== true) {
-            $status = $zip->getStatusString() ?: 'Unknown error';
-            $error_code = (stripos($status, 'quota') !== false || stripos($status, 'space') !== false)
+            $status = Rmmigrate_Zip_Archive_Errors::describe_close_failure(
+                $zip,
+                $zip_path,
+                $open_res,
+                array(
+                    'file_index'  => $file_index,
+                    'total_files' => $total,
+                    'added'       => $added,
+                )
+            );
+            $error_code = (stripos($status, 'quota') !== false || stripos($status, 'space') !== false || stripos($status, 'disk_free') !== false)
                 ? Rmmigrate_Error_Codes::DISK_SPACE
                 : Rmmigrate_Error_Codes::ARCHIVE_VALIDATION_FAILED;
             // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
@@ -240,9 +249,11 @@ class Rmmigrate_Zip_Archiver
             );
         }
 
+        $zip_bytes = Rmmigrate_Filesystem::exists($zip_path) ? (int) Rmmigrate_Filesystem::filesize($zip_path) : 0;
         $this->job->update_progress(array('archive' => array(
             'file_index'    => $file_index,
             'skipped_large' => $skipped_large,
+            'bytes_written' => $zip_bytes,
         ),));
 
         if ($file_index >= $total) {

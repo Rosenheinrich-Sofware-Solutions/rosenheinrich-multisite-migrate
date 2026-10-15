@@ -423,9 +423,9 @@ trait Rmmigrate_Ajax_Base
             || ($context['phase'] ?? '') === 'chunk'
         ) {
             $attempted = (int) ($context['chunk_bytes'] ?? 0);
-            if ($attempted <= 0 && isset($_FILES['chunk']['size'])) {
-                // phpcs:ignore WordPress.Security.NonceVerification.Missing -- Diagnostic only; nonce verified by chunk handler.
-                $attempted = (int) $_FILES['chunk']['size'];
+            if ($attempted <= 0) {
+                // phpcs:ignore WordPress.Security.NonceVerification.Missing -- Diagnostic only; import AJAX calls verify_request() before chunk import_error().
+                $attempted = isset($_FILES['chunk']['size']) ? (int) $_FILES['chunk']['size'] : 0;
             }
             $reason = sanitize_key((string) ($context['reason'] ?? $context['chunk_reject_reason'] ?? ''));
             if (class_exists('Rmmigrate_Import_Upload_Limits')) {

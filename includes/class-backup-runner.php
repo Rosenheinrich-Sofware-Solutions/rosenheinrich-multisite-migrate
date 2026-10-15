@@ -354,6 +354,23 @@ class Rmmigrate_Runner
             $last_progress_at = $started;
         }
 
+        $progress = $job->get_progress();
+        $archive_progress = is_array($progress['archive'] ?? null) ? $progress['archive'] : array();
+        $settings = Rmmigrate_Settings::get();
+        $stale_min = (int) ($settings['stale_job_minutes'] ?? 30);
+        $archive_stale_sec = max(5, $stale_min) * MINUTE_IN_SECONDS;
+        if ($job->get_status() === Rmmigrate_Job::STATUS_ARCHIVING
+            && !empty($archive_progress['file_list_built'])
+            && $last_progress_at > 0
+            && (time() - $last_progress_at) >= $archive_stale_sec
+        ) {
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+            throw Rmmigrate_Job_Exception::raise(
+                sanitize_key(Rmmigrate_Error_Codes::TIME_LIMIT),
+                esc_html(__('Backup archive phase stopped making progress.', 'rosenheinrich-multisite-migrate'))
+            );
+        }
+
         $elapsed = time() - $started;
         $progress = $job->get_progress();
         $scanning = ($job->get_status() === Rmmigrate_Job::STATUS_ARCHIVING)
@@ -373,8 +390,6 @@ class Rmmigrate_Runner
             return;
         }
 
-        $settings = Rmmigrate_Settings::get();
-        $stale_min = (int) ($settings['stale_job_minutes'] ?? 30);
         $grace = max(5, min(10, $stale_min)) * MINUTE_IN_SECONDS;
         if ((time() - $last_progress_at) <= $grace) {
             return;
@@ -395,6 +410,7 @@ class Rmmigrate_Runner
     {
         $db = is_array($progress['database'] ?? null) ? $progress['database'] : array();
         $archive = is_array($progress['archive'] ?? null) ? $progress['archive'] : array();
+        $scan = is_array($progress['file_scan'] ?? null) ? $progress['file_scan'] : array();
 
         return implode('|', array(
             (string) ($progress['step'] ?? ''),
@@ -404,6 +420,8 @@ class Rmmigrate_Runner
             (string) ($db['rows_done'] ?? ''),
             (string) ($archive['file_index'] ?? ''),
             (string) ($archive['bytes_written'] ?? ''),
+            (string) ($scan['path_index'] ?? ''),
+            (string) ($scan['cursor'] ?? ''),
         ));
     }
 

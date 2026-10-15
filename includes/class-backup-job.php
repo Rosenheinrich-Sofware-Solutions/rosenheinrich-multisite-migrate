@@ -1142,6 +1142,14 @@ class Rmmigrate_Job
         }
         $this->data = array_merge($this->data, $fields);
 
+        if ($status === self::STATUS_ERROR
+            && $previous !== self::STATUS_ERROR
+            && $this->get_job_type() === self::JOB_TYPE_BACKUP
+            && Rmmigrate_Runner::job_worker_is_idle($this->get_id())
+        ) {
+            Rmmigrate_Job_Cleanup::purge_failed_backup_artifacts($this);
+        }
+
         if ($status === self::STATUS_COMPLETE || $status === self::STATUS_ERROR) {
             $was_terminal = in_array($previous, array(self::STATUS_COMPLETE, self::STATUS_ERROR, self::STATUS_CANCELLED), true);
             if (!$was_terminal) {

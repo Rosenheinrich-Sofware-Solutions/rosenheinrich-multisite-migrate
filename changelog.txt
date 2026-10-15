@@ -1,3 +1,8 @@
+= 1.2.19 – 2026-10-15 =
+* Fix: SQL imports with mysqldump triggers and routines (DELIMITER).
+* Fix: More reliable backup archives with clearer errors and cleanup after failures.
+* Security: Safer ZIP restore and protected backup folders by default.
+
 = 1.2.18 – 2026-10-15 =
 * Fix restores that failed at the final step on multisite networks with a MySQL syntax error when updating blog domains.
 

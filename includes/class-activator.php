@@ -172,25 +172,9 @@ class Rmmigrate_Activator
             wp_mkdir_p($dir . '/' . $sub);
         }
 
-        $settings = get_site_option('rmmigrate_settings', array());
-        $htaccess_enabled = is_array($settings) && !empty($settings['storage_htaccess']);
+        require_once RMMIGRATE_PATH . 'includes/class-backup-storage-protection.php';
 
-        $htaccess = $dir . '/.htaccess';
-        if ($htaccess_enabled) {
-            if (!Rmmigrate_Filesystem::exists($htaccess)) {
-                $rules = "<IfModule mod_authz_core.c>\n    Require all denied\n</IfModule>\n<IfModule !mod_authz_core.c>\n    Deny from all\n</IfModule>\n";
-                Rmmigrate_Filesystem::put_contents($htaccess, $rules);
-            }
-        } elseif (Rmmigrate_Filesystem::exists($htaccess)) {
-            Rmmigrate_Filesystem::delete($htaccess);
-        }
-
-        $index = $dir . '/index.php';
-        if (!Rmmigrate_Filesystem::exists($index)) {
-            Rmmigrate_Filesystem::put_contents($index, "<?php\nif (!defined('ABSPATH')) {\n    exit;\n}\n// Silence is golden.\n");
-        }
-
-        return true;
+        return Rmmigrate_Backup_Storage_Protection::ensure_protection_files($dir);
     }
 
     private static function resolve_backup_dir(): string
