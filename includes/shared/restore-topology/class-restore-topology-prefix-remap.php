@@ -89,18 +89,15 @@ class Rmmigrate_Restore_Topology_Prefix_Remap
             return $report;
         }
 
-        $like = str_replace(array('\\', '_', '%'), array('\\\\', '\\_', '\\%'), $from_prefix) . '%';
-        $stmt = $pdo->prepare('SHOW TABLES LIKE ?');
-        $stmt->execute(array($like));
-        $tables = $stmt->fetchAll(PDO::FETCH_NUM);
+        $table_names = Rmmigrate_Topology_Db_Connection::list_tables_with_prefix($pdo, $from_prefix);
 
         $preserve = array_fill_keys($preserve_tables, true);
 
         $to_extends_from = $to_prefix !== ''
             && strncmp($to_prefix, $from_prefix, strlen($from_prefix)) === 0;
 
-        foreach ($tables as $row) {
-            $old_table = (string) ($row[0] ?? '');
+        foreach ($table_names as $old_table) {
+            $old_table = (string) $old_table;
             if ($old_table === ''
                 || strncmp($old_table, $from_prefix, strlen($from_prefix)) !== 0
                 || ($to_extends_from && strncmp($old_table, $to_prefix, strlen($to_prefix)) === 0)
@@ -173,17 +170,7 @@ class Rmmigrate_Restore_Topology_Prefix_Remap
 
     private static function table_exists(PDO $pdo, string $table): bool
     {
-        try {
-            $quoted = str_replace('`', '``', $table);
-            $result = $pdo->query('SELECT 1 FROM `' . $quoted . '` LIMIT 1');
-            if ($result === false) {
-                return false;
-            }
-
-            return true;
-        } catch (Throwable $e) {
-            return false;
-        }
+        return Rmmigrate_Topology_Db_Connection::table_exists($pdo, $table);
     }
 
     private static function is_plugin_runtime_table(string $table): bool

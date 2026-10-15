@@ -220,10 +220,7 @@ class Rmmigrate_Restore_Topology_Destination
 
     private static function table_exists(PDO $pdo, string $table): bool
     {
-        $stmt = $pdo->prepare('SHOW TABLES LIKE ?');
-        $stmt->execute(array(self::escape_like_literal($table)));
-
-        return (bool) $stmt->fetchColumn();
+        return Rmmigrate_Topology_Db_Connection::table_exists($pdo, $table);
     }
 
     private static function escape_like_literal(string $value): string

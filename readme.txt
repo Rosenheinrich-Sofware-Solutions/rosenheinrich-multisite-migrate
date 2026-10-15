@@ -4,7 +4,7 @@ Tags: multisite, site-migration, wordpress-migration, migrate-wordpress, clone-s
 Requires at least: 6.2
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.2.17
+Stable tag: 1.2.18
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -241,6 +241,9 @@ Backup and restore run as background-style chunked jobs. They are designed not t
 
 == Changelog ==
 
+= 1.2.18 – 2026-10-15 =
+* Fix restores that failed at the final step on multisite networks with a MySQL syntax error when updating blog domains.
+
 = 1.2.17 – 2026-10-13 =
 * Fix chunked import uploads on hosts with tight PHP upload limits by auto-adjusting chunk size and retrying when the server drops file parts.
 
@@ -267,6 +270,9 @@ Backup and restore run as background-style chunked jobs. They are designed not t
 Older entries are in changelog.txt, which ships with the plugin, and the full history is published at [https://multisitemigrate.rosenheinrich.com/changelog/](https://multisitemigrate.rosenheinrich.com/changelog/).
 
 == Upgrade Notice ==
+
+= 1.2.18 =
+Fix for network restore failures at the final migration step. Recommended update.
 
 = 1.2.17 =
 Fix for chunked import failures on strict upload limits. Recommended update.

@@ -4,6 +4,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
+require_once dirname(__DIR__) . '/class-topology-db-connection.php';
 require_once __DIR__ . '/class-restore-topology-manifest.php';
 require_once __DIR__ . '/class-restore-topology-standalone.php';
 require_once __DIR__ . '/class-restore-topology-destination.php';

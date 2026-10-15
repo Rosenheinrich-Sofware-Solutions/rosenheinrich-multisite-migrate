@@ -92,4 +92,101 @@ final class Rmmigrate_Topology_Db_Connection
             return null;
         }
     }
+
+    /**
+     * Whether a table exists. Uses SELECT/sqlite_master — not SHOW TABLES LIKE with a bound
+     * placeholder, which MySQL/MariaDB reject when PDO::ATTR_EMULATE_PREPARES is false.
+     */
+    public static function table_exists(PDO $pdo, string $table): bool
+    {
+        $table = trim($table);
+        if ($table === '') {
+            return false;
+        }
+
+        if (self::is_sqlite_pdo($pdo)) {
+            $stmt = $pdo->prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1");
+            $stmt->execute(array($table));
+
+            return (bool) $stmt->fetchColumn();
+        }
+
+        try {
+            $quoted = self::quote_sql_identifier($table);
+            $result = $pdo->query('SELECT 1 FROM ' . $quoted . ' LIMIT 1');
+            if ($result === false) {
+                return false;
+            }
+            $result->fetch();
+
+            return true;
+        } catch (Throwable $e) {
+            unset($e);
+
+            return false;
+        }
+    }
+
+    /**
+     * Tables whose names start with a literal prefix (not SQL LIKE wildcards).
+     *
+     * @return string[]
+     */
+    public static function list_tables_with_prefix(PDO $pdo, string $prefix): array
+    {
+        $prefix = trim($prefix);
+        if ($prefix === '') {
+            return array();
+        }
+
+        $len = strlen($prefix);
+        $out = array();
+        foreach (self::list_all_tables($pdo) as $table) {
+            if (strncmp($table, $prefix, $len) === 0) {
+                $out[] = $table;
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * @return string[]
+     */
+    public static function list_all_tables(PDO $pdo): array
+    {
+        if (self::is_sqlite_pdo($pdo)) {
+            $stmt = $pdo->query("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'");
+            $rows = $stmt ? $stmt->fetchAll(PDO::FETCH_NUM) : array();
+        } else {
+            $stmt = $pdo->query('SHOW TABLES');
+            $rows = $stmt ? $stmt->fetchAll(PDO::FETCH_NUM) : array();
+        }
+
+        $tables = array();
+        foreach ($rows as $row) {
+            $name = (string) ($row[0] ?? '');
+            if ($name !== '') {
+                $tables[] = $name;
+            }
+        }
+
+        return $tables;
+    }
+
+    private static function is_sqlite_pdo(PDO $pdo): bool
+    {
+        try {
+            return (string) $pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'sqlite';
+        } catch (Throwable $e) {
+            unset($e);
+
+            return false;
+        }
+    }
+
+    private static function quote_sql_identifier(string $identifier): string
+    {
+        return '`' . str_replace('`', '``', $identifier) . '`';
+    }
 }
