@@ -1,5 +1,7 @@
 <?php
 
+require_once dirname(__DIR__) . '/safe-logger.php';
+
 if (!defined('ABSPATH')) {
     exit;
 }
@@ -79,6 +81,7 @@ class Rmmigrate_Restore_Topology_Destination
                 $probe = self::enrich_probe($probe, $pdo);
             }
         } catch (Throwable $e) {
+            rmmigrate_shared_log_best_effort_failure($e);
             $probe['db_reachable'] = false;
         }
 
@@ -164,6 +167,9 @@ class Rmmigrate_Restore_Topology_Destination
             $parsed = wp_parse_url($site_url);
             if (is_array($parsed)) {
                 $host = (string) ($parsed['host'] ?? '');
+                if ($host !== '' && isset($parsed['port'])) {
+                    $host .= ':' . (int) $parsed['port'];
+                }
                 $path = (string) ($parsed['path'] ?? '/');
             }
         }

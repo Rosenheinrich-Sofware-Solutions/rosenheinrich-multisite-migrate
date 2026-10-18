@@ -74,6 +74,7 @@ final class Rmmigrate_Zip_Archive_Errors
         try {
             return (string) $zip->getStatusString();
         } catch (\Throwable $e) {
+            Rmmigrate_Logger::log('Best-effort operation failed: ' . $e->getMessage());
             return '';
         }
     }
@@ -86,6 +87,7 @@ final class Rmmigrate_Zip_Archive_Errors
         try {
             return (int) $zip->status();
         } catch (\Throwable $e) {
+            Rmmigrate_Logger::log('Best-effort operation failed: ' . $e->getMessage());
             return 0;
         }
     }

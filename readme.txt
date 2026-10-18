@@ -4,7 +4,7 @@ Tags: multisite, site-migration, wordpress-migration, migrate-wordpress, clone-s
 Requires at least: 6.2
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.2.19
+Stable tag: 1.2.20
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -241,6 +241,10 @@ Backup and restore run as background-style chunked jobs. They are designed not t
 
 == Changelog ==
 
+= 1.2.20 – 2026-10-17 =
+* Fix: Various bug fixes and stability improvements.
+* Security: Additional hardening.
+
 = 1.2.19 – 2026-10-15 =
 * Fix: SQL imports with mysqldump triggers and routines (DELIMITER).
 * Fix: More reliable backup archives with clearer errors and cleanup after failures.
@@ -275,6 +279,9 @@ Backup and restore run as background-style chunked jobs. They are designed not t
 Older entries are in changelog.txt, which ships with the plugin, and the full history is published at [https://multisitemigrate.rosenheinrich.com/changelog/](https://multisitemigrate.rosenheinrich.com/changelog/).
 
 == Upgrade Notice ==
+
+= 1.2.20 =
+Bug fixes and stability improvements. Recommended update.
 
 = 1.2.19 =
 Bug fixes and security hardening. Recommended update.

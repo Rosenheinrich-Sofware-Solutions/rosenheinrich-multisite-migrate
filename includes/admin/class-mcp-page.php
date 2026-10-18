@@ -65,7 +65,6 @@ final class Rmmigrate_Mcp_Page
         );
 
         $user = wp_get_current_user();
-        $is_pro = defined('RMMIGRATE_PRO_VERSION');
         $boot = array(
             'abilitiesApiAvailable'         => function_exists('wp_register_ability'),
             'mcpAdapterActive'              => Rmmigrate_Ai_Agents_Rest::is_mcp_adapter_active(),
@@ -79,7 +78,7 @@ final class Rmmigrate_Mcp_Page
             'applicationPasswords'          => Rmmigrate_Ai_Agents_Rest::list_current_user_application_passwords(),
             'registeredAbilities'           => Rmmigrate_Abilities::boot_registered_list(),
             'proAbilityIds'                 => Rmmigrate_Abilities::pro_ability_ids(),
-            'isPro'                         => $is_pro,
+            'isPro'                         => false,
             'siteUrl'                       => home_url('/'),
             'userLogin'                     => $user->user_login,
             'mcpEndpoint'                   => rest_url('mcp/mcp-adapter-default-server'),
@@ -89,7 +88,7 @@ final class Rmmigrate_Mcp_Page
             'oauthAuthorizationEndpoint'    => rest_url('multisite-migrate/v1/oauth/authorize'),
             'oauthTokenEndpoint'            => rest_url('multisite-migrate/v1/oauth/token'),
             'oauthDiscoveryUrl'             => home_url('/.well-known/oauth-authorization-server'),
-            'proUpsellUrl'                  => $is_pro ? '' : Rmmigrate_Links::pricing_url('mcp_tab'),
+            'proUpsellUrl'                  => Rmmigrate_Links::pricing_url('mcp_tab'),
             'i18n'                          => array(
                 'copy'           => __('Copy', 'rosenheinrich-multisite-migrate'),
                 'copied'         => __('Copied', 'rosenheinrich-multisite-migrate'),

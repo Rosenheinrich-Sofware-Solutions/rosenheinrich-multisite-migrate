@@ -7,6 +7,8 @@ if (!defined('ABSPATH')) {
 /**
  * Stateful scanner for mysqldump-style SQL streams (DELIMITER + quoted semicolons).
  */
+if (!class_exists('Rmmigrate_Sql_Import_Stream_Parser', false)) {
+
 class Rmmigrate_Sql_Import_Stream_Parser
 {
     /** @var string */
@@ -30,6 +32,21 @@ class Rmmigrate_Sql_Import_Stream_Parser
     public static function normalize_delimiter(string $delimiter): string
     {
         return $delimiter === '' ? ';' : $delimiter;
+    }
+
+    public static function unwrap_leading_versioned_comment(string $sql): string
+    {
+        if (preg_match('/^\s*\/\*!\d+\s*(.*?)\s*\*\/\s*(.*)$/s', $sql, $m)) {
+            $inner = (string) ($m[1] ?? '');
+            $rest = (string) ($m[2] ?? '');
+            if ($rest === '') {
+                return trim($inner);
+            }
+
+            return rtrim($inner) . ' ' . ltrim($rest);
+        }
+
+        return $sql;
     }
 
     public static function parse_delimiter_directive(string $statement): ?string
@@ -235,4 +252,6 @@ class Rmmigrate_Sql_Import_Stream_Parser
 
         return true;
     }
+}
+
 }

@@ -262,8 +262,9 @@ final class Rmmigrate_Request_Input
         if (!isset($_FILES[$files_key]['tmp_name']) || !is_string($_FILES[$files_key]['tmp_name'])) {
             return '';
         }
-        // phpcs:ignore WordPress.Security.NonceVerification.Missing, WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- Dispatch-layer nonce; tmp_name is validated with is_uploaded_file(), not text-sanitized.
-        $tmp = wp_unslash($_FILES[$files_key]['tmp_name']);
+        // phpcs:ignore WordPress.Security.NonceVerification.Missing, WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- Dispatch-layer nonce; tmp_name must not be wp_unslash'd (breaks Windows paths).
+        $tmp = $_FILES[$files_key]['tmp_name'];
+
         return self::is_uploaded_tmp($tmp) ? $tmp : '';
     }
 

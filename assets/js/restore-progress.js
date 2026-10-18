@@ -379,7 +379,11 @@
     function parseHostPath(url) {
         try {
             var parsed = new URL(url);
-            return { host: parsed.hostname, path: parsed.pathname || '/' };
+            var host = parsed.hostname || '';
+            if (host && parsed.port) {
+                host = host + ':' + parsed.port;
+            }
+            return { host: host, path: parsed.pathname || '/' };
         } catch (e) {
             return { host: '', path: '/' };
         }

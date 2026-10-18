@@ -89,7 +89,9 @@ class Rmmigrate_Setup_Wizard
             return false;
         }
         $rmmigrate_state = self::get_state();
-        if (!empty($rmmigrate_state['complete']) || !empty($rmmigrate_state['banner_dismissed'])) {
+        if (!empty($rmmigrate_state['complete'])
+            || !empty($rmmigrate_state['banner_dismissed'])
+            || !empty($rmmigrate_state['skipped'])) {
             return false;
         }
 
@@ -702,7 +704,7 @@ class Rmmigrate_Setup_Wizard
                 'slug'  => 'schedule',
                 'label' => __('Scheduled backups', 'rosenheinrich-multisite-migrate'),
                 'icon'  => 'dashicons-clock',
-                'blurb' => __('Automate recurring backups on a schedule with Plus or Pro.', 'rosenheinrich-multisite-migrate'),
+                'blurb' => __('Free includes one local scheduled backup. Cloud destinations, multiple schedules, and incremental backups are available in Plus/Pro.', 'rosenheinrich-multisite-migrate'),
             ),
         );
     }
@@ -713,10 +715,8 @@ class Rmmigrate_Setup_Wizard
     public static function pro_highlights(): array
     {
         return array(
-            __('Scheduled backups', 'rosenheinrich-multisite-migrate'),
             __('Cloud storage destinations', 'rosenheinrich-multisite-migrate'),
             __('Recovery points', 'rosenheinrich-multisite-migrate'),
-            __('Secure package encryption', 'rosenheinrich-multisite-migrate'),
             __('Advanced network tooling', 'rosenheinrich-multisite-migrate'),
             __('Priority product updates', 'rosenheinrich-multisite-migrate'),
         );

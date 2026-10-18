@@ -426,11 +426,37 @@ final class Rmmigrate_Feedback
             && strtolower((string) $parts['scheme']) === 'https';
     }
 
+    const SITE_HASH_SALT_OPTION = 'rmmigrate_site_hash_salt';
+
+    /**
+     * Pseudonymous site id for feedback/telemetry: HMAC of the home URL with a random
+     * per-site secret, so the value cannot be recomputed from the public URL.
+     */
     public static function site_hash(): string
     {
-        $salt = defined('AUTH_SALT') ? AUTH_SALT : 'rmmigrate';
+        return hash_hmac('sha256', home_url('/'), self::site_hash_salt());
+    }
 
-        return hash('sha256', home_url('/') . '|' . $salt);
+    /**
+     * Random secret generated once and stored as a network option.
+     */
+    public static function site_hash_salt(): string
+    {
+        $salt = get_site_option(self::SITE_HASH_SALT_OPTION, '');
+        if (is_string($salt) && preg_match('/^[a-f0-9]{64}$/', $salt)) {
+            return $salt;
+        }
+
+        $salt = bin2hex(random_bytes(32));
+        if (!add_site_option(self::SITE_HASH_SALT_OPTION, $salt)) {
+            $existing = get_site_option(self::SITE_HASH_SALT_OPTION, '');
+            if (is_string($existing) && preg_match('/^[a-f0-9]{64}$/', $existing)) {
+                return $existing;
+            }
+            update_site_option(self::SITE_HASH_SALT_OPTION, $salt);
+        }
+
+        return $salt;
     }
 
     private static function mark_cooldown(string $reason): void

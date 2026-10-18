@@ -151,16 +151,15 @@ class Rmmigrate_Admin_Menu
                 $callback
             );
         } else {
-            // Hidden-but-routable: register for direct URL access, then remove from submenu.
+            // Hidden-but-routable: empty parent keeps direct ?page= access without a submenu entry.
             add_submenu_page(
-                $parent,
+                '',
                 __('Setup Wizard', 'rosenheinrich-multisite-migrate'),
                 __('Setup Wizard', 'rosenheinrich-multisite-migrate'),
                 $cap,
                 'multisite-migrate-setup',
                 $callback
             );
-            remove_submenu_page($parent, 'multisite-migrate-setup');
         }
     }
 

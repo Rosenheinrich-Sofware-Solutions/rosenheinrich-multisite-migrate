@@ -131,7 +131,7 @@ class Rmmigrate_Scheduler
         $next_run = (int) ($schedule['next_run'] ?? 0);
 
         if (!self::claim_schedule_slot($schedule_id, $next_run, $blog_id)) {
-            self::advance_next_run($schedule_id, $blog_id);
+            // Another tick already claimed this slot and advanced next_run.
             return;
         }
 
@@ -155,22 +155,22 @@ class Rmmigrate_Scheduler
         $raw_args['scope'] = $resolved['scope'];
         $raw_args['excluded_blogs'] = $resolved['excluded_blogs'];
 
-        self::advance_next_run($schedule_id, $blog_id);
-
         try {
             $result = Rmmigrate_Backup_Service::start_backup($raw_args);
             $job_id = (int) ($result['job_id'] ?? 0);
-            if ($job_id > 0) {
-                $job = Rmmigrate_Job::get($job_id);
-                if ($job !== null) {
-                    $job->update_progress(
-                        array(
-                            'scheduled'     => true,
-                            'schedule_id'   => $schedule_id_arg,
-                            'schedule_name' => $schedule_name_arg,
-                        )
-                    );
-                }
+            if ($job_id <= 0) {
+                throw new RuntimeException(__('Scheduled backup could not be started.', 'rosenheinrich-multisite-migrate'));
+            }
+            self::advance_next_run($schedule_id, $blog_id);
+            $job = Rmmigrate_Job::get($job_id);
+            if ($job !== null) {
+                $job->update_progress(
+                    array(
+                        'scheduled'     => true,
+                        'schedule_id'   => $schedule_id_arg,
+                        'schedule_name' => $schedule_name_arg,
+                    )
+                );
             }
             Rmmigrate_Logger::log_job(
                 $job_id,
@@ -189,6 +189,9 @@ class Rmmigrate_Scheduler
     public static function record_schedule_failure(string $message): void
     {
         $clean_msg = sanitize_text_field($message);
+        if ($clean_msg === '') {
+            $clean_msg = __('Scheduled backup failed without error details.', 'rosenheinrich-multisite-migrate');
+        }
         Rmmigrate_Logger::log_system(
             'Scheduled backup failure: ' . $clean_msg,
             array('triggered_by' => 'cron'),
@@ -318,19 +321,25 @@ class Rmmigrate_Scheduler
     }
 
     /**
-     * First tick to win this wall-clock slot starts the backup. Later ticks
-     * only advance next_run (no second 370MB archive in the grace window).
+     * First tick to win this wall-clock slot starts the backup and advances next_run.
+     * Later ticks in the same slot exit without advancing (no duplicate archives).
      */
     private static function claim_schedule_slot(string $schedule_id, int $next_run, ?int $blog_id = null): bool
     {
         $slot_id = ($blog_id !== null && $blog_id > 0) ? ($schedule_id . '_b' . $blog_id) : $schedule_id;
         $key = self::SLOT_TRANSIENT_PREFIX . md5($slot_id . '|' . $next_run);
-        if (get_site_transient($key)) {
-            return false;
+        $now = microtime(true);
+        if (add_site_option($key, $now)) {
+            return true;
         }
-        set_site_transient($key, 1, defined('HOUR_IN_SECONDS') ? HOUR_IN_SECONDS : 3600);
+        $started = (float) get_site_option($key, 0);
+        $ttl = defined('HOUR_IN_SECONDS') ? (int) HOUR_IN_SECONDS : 3600;
+        if ($started <= 0 || ($now - $started) >= $ttl) {
+            delete_site_option($key);
+            return add_site_option($key, $now);
+        }
 
-        return true;
+        return false;
     }
 
     private static function acquire_admin_due_lock(): bool

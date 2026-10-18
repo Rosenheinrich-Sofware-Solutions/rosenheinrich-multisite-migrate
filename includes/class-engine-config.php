@@ -341,9 +341,15 @@ class Rmmigrate_Engine_Config
         return false;
     }
 
+    /**
+     * Backup storage protection files (.htaccess, web.config, index.php) are always written.
+     * The former Free "storage_htaccess" toggle had no effect and was removed.
+     *
+     * @deprecated Always true; kept for callers of the public helper.
+     */
     public static function storage_htaccess_enabled(): bool
     {
-        return !empty(Rmmigrate_Settings::get()['storage_htaccess']);
+        return true;
     }
 
     public static function log_retention_months(): int

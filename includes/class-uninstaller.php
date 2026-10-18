@@ -132,8 +132,12 @@ class Rmmigrate_Uninstaller
             $base . '/wp-json/multisite-migrate-portal/v1/telemetry/uninstall'
         );
 
-        $salt      = defined('AUTH_SALT') ? AUTH_SALT : 'rmmigrate';
-        $site_hash = hash('sha256', home_url('/') . '|' . $salt);
+        // Same derivation as Rmmigrate_Feedback::site_hash(); never fall back to a guessable salt.
+        $salt = get_site_option('rmmigrate_site_hash_salt', '');
+        if (!is_string($salt) || !preg_match('/^[a-f0-9]{64}$/', $salt)) {
+            $salt = bin2hex(random_bytes(32));
+        }
+        $site_hash = hash_hmac('sha256', home_url('/'), $salt);
 
         wp_remote_post(
             $url,
@@ -247,6 +251,7 @@ class Rmmigrate_Uninstaller
         wp_clear_scheduled_hook('rmmigrate_worker_cron');
         wp_clear_scheduled_hook('rmmigrate_purge_deletes');
         wp_clear_scheduled_hook('rmmigrate_deferred_hosting_detect');
+        wp_clear_scheduled_hook('rmmigrate_storage_self_check');
         wp_clear_scheduled_hook('rmmigrate_deferred_retention_prune');
         wp_clear_scheduled_hook('rmmigrate_tick');
         wp_clear_scheduled_hook('rmmigrate_telemetry_flush');

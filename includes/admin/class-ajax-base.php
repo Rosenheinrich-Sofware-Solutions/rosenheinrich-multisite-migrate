@@ -298,7 +298,7 @@ trait Rmmigrate_Ajax_Base
                 Rmmigrate_Filesystem::delete($path);
                 return new WP_Error('mm_passphrase', __('Enter the archive passphrase for encrypted .venc files.', 'rosenheinrich-multisite-migrate'));
             }
-            $plain_path = $path . '.import-probe.tmp';
+            $plain_path = $path . '.import-probe.daf';
             Rmmigrate_Archive_Encryption::set_runtime_passphrase($archive_passphrase);
             $decrypted = false;
             try {

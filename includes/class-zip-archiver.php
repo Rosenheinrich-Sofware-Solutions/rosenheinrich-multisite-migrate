@@ -9,6 +9,9 @@ class Rmmigrate_Zip_Archiver
     private const QUEUE_FILE = 'zip-queue.json';
     private const MAX_ADD_FILES_PER_SLICE = 1000;
 
+    /** @var string|null Unit tests: force ZipArchive::close failure with this status string. */
+    public static $unit_test_simulate_zip_close_status = null;
+
     /** @var Rmmigrate_Job */
     private $job;
 
@@ -222,17 +225,30 @@ class Rmmigrate_Zip_Archiver
         }
 
         Rmmigrate_Runner::touch_worker_lease($this->job->get_id());
-        if ($zip->close() !== true) {
-            $status = Rmmigrate_Zip_Archive_Errors::describe_close_failure(
-                $zip,
-                $zip_path,
-                $open_res,
-                array(
-                    'file_index'  => $file_index,
-                    'total_files' => $total,
-                    'added'       => $added,
-                )
-            );
+        $close_ok = true;
+        $simulated_status = null;
+        if ((defined('MULTISITE_MIGRATE_UNIT_TEST') || defined('RMMIGRATE_UNIT_TEST'))
+            && self::$unit_test_simulate_zip_close_status !== null
+        ) {
+            $simulated_status = self::$unit_test_simulate_zip_close_status;
+            self::$unit_test_simulate_zip_close_status = null;
+            $close_ok = false;
+        } else {
+            $close_ok = $zip->close();
+        }
+        if ($close_ok !== true) {
+            $status = $simulated_status !== null
+                ? $simulated_status
+                : Rmmigrate_Zip_Archive_Errors::describe_close_failure(
+                    $zip,
+                    $zip_path,
+                    $open_res,
+                    array(
+                        'file_index'  => $file_index,
+                        'total_files' => $total,
+                        'added'       => $added,
+                    )
+                );
             $error_code = (stripos($status, 'quota') !== false || stripos($status, 'space') !== false || stripos($status, 'disk_free') !== false)
                 ? Rmmigrate_Error_Codes::DISK_SPACE
                 : Rmmigrate_Error_Codes::ARCHIVE_VALIDATION_FAILED;
@@ -257,7 +273,7 @@ class Rmmigrate_Zip_Archiver
         ),));
 
         if ($file_index >= $total) {
-            $rel = 'jobs/' . $this->job->get_id() . '/' . basename($zip_path);
+            $rel = Rmmigrate_Local_Storage::work_dir_rel($this->job) . basename($zip_path);
             $this->job->save_fields(array(
                 'local_path' => $rel,
                 'file_size'  => (int) Rmmigrate_Filesystem::filesize($zip_path),

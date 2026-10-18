@@ -13,6 +13,9 @@ final class Rmmigrate_OAuth_Server
 
     private const AUTH_FAIL_WINDOW = 900;
 
+    /** Failed attempts per IP with unknown client ids before that IP is locked out. */
+    private const AUTH_FAIL_IP_MAX = 20;
+
     public static function register(): void
     {
         add_action('rest_api_init', array(__CLASS__, 'register_routes'));
@@ -297,7 +300,7 @@ final class Rmmigrate_OAuth_Server
         }
         $client = Rmmigrate_OAuth_Store::get_client($client_id);
         if ($client === null || !Rmmigrate_OAuth_Store::verify_secret($client, $client_secret)) {
-            self::auth_throttle_record_failure($client_id);
+            self::auth_throttle_record_failure($client_id, $client !== null);
             return new WP_Error('invalid_client', 'Client authentication failed', array('status' => 401));
         }
         self::auth_throttle_clear($client_id);
@@ -474,7 +477,7 @@ final class Rmmigrate_OAuth_Server
         }
         $client = Rmmigrate_OAuth_Store::get_client($client_id);
         if ($client === null || !Rmmigrate_OAuth_Store::verify_secret($client, $client_secret)) {
-            self::auth_throttle_record_failure($client_id);
+            self::auth_throttle_record_failure($client_id, $client !== null);
             return new WP_Error('invalid_client', 'Client authentication failed', array('status' => 401));
         }
         self::auth_throttle_clear($client_id);
@@ -584,14 +587,49 @@ final class Rmmigrate_OAuth_Server
         exit;
     }
 
-    private static function auth_throttle_key(string $client_id): string
+    private static function auth_throttle_ip(): string
     {
         $ip = '';
         if (!empty($_SERVER['REMOTE_ADDR']) && is_string($_SERVER['REMOTE_ADDR'])) {
             $ip = sanitize_text_field(wp_unslash($_SERVER['REMOTE_ADDR']));
         }
 
-        return 'rmmigrate_oauth_fail_' . hash('sha256', $client_id . '|' . $ip);
+        return $ip;
+    }
+
+    private static function auth_throttle_key(string $client_id): string
+    {
+        return 'rmmigrate_oauth_fail_' . hash('sha256', $client_id . '|' . self::auth_throttle_ip());
+    }
+
+    /**
+     * One counter per remote IP for unknown client ids, so random ids cannot create rows.
+     */
+    private static function auth_throttle_ip_key(): string
+    {
+        return 'rmmigrate_oauth_ipfail_' . hash('sha256', self::auth_throttle_ip());
+    }
+
+    /**
+     * @return array{since:int,count:int,until:int}
+     */
+    private static function auth_throttle_state(string $key): array
+    {
+        $raw = get_site_transient($key);
+        if (!is_array($raw)) {
+            // Older releases stored the counter as an int with _since/_lock companions.
+            return array(
+                'since' => (int) get_site_transient($key . '_since'),
+                'count' => (int) $raw,
+                'until' => (int) get_site_transient($key . '_lock'),
+            );
+        }
+
+        return array(
+            'since' => (int) ($raw['since'] ?? 0),
+            'count' => (int) ($raw['count'] ?? 0),
+            'until' => (int) ($raw['until'] ?? 0),
+        );
     }
 
     /**
@@ -599,9 +637,9 @@ final class Rmmigrate_OAuth_Server
      */
     private static function auth_throttle_blocked(string $client_id)
     {
-        $key = self::auth_throttle_key($client_id);
-        $until = (int) get_site_transient($key . '_lock');
-        if ($until > time()) {
+        $now = time();
+        if (self::auth_throttle_state(self::auth_throttle_ip_key())['until'] > $now
+            || self::auth_throttle_state(self::auth_throttle_key($client_id))['until'] > $now) {
             return new WP_Error(
                 'slow_down',
                 __('Too many failed authentication attempts.', 'rosenheinrich-multisite-migrate'),
@@ -612,29 +650,32 @@ final class Rmmigrate_OAuth_Server
         return null;
     }
 
-    private static function auth_throttle_record_failure(string $client_id): void
+    private static function auth_throttle_record_failure(string $client_id, bool $known_client): void
     {
-        $key = self::auth_throttle_key($client_id);
-        $window_key = $key . '_since';
+        $key = $known_client ? self::auth_throttle_key($client_id) : self::auth_throttle_ip_key();
+        $max = $known_client ? self::AUTH_FAIL_MAX : self::AUTH_FAIL_IP_MAX;
         $now = time();
-        $since = (int) get_site_transient($window_key);
-        $count = (int) get_site_transient($key);
+        $state = self::auth_throttle_state($key);
 
-        if ($since <= 0 || ($now - $since) >= self::AUTH_FAIL_WINDOW) {
-            $count = 0;
-            $since = $now;
-            set_site_transient($window_key, $since, self::AUTH_FAIL_WINDOW);
+        if ($state['since'] <= 0 || ($now - $state['since']) >= self::AUTH_FAIL_WINDOW) {
+            $state = array('since' => $now, 'count' => 0, 'until' => 0);
         }
 
-        $count++;
-        set_site_transient($key, $count, self::AUTH_FAIL_WINDOW);
-        if ($count >= self::AUTH_FAIL_MAX) {
-            set_site_transient($key . '_lock', $now + self::AUTH_FAIL_WINDOW, self::AUTH_FAIL_WINDOW);
+        // Capped: a locked counter is not rewritten on every further attempt.
+        if ($state['until'] > $now) {
+            return;
+        }
+        $state['count'] = min($max, $state['count'] + 1);
+        if ($state['count'] >= $max) {
+            $state['until'] = $now + self::AUTH_FAIL_WINDOW;
+        }
+        set_site_transient($key, $state, self::AUTH_FAIL_WINDOW);
+        if ($state['until'] > $now) {
             Rmmigrate_Logger::log_activity(
                 'oauth',
                 __('Repeated OAuth client authentication failures.', 'rosenheinrich-multisite-migrate'),
                 'warning',
-                array('client_id' => sanitize_key($client_id))
+                array('client_id' => $known_client ? sanitize_key($client_id) : '')
             );
         }
     }

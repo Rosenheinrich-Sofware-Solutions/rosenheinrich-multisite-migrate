@@ -113,6 +113,16 @@ class Rmmigrate_Access
             : Rmmigrate_Multisite_Scope::SCOPE_NETWORK;
         $blog_id = is_array($manifest) ? (int) ($manifest['blog_id'] ?? 0) : 0;
 
+        // scope/blog_id are self-declared by the archive: only trust them when the manifest
+        // carries this network's seal (created here, unmodified since).
+        if (!is_array($manifest) || !Rmmigrate_Manifest::verify_site_seal($manifest)) {
+            Rmmigrate_Filesystem::delete($path);
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Structured exception payload.
+            throw Rmmigrate_Service_Exception::forbidden(
+                esc_html(__('This backup could not be verified as created on this network. Ask your network administrator to import it.', 'rosenheinrich-multisite-migrate'))
+            );
+        }
+
         if ($scope !== Rmmigrate_Multisite_Scope::SCOPE_SUBSITE
             || $blog_id !== get_current_blog_id()
         ) {

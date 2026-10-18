@@ -65,6 +65,7 @@ final class Rmmigrate_Plugin
         require_once $includes . 'class-error-recorder.php';
         require_once $includes . 'class-job-exception.php';
         require_once $includes . 'class-hosting-detection.php';
+        require_once $includes . 'class-storage-self-check.php';
         require_once $includes . 'class-post-migration.php';
         require_once $includes . 'class-engine-maintenance.php';
         require_once $includes . 'class-log-rotator.php';
@@ -77,7 +78,9 @@ final class Rmmigrate_Plugin
         require_once $includes . 'class-job-cleanup.php';
         require_once $includes . 'class-build-steps.php';
         require_once $includes . 'class-restore-build-steps.php';
+        require_once $includes . 'shared/safe-logger.php';
         require_once $includes . 'shared/progress.php';
+        require_once $includes . 'shared/import-chunk-session-core.php';
         require_once $includes . 'shared/restore-topology/bootstrap.php';
         require_once $includes . 'class-manifest.php';
         require_once $includes . 'class-archive-index.php';
@@ -129,6 +132,7 @@ final class Rmmigrate_Plugin
         require_once $includes . 'admin/class-ajax-import.php';
         require_once $includes . 'admin/class-ajax-activity.php';
         require_once $includes . 'admin/class-ajax-cleanup.php';
+        require_once $includes . 'admin/class-ajax-notices.php';
         require_once $includes . 'admin/class-ajax-handler.php';
         require_once $includes . 'admin/class-network-admin.php';
         require_once $includes . 'admin/class-site-admin.php';
@@ -196,6 +200,7 @@ final class Rmmigrate_Plugin
         Rmmigrate_Admin_Assets::register();
         Rmmigrate_Ajax_Handler::register();
         Rmmigrate_Hosting_Detection::register();
+        Rmmigrate_Storage_Self_Check::register();
         Rmmigrate_Engine_Config::register_http_hooks();
         Rmmigrate_Retention::register();
         Rmmigrate_Job_Cleanup::register();
@@ -213,20 +218,17 @@ final class Rmmigrate_Plugin
         Rmmigrate_Restore_Runner::register_maintenance_hooks();
         add_action('admin_init', array('Rmmigrate_Restore_Runner', 'recover_stale_maintenance'), 1);
 
-        // Pro owns Ops-MCP when the commercial plugin is active (standalone or addon).
         // MCP/Abilities need WP 6.9+; page still registers so admins see the WP 6.9 gate UI.
-        if (!defined('RMMIGRATE_PRO_VERSION')) {
-            if (Rmmigrate_Bootstrap::mcp_supported()) {
-                Rmmigrate_OAuth_Store::ensure_tables();
-                Rmmigrate_OAuth_Store::register_cron();
-                Rmmigrate_OAuth_Bearer_Auth::register();
-                Rmmigrate_OAuth_Server::register();
-                Rmmigrate_Ai_Agents_Rest::register();
-                Rmmigrate_Abilities::register();
-                add_action('init', array(__CLASS__, 'maybe_flush_oauth_rewrites'), 99);
-            }
-            Rmmigrate_Mcp_Page::register();
+        if (Rmmigrate_Bootstrap::mcp_supported()) {
+            Rmmigrate_OAuth_Store::ensure_tables();
+            Rmmigrate_OAuth_Store::register_cron();
+            Rmmigrate_OAuth_Bearer_Auth::register();
+            Rmmigrate_OAuth_Server::register();
+            Rmmigrate_Ai_Agents_Rest::register();
+            Rmmigrate_Abilities::register();
+            add_action('init', array(__CLASS__, 'maybe_flush_oauth_rewrites'), 99);
         }
+        Rmmigrate_Mcp_Page::register();
 
         if (is_multisite()) {
             Rmmigrate_Network_Admin::register();

@@ -1109,6 +1109,55 @@ class Rmmigrate_Activity_Log
     }
 
     /**
+     * Whether the current user may read a log file: system logs are for activity admins only,
+     * job logs for whoever may view the owning job. Unresolvable owners are denied.
+     */
+    public static function current_user_can_read_log(string $basename): bool
+    {
+        if (!self::is_allowed_log_basename($basename)) {
+            return false;
+        }
+        if (self::current_user_is_activity_admin()) {
+            return true;
+        }
+        $job_id = self::job_id_for_log_basename($basename);
+        if ($job_id <= 0) {
+            return false;
+        }
+        $job = self::get_request_cached_job($job_id);
+
+        return $job !== null && Rmmigrate_Access::can_view_job($job);
+    }
+
+    /**
+     * Owning job of a job log basename (legacy backup-{id} or opaque job-{token}), 0 if none.
+     */
+    public static function job_id_for_log_basename(string $basename): int
+    {
+        if (preg_match('/^backup-(\d+)(?:\.\d+)?\.log$/', $basename, $m)) {
+            return (int) $m[1];
+        }
+        if (!preg_match('/^job-([a-f0-9]{16})(?:\.\d+)?\.log$/', $basename, $m)) {
+            return 0;
+        }
+        $token = $m[1];
+        global $wpdb;
+        if (!isset($wpdb) || !is_object($wpdb) || !method_exists($wpdb, 'get_col') || !method_exists($wpdb, 'prepare') || !method_exists($wpdb, 'esc_like')) {
+            return 0;
+        }
+        $table = Rmmigrate_Job::table_name();
+        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Plugin jobs table; token bound via prepare().
+        $ids = $wpdb->get_col($wpdb->prepare("SELECT id FROM {$table} WHERE progress LIKE %s LIMIT 5", '%' . $wpdb->esc_like('"log_token":"' . $token . '"') . '%'));
+        foreach ((array) $ids as $id) {
+            if (self::read_job_log_token((int) $id) === $token) {
+                return (int) $id;
+            }
+        }
+
+        return 0;
+    }
+
+    /**
      * Read log_token from job progress without minting.
      */
     public static function read_job_log_token(int $job_id): string

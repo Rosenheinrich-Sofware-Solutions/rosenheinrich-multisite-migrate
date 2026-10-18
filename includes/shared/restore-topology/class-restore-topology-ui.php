@@ -22,10 +22,14 @@ class Rmmigrate_Restore_Topology_Ui
      */
     public static function offers_subsite_on_network(array $manifest, array $destination): bool
     {
-        return ($manifest['scope'] ?? '') === 'subsite'
-            && !empty($manifest['is_multisite'])
-            && !empty($destination['is_multisite'])
-            && empty($destination['is_multisite_subsite']);
+        if (empty($destination['is_multisite']) || !empty($destination['is_multisite_subsite'])) {
+            return false;
+        }
+        if (($manifest['scope'] ?? '') === 'subsite') {
+            return true;
+        }
+
+        return !Rmmigrate_Restore_Topology_Manifest::restore_as_multisite($manifest);
     }
 
     /**
@@ -58,11 +62,28 @@ class Rmmigrate_Restore_Topology_Ui
             'prefix_policy'  => sanitize_key((string) ($raw['prefix_policy'] ?? 'keep_source')),
         );
 
+        if ($topology === 'subsite_overwrite') {
+            $target_blog_id = (int) ($raw['topology_target_blog_id'] ?? 0);
+            if ($target_blog_id > 0) {
+                $out['target_blog_id'] = $target_blog_id;
+            }
+
+            return $out;
+        }
+
+        if ($topology === 'subsite_on_network' && !self::offers_subsite_on_network($manifest, $destination)) {
+            return self::with_topology_error($out, 'subsite_on_network');
+        }
+        if ($topology === 'network_to_subsite' && !self::offers_network_to_subsite($manifest, $destination)) {
+            return self::with_topology_error($out, 'network_to_subsite');
+        }
+
         if ($topology === 'subsite_on_network' && self::offers_subsite_on_network($manifest, $destination)) {
             $target_blog_id = (int) ($raw['topology_target_blog_id'] ?? 0);
             $target_url = esc_url_raw((string) ($raw['topology_target_url'] ?? ''));
-            if ($target_url === '') {
-                return $out;
+            if ($target_blog_id <= 0 && $target_url === '') {
+                // Fail closed: never fall back to a same-slot overwrite of the source blog.
+                return self::with_topology_error($out, 'subsite_on_network');
             }
             $out['restore_mode'] = 'subsite_on_network';
             $out['site_owr_map'] = array(
@@ -81,11 +102,36 @@ class Rmmigrate_Restore_Topology_Ui
                 $target_blog_id = (int) ($destination['destination_blog_id'] ?? 0);
             }
             if ($target_blog_id <= 0) {
-                return $out;
+                return self::with_topology_error($out, 'network_to_subsite');
             }
             $out['restore_mode'] = 'network_to_subsite';
             $out['target_blog_id'] = $target_blog_id;
         }
+
+        return $out;
+    }
+
+    /**
+     * An explicitly requested cross-blog topology that cannot be honored must hard-fail
+     * instead of silently degrading to a same-slot restore over the live source blog.
+     *
+     * @param array<string,mixed> $out
+     * @return array<string,mixed>
+     */
+    private static function with_topology_error(array $out, string $requested_mode): array
+    {
+        $out['restore_mode'] = '';
+        $out['site_owr_map'] = array();
+        $out['target_blog_id'] = 0;
+        $out['topology_error'] = array(
+            'gate'          => $requested_mode === 'network_to_subsite'
+                ? 'topology_network_to_subsite_target'
+                : 'topology_subsite_on_network_target_unresolved',
+            'message'       => $requested_mode === 'network_to_subsite'
+                ? __('Network-to-subsite import requires a target blog on this network.', 'rosenheinrich-multisite-migrate')
+                : __('Subsite-on-network import could not resolve the target blog. Check the blog ID and URL.', 'rosenheinrich-multisite-migrate'),
+            'recovery_hint' => '',
+        );
 
         return $out;
     }

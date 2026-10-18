@@ -133,13 +133,13 @@ class Rmmigrate_Extract_Engine
         }
 
         if ( $requested === self::ENGINE_SHELL ) {
-            if ( self::archive_password( $state ) !== '' || self::blocking_engine_unsafe( $archive_path ) ) {
+            if ( self::archive_password( $state ) !== '' || self::blocking_engine_unsafe( $archive_path ) || self::archive_requires_chunked_extract( $archive_path ) ) {
                 return self::ENGINE_ZIP_CHUNK;
             }
             return self::is_shell_unzip_available() ? self::ENGINE_SHELL : self::ENGINE_ZIP_CHUNK;
         }
         if ( $requested === self::ENGINE_ZIP_ONESHOT ) {
-            if ( self::blocking_engine_unsafe( $archive_path ) || ! self::can_oneshot_zip( $archive_path, $state ) ) {
+            if ( self::blocking_engine_unsafe( $archive_path ) || ! self::can_oneshot_zip( $archive_path, $state ) || self::archive_requires_chunked_extract( $archive_path ) ) {
                 return self::ENGINE_ZIP_CHUNK;
             }
             return self::ENGINE_ZIP_ONESHOT;
@@ -151,11 +151,14 @@ class Rmmigrate_Extract_Engine
         if (
             self::archive_password( $state ) === ''
             && ! self::blocking_engine_unsafe( $archive_path )
+            && ! self::archive_requires_chunked_extract( $archive_path )
             && self::is_shell_unzip_available()
         ) {
             return self::ENGINE_SHELL;
         }
-        if ( ! self::blocking_engine_unsafe( $archive_path ) && self::can_oneshot_zip( $archive_path, $state ) ) {
+        if ( ! self::blocking_engine_unsafe( $archive_path )
+            && ! self::archive_requires_chunked_extract( $archive_path )
+            && self::can_oneshot_zip( $archive_path, $state ) ) {
             return self::ENGINE_ZIP_ONESHOT;
         }
 
@@ -537,6 +540,36 @@ class Rmmigrate_Extract_Engine
 
 
     /**
+     * True when shell/one-shot engines must not run (symlinks, zip-slip, unreadable members).
+     */
+    public static function archive_requires_chunked_extract( string $archive_path ): bool
+    {
+        if ( ! class_exists( 'ZipArchive' ) || ! self::filesystem_exists( $archive_path ) ) {
+            return true;
+        }
+
+        $precheck_dir = rtrim( sys_get_temp_dir(), '/\\' ) . '/mm-zip-precheck-' . md5( $archive_path ) . '/';
+        $zip = new ZipArchive();
+        if ( $zip->open( $archive_path ) !== true ) {
+            return true;
+        }
+
+        try {
+            for ( $i = 0; $i < $zip->numFiles; $i++ ) {
+                self::assert_zip_entry_index_safe( $zip, $i, $precheck_dir );
+            }
+        } catch ( Rmmigrate_Job_Exception $e ) {
+            rmmigrate_shared_log_best_effort_failure($e);
+            $zip->close();
+            return true;
+        }
+
+        $zip->close();
+
+        return false;
+    }
+
+    /**
      * Validate one archive member before extractTo / streaming (fail closed).
      *
      * @return string Entry name when the member should be extracted; empty string for directory entries.
@@ -701,6 +734,7 @@ class Rmmigrate_Extract_Engine
                 }
             }
         } catch ( Exception $e ) {
+            rmmigrate_shared_log_best_effort_failure($e);
             return 0;
         }
 

@@ -44,11 +44,27 @@ class Rmmigrate_Search_Replace_Core
                 if (!empty($blog['old_domain']) && !empty($blog['new_domain'])) {
                     $this->add_pair($blog['old_domain'], $blog['new_domain']);
                 }
-                if (!empty($blog['old_path']) && !empty($blog['new_path']) && $blog['old_path'] !== $blog['new_path']) {
-                    $this->add_pair($blog['old_path'], $blog['new_path']);
-                    $this->add_pair(rtrim($blog['old_path'], '/'), rtrim($blog['new_path'], '/'));
-                }
             }
+        }
+
+        $this->add_json_escaped_url_variants();
+    }
+
+    private function add_json_escaped_url_variants(): void
+    {
+        $extra = array();
+        foreach ($this->pairs as $pair) {
+            if (strpos($pair['search'], 'http') === false) {
+                continue;
+            }
+            $search = str_replace('/', '\\/', $pair['search']);
+            $replace = str_replace('/', '\\/', $pair['replace']);
+            if ($search !== $pair['search']) {
+                $extra[] = array('search' => $search, 'replace' => $replace);
+            }
+        }
+        foreach ($extra as $pair) {
+            $this->add_pair($pair['search'], $pair['replace']);
         }
     }
 
@@ -79,6 +95,25 @@ class Rmmigrate_Search_Replace_Core
             if ($o && $n) {
                 $pairs[] = array('search' => $o, 'replace' => $n);
                 $pairs[] = array('search' => $o . '/', 'replace' => $n . '/');
+            }
+        }
+
+        $old_parsed = wp_parse_url($old);
+        $new_parsed = wp_parse_url($new);
+        if (is_array($old_parsed) && is_array($new_parsed)) {
+            $old_host = (string) ($old_parsed['host'] ?? '');
+            $new_host = (string) ($new_parsed['host'] ?? '');
+            $old_port = isset($old_parsed['port']) ? (int) $old_parsed['port'] : 0;
+            if ($old_host !== '' && $new_host !== '' && $old_port > 0) {
+                foreach (array('http', 'https') as $scheme) {
+                    $with_port = $scheme . '://' . $old_host . ':' . $old_port;
+                    $target = $scheme . '://' . $new_host;
+                    if (!empty($new_parsed['port'])) {
+                        $target .= ':' . (int) $new_parsed['port'];
+                    }
+                    $pairs[] = array('search' => $with_port, 'replace' => $target);
+                    $pairs[] = array('search' => $with_port . '/', 'replace' => $target . '/');
+                }
             }
         }
 
@@ -177,6 +212,10 @@ class Rmmigrate_Search_Replace_Core
             $offset = 0;
             $occupied_scan = 0;
             while (($pos = strpos($original, $search, $offset)) !== false) {
+                if ($this->should_skip_prefix_extension_match($original, $pos, $search, $pair['replace'])) {
+                    $offset = $pos + 1;
+                    continue;
+                }
                 $end = $pos + $search_len;
                 if (!$this->interval_overlaps($occupied, $pos, $end, $occupied_scan)) {
                     $matches[] = array(
@@ -192,6 +231,30 @@ class Rmmigrate_Search_Replace_Core
         }
 
         return $matches;
+    }
+
+    private function should_skip_prefix_extension_match(string $original, int $pos, string $search, string $replace): bool
+    {
+        if ($search === '' || $search === $replace) {
+            return false;
+        }
+        $after = $pos + strlen($search);
+        if ($after >= strlen($original)) {
+            return false;
+        }
+        $next = $original[$after];
+
+        if (preg_match('/[A-Za-z0-9_-]/', $next)) {
+            return true;
+        }
+        if ($next === ':' && ($after + 1) < strlen($original) && ctype_digit($original[$after + 1])) {
+            return true;
+        }
+        if ($next === '.' && ($after + 1) < strlen($original)) {
+            return (bool) preg_match('/[A-Za-z0-9]/', $original[$after + 1]);
+        }
+
+        return false;
     }
 
     /**

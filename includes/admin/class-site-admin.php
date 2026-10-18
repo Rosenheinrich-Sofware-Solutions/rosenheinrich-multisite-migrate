@@ -18,13 +18,6 @@ class Rmmigrate_Site_Admin
 
     public static function menu(): void
     {
-        if (class_exists('Rmmigrate_Pro_Edition_Exclusion', false)
-            && method_exists('Rmmigrate_Pro_Edition_Exclusion', 'should_hide_engine_admin_menu')
-            && Rmmigrate_Pro_Edition_Exclusion::should_hide_engine_admin_menu()
-        ) {
-            return;
-        }
-
         if (!Rmmigrate_Access::subsite_menu_visible()) {
             return;
         }
@@ -34,13 +27,6 @@ class Rmmigrate_Site_Admin
 
     public static function menu_single(): void
     {
-        if (class_exists('Rmmigrate_Pro_Edition_Exclusion', false)
-            && method_exists('Rmmigrate_Pro_Edition_Exclusion', 'should_hide_engine_admin_menu')
-            && Rmmigrate_Pro_Edition_Exclusion::should_hide_engine_admin_menu()
-        ) {
-            return;
-        }
-
         Rmmigrate_Admin_Menu::register_top_level('manage_options', array(__CLASS__, 'render_page'));
     }
 

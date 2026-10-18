@@ -13,5 +13,6 @@ class Rmmigrate_Ajax_Handler
         Rmmigrate_Ajax_Import::register();
         Rmmigrate_Ajax_Activity::register();
         Rmmigrate_Ajax_Cleanup::register();
+        Rmmigrate_Ajax_Notices::register();
     }
 }

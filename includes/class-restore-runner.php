@@ -13,6 +13,12 @@ class Rmmigrate_Restore_Runner
      */
     public static function process_slice(Rmmigrate_Job $job): array
     {
+        if (Rmmigrate_Job_Cleanup::cancel_flag_requested($job->get_id())
+            && $job->get_status() !== Rmmigrate_Job::STATUS_CANCELLED) {
+            $job->cancel();
+            self::disable_maintenance();
+            return array('message' => $job->get_status_label());
+        }
         if ($job->get_status() === Rmmigrate_Job::STATUS_CANCELLED) {
             self::disable_maintenance();
             return array('message' => $job->get_status_label());
@@ -55,7 +61,7 @@ class Rmmigrate_Restore_Runner
 
         Rmmigrate_Plugin::ensure_backup_root();
         $work_dir = Rmmigrate_Local_Storage::ensure_job_work_dir($job, false);
-        $work_rel = 'jobs/' . $job->get_id() . '/';
+        $work_rel = Rmmigrate_Local_Storage::work_dir_rel($job);
 
         self::enable_maintenance($job->get_id());
 
@@ -68,14 +74,6 @@ class Rmmigrate_Restore_Runner
         }
 
         $progress = $job->get_progress();
-        $extract_plan = self::build_extract_plan($source_job);
-        if ($extract_plan === array()) {
-            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
-            throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::ARCHIVE_MISSING),
-                esc_html(__('No backup archives found for restore.', 'rosenheinrich-multisite-migrate'))
-            );
-        }
-
         $source_path = $progress['source']['zip_path'] ?? Rmmigrate_Runner::resolve_local_path($source_job);
         $decrypt = is_array($progress['decrypt'] ?? null) ? $progress['decrypt'] : array();
         if (!empty($decrypt['plain_path']) && empty($decrypt['pending']) && Rmmigrate_Filesystem::exists((string) $decrypt['plain_path'])) {
@@ -133,6 +131,14 @@ class Rmmigrate_Restore_Runner
         }
 
         self::maybe_warn_php_version_mismatch($job, $source_path);
+
+        $extract_plan = self::build_extract_plan($source_job, $source_path);
+        if ($extract_plan === array()) {
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+            throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::ARCHIVE_MISSING),
+                esc_html(__('No backup archives found for restore.', 'rosenheinrich-multisite-migrate'))
+            );
+        }
 
         $init_progress = array(
             'init'           => array('work_dir' => $work_rel),
@@ -211,6 +217,8 @@ class Rmmigrate_Restore_Runner
         if (empty($progress['db_prepared'])) {
             self::prepare_database_for_restore($job);
             $job->update_progress(array('db_prepared' => true));
+            // Import must continue in this worker tick: quarantine renames live tables and
+            // the next HTTP request cannot boot WordPress against missing wp_* tables.
         }
 
         $job->set_status(Rmmigrate_Job::STATUS_DUMPING_DB);
@@ -218,7 +226,9 @@ class Rmmigrate_Restore_Runner
         $done = $importer->run_slice(Rmmigrate_Runner::remaining_budget_sec());
 
         if ($done) {
+            self::finish_database_import($job);
             $job->set_status(Rmmigrate_Job::STATUS_DB_DONE);
+            self::enable_maintenance($job->get_id());
             $steps->advance_next();
             Rmmigrate_Logger::log('Database import complete');
             return array('message' => __('Database restored', 'rosenheinrich-multisite-migrate'));
@@ -226,6 +236,28 @@ class Rmmigrate_Restore_Runner
 
         $progress = $job->get_progress();
         $import = is_array($progress['import'] ?? null) ? $progress['import'] : array();
+        $import_warnings = is_array($import['warnings'] ?? null) ? $import['warnings'] : array();
+        if ($import_warnings !== array()) {
+            $first = (string) $import_warnings[0];
+            if (count($import_warnings) > 1) {
+                return array(
+                    'message' => sprintf(
+                        /* translators: 1: first warning, 2: additional warning count */
+                        __('Importing database (%1$s; +%2$d more warnings)', 'rosenheinrich-multisite-migrate'),
+                        $first,
+                        count($import_warnings) - 1,
+                    ),
+                );
+            }
+
+            return array(
+                'message' => sprintf(
+                    /* translators: %s: import warning message */
+                    __('Importing database (%s)', 'rosenheinrich-multisite-migrate'),
+                    $first,
+                ),
+            );
+        }
         $extract_dir = trailingslashit($job->get_work_dir()) . 'extracted/';
         $sql_path = $extract_dir . 'database.sql';
         $fallback_total = Rmmigrate_Filesystem::exists($sql_path)
@@ -307,10 +339,36 @@ class Rmmigrate_Restore_Runner
             return array('message' => __('Finalizing migration', 'rosenheinrich-multisite-migrate'));
         }
 
+        $progress = $job->get_progress();
+        $restore_mode = (string) ($progress['restore_mode'] ?? '');
+        if ($restore_mode === 'subsite_on_network') {
+            $map = $job->get_migration_map();
+            $manifest = self::load_job_manifest($job) ?? array();
+            try {
+                self::run_topology_finalize($job, $map, $manifest);
+            } catch (Throwable $e) {
+                global $wpdb;
+                $pdo = self::topology_pdo();
+                $protect = is_array($progress['user_merge_protect_report'] ?? null)
+                    ? $progress['user_merge_protect_report']
+                    : array();
+                if ($pdo !== null && $protect !== array()) {
+                    $global = Rmmigrate_Restore_Topology_User_Merge::resolve_global_prefix(
+                        $pdo,
+                        (string) ($manifest['db_prefix'] ?? $wpdb->prefix)
+                    );
+                    Rmmigrate_Restore_Topology_User_Merge::restore_protected_users($pdo, $protect, $global);
+                }
+                throw $e;
+            }
+        }
+
         Rmmigrate_Post_Migration::purge_caches();
         Rmmigrate_Post_Migration::cleanup_bridge_mu_plugin();
         Rmmigrate_Post_Migration::maybe_revalidate_after_migration();
         $job->set_status(Rmmigrate_Job::STATUS_COMPLETE, self::restore_complete_warning($job));
+        Rmmigrate_Runner::force_release_lock($job->get_id());
+        self::prune_restore_work_artifacts($job);
         self::disable_maintenance();
         flush_rewrite_rules();
         Rmmigrate_Logger::log('Restore complete');
@@ -331,8 +389,11 @@ class Rmmigrate_Restore_Runner
     {
         $map = $job->get_migration_map();
         $mode = $job->get_restore_mode();
+        $progress = $job->get_progress();
+        $topology_restore_mode = (string) ($progress['restore_mode'] ?? '');
 
-        if ($mode === Rmmigrate_Job::RESTORE_MODE_DB || $mode === Rmmigrate_Job::RESTORE_MODE_BOTH) {
+        if ($topology_restore_mode !== 'subsite_on_network'
+            && ($mode === Rmmigrate_Job::RESTORE_MODE_DB || $mode === Rmmigrate_Job::RESTORE_MODE_BOTH)) {
             if (!empty($map['site_url']['new'])) {
                 update_option('siteurl', untrailingslashit($map['site_url']['new']));
             }
@@ -375,9 +436,10 @@ class Rmmigrate_Restore_Runner
                     : __('Backup used subdirectory multisite; destination uses subdomain (or vice versa). Update wp-config.php and .htaccess manually.', 'rosenheinrich-multisite-migrate');
             }
         }
-        if (is_multisite() && defined('DOMAIN_CURRENT_SITE') && !empty($map['site_url']['new'])) {
-            $new_host = wp_parse_url($map['site_url']['new'], PHP_URL_HOST);
-            if ($new_host && DOMAIN_CURRENT_SITE !== $new_host) {
+        if ($topology_restore_mode !== 'subsite_on_network'
+            && is_multisite() && defined('DOMAIN_CURRENT_SITE') && !empty($map['site_url']['new'])) {
+            $new_host = Rmmigrate_Migration_Preflight::network_domain_from_url((string) $map['site_url']['new']);
+            if ($new_host !== '' && DOMAIN_CURRENT_SITE !== $new_host) {
                 $notices[] = sprintf(
                     "define('DOMAIN_CURRENT_SITE', '%s');",
                     $new_host
@@ -395,17 +457,31 @@ class Rmmigrate_Restore_Runner
 
         self::run_topology_finalize($job, $map, $manifest);
 
+        if (!class_exists('Rmmigrate_Migration_Preflight', false)) {
+            require_once RMMIGRATE_PATH . 'includes/shared/restore-topology/bootstrap.php';
+        }
+        $post_error = Rmmigrate_Migration_Preflight::validate_after_migration($map, is_array($manifest) ? $manifest : array());
+        if ($post_error !== null) {
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+            throw Rmmigrate_Job_Exception::raise(
+                sanitize_key(Rmmigrate_Error_Codes::VALIDATION),
+                esc_html($post_error)
+            );
+        }
+
         $extract_dir = trailingslashit($job->get_work_dir()) . 'extracted/';
         if (Rmmigrate_Filesystem::is_dir($extract_dir)) {
             Rmmigrate_Filesystem::delete_directory($extract_dir);
         }
 
         $job->set_status(Rmmigrate_Job::STATUS_COMPLETE, self::restore_complete_warning($job));
+        Rmmigrate_Runner::force_release_lock($job->get_id());
         self::disable_maintenance();
         flush_rewrite_rules();
         Rmmigrate_Post_Migration::purge_caches();
         Rmmigrate_Post_Migration::cleanup_bridge_mu_plugin();
         Rmmigrate_Post_Migration::maybe_revalidate_after_migration();
+        self::prune_restore_work_artifacts($job);
         Rmmigrate_Logger::log('Migration restore complete');
         /**
          * Fires after a restore completes (migration path).
@@ -416,6 +492,17 @@ class Rmmigrate_Restore_Runner
         do_action('rmmigrate_restore_done', $job);
 
         return array('message' => __('Migration complete', 'rosenheinrich-multisite-migrate'));
+    }
+
+    private static function prune_restore_work_artifacts(Rmmigrate_Job $job): void
+    {
+        $dir = trailingslashit($job->get_work_dir());
+        foreach (array('restore-queue.json') as $basename) {
+            $path = $dir . $basename;
+            if (Rmmigrate_Filesystem::exists($path)) {
+                Rmmigrate_Filesystem::delete($path);
+            }
+        }
     }
 
     public static function get_percent(Rmmigrate_Job $job): int
@@ -495,13 +582,22 @@ class Rmmigrate_Restore_Runner
     private static function restore_complete_warning(Rmmigrate_Job $job): ?string
     {
         $progress = $job->get_progress();
+        $messages = array();
+        $import = is_array($progress['import'] ?? null) ? $progress['import'] : array();
+        $import_warnings = is_array($import['warnings'] ?? null) ? $import['warnings'] : array();
+        if ($import_warnings !== array()) {
+            $messages[] = __('Some database objects were skipped during import. See the activity log for details.', 'rosenheinrich-multisite-migrate');
+        }
         $file_restore = is_array($progress['file_restore'] ?? null) ? $progress['file_restore'] : array();
         $skipped = (int) ($file_restore['skipped_count'] ?? 0);
-        if ($skipped <= 0) {
+        if ($skipped > 0) {
+            $messages[] = __('Some files could not be restored.', 'rosenheinrich-multisite-migrate');
+        }
+        if ($messages === array()) {
             return null;
         }
 
-        return __('Some files could not be restored.', 'rosenheinrich-multisite-migrate');
+        return implode(' ', $messages);
     }
 
     /**
@@ -699,10 +795,21 @@ class Rmmigrate_Restore_Runner
         }
 
         $destination = Rmmigrate_Restore_Topology_Destination::probe_for_plugin();
+        $progress = $job->get_progress();
         $state = array(
             'install_mode' => $job->get_restore_type() === Rmmigrate_Job::RESTORE_TYPE_MIGRATION ? 'standard' : 'overwrite',
             'archive'      => array('has_wp_core_files' => !empty($manifest['has_wp_core_files'])),
+            'restore_mode' => (string) ($progress['restore_mode'] ?? ''),
+            'site_owr_map' => is_array($progress['site_owr_map'] ?? null) ? $progress['site_owr_map'] : array(),
+            'target_blog_id' => (int) ($progress['target_blog_id'] ?? 0),
+            'source_blog_id' => (int) ($progress['source_blog_id'] ?? 0),
         );
+        if (!empty($progress['full_installation_replace'])) {
+            $state['install_mode'] = 'overwrite';
+            $state['full_installation_replace'] = true;
+            $state['db_action'] = 'empty';
+            $state['overwrite_confirmed'] = true;
+        }
         $gate = Rmmigrate_Restore_Topology_Compatibility::validate_gates($state, $manifest, $destination, false);
         if ($gate !== null) {
             // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
@@ -712,6 +819,34 @@ class Rmmigrate_Restore_Runner
         }
     }
 
+    /**
+     * Target blog for the database prepare step.
+     *
+     * Subsite-on-network restores fail closed when neither a blog ID nor a target URL was
+     * chosen: falling back to the backup's own blog_id would silently overwrite that slot.
+     *
+     * @param array<string,mixed> $progress
+     */
+    public static function resolve_prepare_target_blog_id(array $progress, string $restore_mode): int
+    {
+        $target_blog_id = (int) ($progress['target_blog_id'] ?? 0);
+        $map = is_array($progress['site_owr_map'] ?? null) ? $progress['site_owr_map'] : array();
+        $entry = is_array($map[0] ?? null) ? $map[0] : array();
+        if ($target_blog_id <= 0) {
+            $target_blog_id = (int) ($entry['target_blog_id'] ?? 0);
+        }
+        if ($target_blog_id <= 0 && $restore_mode === 'subsite_on_network'
+            && trim((string) ($entry['target_url'] ?? '')) === '') {
+            throw Rmmigrate_Job_Exception::raise(
+                sanitize_key('topology_subsite_on_network_target_unresolved'),
+                // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+                __('Subsite-on-network import could not resolve the target blog. Check the blog ID and URL.', 'rosenheinrich-multisite-migrate')
+            );
+        }
+
+        return max(0, $target_blog_id);
+    }
+
     private static function prepare_database_for_restore(Rmmigrate_Job $job): void
     {
         $manifest = self::load_job_manifest($job);
@@ -719,27 +854,221 @@ class Rmmigrate_Restore_Runner
             return;
         }
 
-        $is_network = Rmmigrate_Restore_Topology_Manifest::restore_as_multisite($manifest);
-        $is_subsite = Rmmigrate_Restore_Topology_Manifest::is_subsite_standalone_restore($manifest);
-        if (!$is_network && !$is_subsite) {
-            return;
-        }
-
         global $wpdb;
+        $progress = $job->get_progress();
+        $merge_context = array(
+            'restore_mode' => (string) ($progress['restore_mode'] ?? ''),
+            'user_merge'   => array_key_exists('user_merge', $progress) ? !empty($progress['user_merge']) : true,
+            'db_prefix'    => (string) ($manifest['db_prefix'] ?? $wpdb->prefix),
+        );
         $pdo = self::topology_pdo();
-        if ($pdo === null) {
+        if ($pdo !== null && in_array((string) ($merge_context['restore_mode'] ?? ''), Rmmigrate_Restore_Topology_User_Merge::eligible_modes(), true)) {
+            $global = Rmmigrate_Restore_Topology_User_Merge::resolve_global_prefix(
+                $pdo,
+                (string) $merge_context['db_prefix']
+            );
+            $protect = Rmmigrate_Restore_Topology_User_Merge::protect_destination($pdo, $global);
+            $job->update_progress(array('user_merge_protect_report' => $protect));
+        }
+
+        $is_subsite = Rmmigrate_Restore_Topology_Manifest::is_subsite_standalone_restore($manifest);
+        $is_network = Rmmigrate_Restore_Topology_Manifest::restore_as_multisite($manifest);
+        $full_replace = !empty($progress['full_installation_replace']);
+        $restore_mode = (string) ($progress['restore_mode'] ?? '');
+        $needs_table_prepare = $is_subsite
+            || $is_network
+            || $full_replace
+            || $restore_mode === 'subsite_on_network'
+            || $restore_mode === 'network_to_subsite';
+        if (!$needs_table_prepare) {
             return;
         }
 
-        Rmmigrate_Restore_Topology_Db_Action::prepare_overwrite(
-            $pdo,
-            'tables_only',
-            $manifest,
-            array(
-                'db_prefix'   => (string) ($manifest['db_prefix'] ?? $wpdb->prefix),
-                'destination' => Rmmigrate_Restore_Topology_Destination::probe_for_plugin(),
-            )
+        if ($pdo === null) {
+            $pdo = self::topology_pdo();
+        }
+        if ($pdo === null) {
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+            throw Rmmigrate_Job_Exception::raise(
+                sanitize_key(Rmmigrate_Error_Codes::DB_CONNECTION),
+                esc_html__(
+                    'Database connection failed. Cannot safely prepare tables for this restore.',
+                    'rosenheinrich-multisite-migrate'
+                )
+            );
+        }
+
+        if (!class_exists('Rmmigrate_Migration_Preflight', false)) {
+            require_once RMMIGRATE_PATH . 'includes/shared/restore-topology/bootstrap.php';
+        }
+        if ($is_network) {
+            $preflight = Rmmigrate_Migration_Preflight::validate_before_database_drop(
+                $manifest,
+                $job->get_migration_map(),
+                (int) ($progress['safety_job_id'] ?? 0)
+            );
+            if ($preflight !== null) {
+                // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+                throw Rmmigrate_Job_Exception::raise(
+                    sanitize_key((string) $preflight['code']),
+                    esc_html((string) $preflight['message'])
+                );
+            }
+        }
+
+        $db_action = $full_replace
+            ? 'empty'
+            : (string) ($progress['db_action'] ?? 'tables_only');
+        if ($db_action === '') {
+            $db_action = 'tables_only';
+        }
+
+        if (!class_exists('Rmmigrate_Network_Restore_Quarantine', false)) {
+            require_once RMMIGRATE_PATH . 'includes/shared/restore-topology/bootstrap.php';
+        }
+        $destination = Rmmigrate_Restore_Topology_Destination::probe_for_plugin();
+        $use_quarantine = $is_network && Rmmigrate_Migration_Preflight::will_drop_network_tables($manifest);
+        $target_blog_id = self::resolve_prepare_target_blog_id($progress, $restore_mode);
+        $prepare_context = array(
+            'db_prefix'   => (string) ($manifest['db_prefix'] ?? $wpdb->prefix),
+            'destination' => $destination,
+            'restore_mode'=> $restore_mode,
+            'site_owr_map' => is_array($progress['site_owr_map'] ?? null) ? $progress['site_owr_map'] : array(),
+            'target_blog_id' => $target_blog_id,
+            'destination_blog_id' => $target_blog_id,
+            'install_mode'=> 'overwrite',
+            'db_action'   => $db_action,
+            'full_installation_replace' => $full_replace,
+            'overwrite_confirmed' => $full_replace,
+            'job_id'      => $job->get_id(),
+            'network_quarantine' => array(
+                'enabled' => $use_quarantine,
+                'token'   => $use_quarantine
+                    ? Rmmigrate_Network_Restore_Quarantine::make_token($job->get_id())
+                    : '',
+            ),
         );
+        $prepare_context = Rmmigrate_Restore_Topology_Db_Action::prepare_overwrite(
+            $pdo,
+            $db_action,
+            $manifest,
+            $prepare_context
+        );
+        $progress_updates = array(
+            'destination' => $destination,
+            'db_prefix'   => (string) ($manifest['db_prefix'] ?? $wpdb->prefix),
+        );
+        if (!empty($prepare_context['network_quarantine']['live_to_quarantine'])) {
+            $progress_updates['network_quarantine'] = $prepare_context['network_quarantine'];
+        }
+        if (!empty($prepare_context['sql_table_prefix_rewrite'])) {
+            $progress_updates['sql_table_prefix_rewrite'] = $prepare_context['sql_table_prefix_rewrite'];
+        }
+        if (!empty($prepare_context['subsite_on_network_target_blog_id'])) {
+            $progress_updates['subsite_on_network_target_blog_id'] = (int) $prepare_context['subsite_on_network_target_blog_id'];
+            if ($target_blog_id <= 0) {
+                $progress_updates['target_blog_id'] = (int) $prepare_context['subsite_on_network_target_blog_id'];
+            }
+        }
+        if (!empty($prepare_context['subsite_on_network_allocated_blog'])) {
+            $progress_updates['subsite_on_network_allocated_blog'] = $prepare_context['subsite_on_network_allocated_blog'];
+        }
+        if (!empty($prepare_context['site_owr_map']) && is_array($prepare_context['site_owr_map'])) {
+            $progress_updates['site_owr_map'] = $prepare_context['site_owr_map'];
+        }
+        $job->update_progress($progress_updates);
+    }
+
+    public static function attempt_network_rollback(Rmmigrate_Job $job): void
+    {
+        $progress = $job->get_progress();
+        $pdo = self::topology_pdo();
+        $allocated = is_array($progress['subsite_on_network_allocated_blog'] ?? null)
+            ? $progress['subsite_on_network_allocated_blog']
+            : array();
+        if ($pdo !== null && $allocated !== array()) {
+            if (!class_exists('Rmmigrate_Restore_Topology_Network_Import', false)) {
+                require_once RMMIGRATE_PATH . 'includes/shared/restore-topology/class-restore-topology-network-import.php';
+            }
+            Rmmigrate_Restore_Topology_Network_Import::revert_allocated_blog_row($pdo, $allocated);
+            $job->update_progress(array('subsite_on_network_allocated_blog' => null));
+            $progress = $job->get_progress();
+        }
+        $protect = is_array($progress['user_merge_protect_report'] ?? null) ? $progress['user_merge_protect_report'] : array();
+        if (!empty($protect['protected'])) {
+            $manifest = self::load_job_manifest($job);
+            global $wpdb;
+            $pdo = self::topology_pdo();
+            if ($manifest !== null && $pdo !== null) {
+                $global = Rmmigrate_Restore_Topology_User_Merge::resolve_global_prefix(
+                    $pdo,
+                    (string) ($manifest['db_prefix'] ?? $wpdb->prefix)
+                );
+                Rmmigrate_Restore_Topology_User_Merge::restore_protected_users($pdo, $protect, $global);
+            }
+        }
+        if (!Rmmigrate_Network_Restore_Quarantine::progress_has_quarantine($progress)) {
+            return;
+        }
+        if (!class_exists('Rmmigrate_Network_Restore_Orchestration', false)) {
+            require_once RMMIGRATE_PATH . 'includes/shared/restore-topology/bootstrap.php';
+        }
+        $manifest = self::load_job_manifest($job);
+        $pdo = self::topology_pdo();
+        if ($manifest === null || $pdo === null) {
+            return;
+        }
+        $report = Rmmigrate_Network_Restore_Orchestration::rollback_failed_import($pdo, $manifest, $progress);
+        $quarantine = is_array($progress['network_quarantine'] ?? null) ? $progress['network_quarantine'] : array();
+        $quarantine['rolled_back'] = true;
+        $job->update_progress(array(
+            'network_quarantine'      => $quarantine,
+            'network_rollback_report' => $report,
+        ));
+    }
+
+    private static function finish_database_import(Rmmigrate_Job $job): void
+    {
+        if (!class_exists('Rmmigrate_Network_Restore_Orchestration', false)) {
+            require_once RMMIGRATE_PATH . 'includes/shared/restore-topology/bootstrap.php';
+        }
+        $manifest = self::load_job_manifest($job);
+        $pdo = self::topology_pdo();
+        if ($manifest === null || $pdo === null) {
+            return;
+        }
+        $updates = Rmmigrate_Network_Restore_Orchestration::after_database_import(
+            $pdo,
+            $manifest,
+            $job->get_progress()
+        );
+        if ($updates !== array()) {
+            $job->update_progress($updates);
+        }
+
+        if ($job->get_restore_type() === Rmmigrate_Job::RESTORE_TYPE_MIGRATION && $pdo !== null) {
+            $map = $job->get_migration_map();
+            if (is_array($map) && $map !== array()) {
+                global $wpdb;
+                $progress = $job->get_progress();
+                $context = array(
+                    'db_prefix'     => (string) ($manifest['db_prefix'] ?? $wpdb->prefix),
+                    'migration_map' => $map,
+                    'destination'   => is_array($progress['destination'] ?? null)
+                        ? $progress['destination']
+                        : Rmmigrate_Restore_Topology_Destination::probe_for_plugin(),
+                    'migration_network_domains_applied' => !empty($progress['migration_network_domains_applied']),
+                    'migration_network_paths_applied'   => !empty($progress['migration_network_paths_applied']),
+                );
+                $early = Rmmigrate_Restore_Topology_Standalone::apply_migration_network_urls_early($pdo, $manifest, $context);
+                if ($early !== array()) {
+                    $job->update_progress($early);
+                    if (!empty($early['migration_network_paths_applied'])) {
+                        $job->update_progress(array('migration_network_paths_applied' => true));
+                    }
+                }
+            }
+        }
     }
 
     /**
@@ -767,17 +1096,70 @@ class Rmmigrate_Restore_Runner
             'restore_mode'        => (string) ($progress['restore_mode'] ?? ''),
             'site_owr_map'        => is_array($progress['site_owr_map'] ?? null) ? $progress['site_owr_map'] : array(),
             'target_blog_id'      => (int) ($progress['target_blog_id'] ?? 0),
+            'subsite_on_network_target_blog_id' => (int) ($progress['subsite_on_network_target_blog_id'] ?? 0),
+            'sql_table_prefix_rewrite' => is_array($progress['sql_table_prefix_rewrite'] ?? null)
+                ? $progress['sql_table_prefix_rewrite']
+                : array(),
+            'migration_network_domains_applied' => !empty($progress['migration_network_domains_applied']),
+            'migration_network_paths_applied'   => !empty($progress['migration_network_paths_applied']),
         );
 
         $pdo = self::topology_pdo();
         if ($pdo !== null) {
             Rmmigrate_Restore_Topology_Standalone::finish($pdo, $manifest, $context);
+            if ((string) ($progress['restore_mode'] ?? '') === 'subsite_on_network') {
+                $progress = $job->get_progress();
+                $context['subsite_on_network_target_blog_id'] = (int) ($progress['subsite_on_network_target_blog_id'] ?? $context['subsite_on_network_target_blog_id'] ?? 0);
+                $context['target_blog_id'] = (int) ($progress['target_blog_id'] ?? $context['target_blog_id'] ?? 0);
+                $context['site_owr_map'] = is_array($progress['site_owr_map'] ?? null)
+                    ? $progress['site_owr_map']
+                    : $context['site_owr_map'];
+                $context['sql_table_prefix_rewrite'] = is_array($progress['sql_table_prefix_rewrite'] ?? null)
+                    ? $progress['sql_table_prefix_rewrite']
+                    : $context['sql_table_prefix_rewrite'];
+                $verify = Rmmigrate_Restore_Topology_Db_Action::verify_subsite_on_network_restore(
+                    $pdo,
+                    $manifest,
+                    $context
+                );
+                if ($verify !== null) {
+                    // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+                    throw Rmmigrate_Job_Exception::raise(
+                        sanitize_key('topology_subsite_on_network_verify'),
+                        esc_html($verify)
+                    );
+                }
+                $committed_blog_id = (int) ($context['subsite_on_network_target_blog_id'] ?? 0);
+                if ($committed_blog_id > 0) {
+                    Rmmigrate_Restore_Topology_Network_Import::invalidate_multisite_blog_cache($committed_blog_id);
+                }
+                $job->update_progress(array('subsite_on_network_allocated_blog' => null));
+            }
+        }
+
+        $destination = is_array($context['destination'] ?? null) ? $context['destination'] : array();
+        $slot_restore = Rmmigrate_Restore_Topology_Compatibility::is_network_slot_restore(
+            array_merge($progress, array('migration_map' => $map)),
+            $manifest,
+            $destination
+        );
+        if ($slot_restore) {
+            return;
         }
 
         $extract_dir = trailingslashit($job->get_work_dir()) . 'extracted/files/wp-config.php';
+        $wp_policy = (string) ($progress['wp_config_policy'] ?? 'merge');
+        if ($job->get_restore_type() === Rmmigrate_Job::RESTORE_TYPE_MIGRATION
+            && Rmmigrate_Restore_Topology_Manifest::restore_as_multisite($manifest)) {
+            $wp_policy = 'merge';
+        }
         $wp_state = array(
-            'wp_config_policy'    => (string) ($job->get_progress()['wp_config_policy'] ?? 'merge'),
+            'wp_config_policy'    => $wp_policy,
             'manifest'            => $manifest,
+            'destination'         => $destination,
+            'restore_mode'        => (string) ($progress['restore_mode'] ?? ''),
+            'target_blog_id'      => (int) ($progress['target_blog_id'] ?? 0),
+            'site_owr_map'        => is_array($progress['site_owr_map'] ?? null) ? $progress['site_owr_map'] : array(),
             'db_prefix'           => $context['db_prefix'],
             'db_name'             => DB_NAME,
             'db_user'             => DB_USER,
@@ -829,23 +1211,29 @@ class Rmmigrate_Restore_Runner
     /**
      * @return array<int,array{job_id:int,archive_path:string,format:string}>
      */
-    private static function build_extract_plan(Rmmigrate_Job $job): array
+    private static function build_extract_plan(Rmmigrate_Job $job, string $archive_path = ''): array
     {
-        $path = Rmmigrate_Runner::resolve_local_path($job);
-        if (!Rmmigrate_Filesystem::exists($path)) {
+        $path = $archive_path !== '' ? $archive_path : Rmmigrate_Runner::resolve_local_path($job);
+        if ($path === '' || !Rmmigrate_Filesystem::exists($path)) {
             return array();
         }
         $enc_ext = Rmmigrate_Archive_Encryption::EXT;
-        $ext = strtolower(pathinfo($path, PATHINFO_EXTENSION));
-        if ($ext === ltrim($enc_ext, '.')) {
-            $ext = strtolower(pathinfo(substr($path, 0, -strlen($enc_ext)), PATHINFO_EXTENSION));
+        if (substr($path, -strlen($enc_ext)) === $enc_ext) {
+            return array();
+        }
+        $format = 'zip';
+        if (class_exists('Rmmigrate_Validator', false)) {
+            $probe = Rmmigrate_Validator::probe_payload_type($path);
+            if (is_array($probe) && !empty($probe['type'])) {
+                $format = (string) $probe['type'];
+            }
         }
 
         return array(
             array(
                 'job_id'       => $job->get_id(),
                 'archive_path' => $path,
-                'format'       => $ext === 'daf' ? 'daf' : 'zip',
+                'format'       => $format,
             ),
         );
     }
@@ -898,6 +1286,11 @@ class Rmmigrate_Restore_Runner
 
     private static function topology_pdo(): ?PDO
     {
+        if (array_key_exists('mm_test_topology_pdo', $GLOBALS)) {
+            $override = $GLOBALS['mm_test_topology_pdo'];
+            return $override instanceof PDO ? $override : null;
+        }
+
         $pdo = Rmmigrate_Topology_Db_Connection::connect();
         if ($pdo === null) {
             Rmmigrate_Logger::log('Topology database step skipped: connection failed.');

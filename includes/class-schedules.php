@@ -44,7 +44,7 @@ class Rmmigrate_Schedules
 
         return array(
             'id'             => $id,
-            'name'           => __('Local schedule', 'rosenheinrich-multisite-migrate'),
+            'name'           => self::default_blank_schedule_name(),
             'enabled'        => false,
             'interval'       => 'weekly',
             'hour'           => 3,
@@ -65,6 +65,15 @@ class Rmmigrate_Schedules
     public static function new_id(): string
     {
         return 'sch_' . substr(wp_generate_uuid4(), 0, 8);
+    }
+
+    private static function default_blank_schedule_name(): string
+    {
+        if (function_exists('did_action') && did_action('init')) {
+            return __('Local schedule', 'rosenheinrich-multisite-migrate');
+        }
+
+        return 'Local schedule';
     }
 
     /**
@@ -844,7 +853,7 @@ class Rmmigrate_Schedules
 
         $name = sanitize_text_field($schedule['name'] ?? '');
         if ($name === '') {
-            $name = __('Local schedule', 'rosenheinrich-multisite-migrate');
+            $name = self::default_blank_schedule_name();
         }
 
         $hour_12 = isset($schedule['hour_12']) ? (int) $schedule['hour_12'] : null;

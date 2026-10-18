@@ -90,6 +90,7 @@ class Rmmigrate_Job
             'backup_intent'     => 'manual',
             'include_wp_core'   => false,
             'log_token'         => Rmmigrate_Activity_Log::generate_log_token(),
+            'worker_auth_site'  => function_exists('site_url') ? (string) site_url() : '',
         );
         // Explicit per-backup override from the wizard wins over both the
         // migration-intent default and the global setting.
@@ -313,11 +314,24 @@ class Rmmigrate_Job
         }
 
         if ($source->get_scope() === Rmmigrate_Multisite_Scope::SCOPE_SUBSITE) {
-            if (is_multisite() && $source->get_blog_id() !== get_current_blog_id()) {
-                // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Structured service exception payload.
-                throw new Rmmigrate_Service_Exception(
-                    esc_html(__('Cannot restore another subsite backup here.', 'rosenheinrich-multisite-migrate')),
-                    array(), sanitize_key(Rmmigrate_Error_Codes::RESTORE_SCOPE_DENIED));
+            if (is_multisite() && $restore_type !== self::RESTORE_TYPE_MIGRATION) {
+                $topology = is_array($options['topology'] ?? null) ? $options['topology'] : array();
+                $restore_mode = (string) ($topology['restore_mode'] ?? '');
+                $map = is_array($topology['site_owr_map'] ?? null) ? $topology['site_owr_map'] : array();
+                $entry = is_array($map[0] ?? null) ? $map[0] : array();
+                $topology_target_blog = (int) ($entry['target_blog_id'] ?? 0);
+                $target_blog = $topology_target_blog > 0
+                    ? $topology_target_blog
+                    : (int) ($topology['target_blog_id'] ?? $options['target_blog_id'] ?? $options['blog_id'] ?? $source->get_blog_id());
+                $network_topology_restore = $restore_mode === 'subsite_on_network' && current_user_can('manage_network');
+                if (!$network_topology_restore
+                    && $source->get_blog_id() !== get_current_blog_id()
+                    && ($restore_type !== self::RESTORE_TYPE_SAME_SERVER || $source->get_blog_id() !== $target_blog)) {
+                    // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Structured service exception payload.
+                    throw new Rmmigrate_Service_Exception(
+                        esc_html(__('Cannot restore another subsite backup here.', 'rosenheinrich-multisite-migrate')),
+                        array(), sanitize_key(Rmmigrate_Error_Codes::RESTORE_SCOPE_DENIED));
+                }
             }
         }
 
@@ -332,9 +346,10 @@ class Rmmigrate_Job
 
         $now = current_time('mysql', true);
         $progress_data = array(
-            'step'      => Rmmigrate_Restore_Build_Steps::STEP_EXTRACT,
-            'source'    => array('zip_path' => $zip_path, 'source_job_id' => $source_job_id),
-            'log_token' => Rmmigrate_Activity_Log::generate_log_token(),
+            'step'             => Rmmigrate_Restore_Build_Steps::STEP_EXTRACT,
+            'source'           => array('zip_path' => $zip_path, 'source_job_id' => $source_job_id),
+            'log_token'        => Rmmigrate_Activity_Log::generate_log_token(),
+            'worker_auth_site' => function_exists('site_url') ? (string) site_url() : '',
         );
         $safety_job_id = (int) ($options['safety_job_id'] ?? 0);
         if ($safety_job_id > 0) {
@@ -343,8 +358,11 @@ class Rmmigrate_Job
         if (!empty($options['archive_passphrase'])) {
             $progress_data['archive_passphrase'] = (string) $options['archive_passphrase'];
         }
+        if (array_key_exists('user_merge', $options)) {
+            $progress_data['user_merge'] = !empty($options['user_merge']);
+        }
         if (!empty($options['topology']) && is_array($options['topology'])) {
-            foreach (array('restore_mode', 'site_owr_map', 'target_blog_id', 'prefix_policy', 'wp_config_merge_constants', 'import_skip_tables') as $topology_key) {
+            foreach (array('restore_mode', 'site_owr_map', 'target_blog_id', 'prefix_policy', 'wp_config_policy', 'wp_config_merge_constants', 'import_skip_tables') as $topology_key) {
                 if (array_key_exists($topology_key, $options['topology'])) {
                     $progress_data[$topology_key] = $options['topology'][$topology_key];
                 }
@@ -1139,6 +1157,7 @@ class Rmmigrate_Job
         $updated = $wpdb->update(self::table_name(), $fields, array('id' => $this->get_id()), $formats, array('%d'));
         if ($updated === false) {
             self::log_db_write_failure('set_status', $this->get_id());
+            return;
         }
         $this->data = array_merge($this->data, $fields);
 
@@ -1199,7 +1218,7 @@ class Rmmigrate_Job
                         Rmmigrate_Scheduler::reset_schedule_failures();
                     } elseif ($status === self::STATUS_ERROR) {
                         Rmmigrate_Scheduler::record_schedule_failure(
-                            $error ?? __('Unknown error', 'rosenheinrich-multisite-migrate')
+                            is_string($error) ? $error : ''
                         );
                     }
                 }
@@ -1212,6 +1231,10 @@ class Rmmigrate_Job
                  * @param string|null   $error  Optional error or warning message.
                  */
                 do_action('rmmigrate_job_terminal', $this, $status, $error);
+            }
+            if (class_exists('Rmmigrate_Job_Cleanup', false)) {
+                Rmmigrate_Job_Cleanup::clear_transients($this->get_id());
+                Rmmigrate_Job_Cleanup::unschedule_worker($this->get_id());
             }
         }
 
@@ -1387,22 +1410,47 @@ class Rmmigrate_Job
 
     public function cancel(): void
     {
-        if ($this->is_restore()) {
-            $status = $this->get_status();
-            if ($status > self::STATUS_PENDING && $status < self::STATUS_COMPLETE) {
-                $progress = $this->get_progress();
-                $progress['step'] = 'cancelled_partial';
-                $progress['cancel_notice'] = __(
-                    'Restore cancelled. The site may be inconsistent — use a recovery point or safety snapshot before retrying.',
-                    'rosenheinrich-multisite-migrate'
-                );
-                $this->update_progress($progress);
-            }
-            Rmmigrate_Restore_Runner::disable_maintenance();
+        $status = $this->get_status();
+        if (in_array($status, array(self::STATUS_COMPLETE, self::STATUS_ERROR, self::STATUS_CANCELLED), true)) {
+            return;
         }
-        $this->set_status(self::STATUS_CANCELLED);
-        if (Rmmigrate_Runner::job_worker_is_idle($this->get_id())) {
+        $flag_written = Rmmigrate_Job_Cleanup::write_cancel_flag($this->get_id());
+        $worker_idle = Rmmigrate_Runner::job_worker_is_idle($this->get_id());
+        if (!$flag_written && !$worker_idle) {
+            throw Rmmigrate_Job_Exception::raise(
+                sanitize_key(Rmmigrate_Error_Codes::PERMISSION_DENIED),
+                // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+                __('Could not request job cancellation on this host.', 'rosenheinrich-multisite-migrate')
+            );
+        }
+        if ($flag_written && !$worker_idle && !Rmmigrate_Runner::current_request_holds_job_lock($this->get_id())) {
+            // A worker in another request owns this job. It sees the cancel flag at its next
+            // checkpoint and runs rollback, maintenance cleanup and artifact purge itself;
+            // doing it here as well would race with its in-flight database writes.
+            return;
+        }
+        try {
+            if ($this->is_restore()) {
+                if ($status > self::STATUS_PENDING && $status < self::STATUS_COMPLETE) {
+                    Rmmigrate_Restore_Runner::attempt_network_rollback($this);
+                    $progress = $this->get_progress();
+                    $progress['step'] = 'cancelled_partial';
+                    $progress['cancel_notice'] = __(
+                        'Restore cancelled. The site may be inconsistent — use a recovery point or safety snapshot before retrying.',
+                        'rosenheinrich-multisite-migrate'
+                    );
+                    $this->update_progress($progress);
+                }
+            }
+        } finally {
+            if ($this->is_restore()) {
+                Rmmigrate_Restore_Runner::disable_maintenance();
+            }
+            if (!in_array($this->get_status(), array(self::STATUS_COMPLETE, self::STATUS_ERROR, self::STATUS_CANCELLED), true)) {
+                $this->set_status(self::STATUS_CANCELLED);
+            }
             Rmmigrate_Job_Cleanup::purge_cancelled_artifacts($this);
+            Rmmigrate_Job_Cleanup::clear_cancel_flag($this->get_id());
         }
     }
 

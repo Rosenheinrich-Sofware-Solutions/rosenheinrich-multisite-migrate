@@ -27,10 +27,6 @@ $rmmigrate_network_globals_locked = is_multisite() && !is_network_admin();
             </p>
         </td>
     </tr>
-    <tr>
-        <th><?php esc_html_e('.htaccess protection', 'rosenheinrich-multisite-migrate'); ?></th>
-        <td><label><input type="checkbox" name="storage_htaccess" value="1" <?php checked($rmmigrate_settings['storage_htaccess'] ?? true); ?> <?php disabled($rmmigrate_network_globals_locked); ?>> <?php esc_html_e('Write .htaccess rules to block direct web access to archives', 'rosenheinrich-multisite-migrate'); ?></label></td>
-    </tr>
 </table>
 </div>
 <?php

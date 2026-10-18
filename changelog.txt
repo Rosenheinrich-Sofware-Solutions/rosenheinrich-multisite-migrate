@@ -1,3 +1,7 @@
+= 1.2.20 – 2026-10-17 =
+* Fix: Various bug fixes and stability improvements.
+* Security: Additional hardening.
+
 = 1.2.19 – 2026-10-15 =
 * Fix: SQL imports with mysqldump triggers and routines (DELIMITER).
 * Fix: More reliable backup archives with clearer errors and cleanup after failures.

@@ -85,7 +85,7 @@ return '0 B';
         var leadText = $('.mm-import-source-lead');
         var chunkSize = Math.min(rmmigrateAdmin.importChunkSize || 1048576, MAX_SAFE_CHUNK_BYTES);
         var totalChunks = Math.max(1, Math.ceil(file.size / chunkSize));
-        var uploadId = 'u' + Date.now();
+        var uploadId = null;
         var chunkIndex = 0;
         var archivePassphrase = $('#mm-import-passphrase').val() || '';
 
@@ -214,10 +214,13 @@ return '0 B';
             var form = new FormData();
             form.append('action', 'rmmigrate_import_local_chunk');
             form.append('nonce', rmmigrateAdmin.nonce);
-            form.append('upload_id', uploadId);
+            if (uploadId) {
+                form.append('upload_id', uploadId);
+            }
             form.append('filename', file.name);
             form.append('chunk_index', chunkIndex);
             form.append('total_chunks', totalChunks);
+            form.append('file_total_bytes', String(file.size));
             form.append('expected_offset', String(start));
             form.append('archive_passphrase', archivePassphrase);
             form.append('chunk', blob, file.name + '.part');
@@ -334,6 +337,9 @@ return '0 B';
                 }
 
                 chunkRetries = 0;
+                if (res && res.data && res.data.upload_id) {
+                    uploadId = String(res.data.upload_id);
+                }
                 chunkIndex++;
 
                 if (res && res.success && res.data && res.data.complete && res.data.job_id) {

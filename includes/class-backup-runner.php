@@ -114,6 +114,24 @@ class Rmmigrate_Runner
             return self::waiting_worker_response($job, $job_id);
         }
 
+        if (Rmmigrate_Job_Cleanup::cancel_flag_requested($job_id)
+            && !in_array($job->get_status(), array(
+                Rmmigrate_Job::STATUS_COMPLETE,
+                Rmmigrate_Job::STATUS_ERROR,
+                Rmmigrate_Job::STATUS_CANCELLED,
+            ), true)) {
+            $job->cancel();
+            self::release_job_lock($job_id);
+            $job = Rmmigrate_Job::get($job_id) ?? $job;
+            Rmmigrate_Job_Cleanup::purge_cancelled_artifacts($job);
+            return array(
+                'done'    => true,
+                'status'  => $job->get_status(),
+                'percent' => $job->get_percent(),
+                'message' => $job->get_progress_message(),
+            );
+        }
+
         foreach (Rmmigrate_Snap_DB::jobs_get_active_ids() as $other_id) {
             if ($other_id >= $job_id) {
                 continue;
@@ -205,7 +223,19 @@ class Rmmigrate_Runner
                 Rmmigrate_Job::STATUS_ERROR,
                 Rmmigrate_Job::STATUS_CANCELLED,
             ), true)) {
-                Rmmigrate_Logger::log('Error: ' . sanitize_text_field($e->getMessage()));
+                $message = $e->getMessage();
+                if ($job->is_restore()) {
+                    Rmmigrate_Restore_Runner::attempt_network_rollback($job);
+                    $job = Rmmigrate_Job::get($job_id) ?? $job;
+                    if (!class_exists('Rmmigrate_Migration_Preflight', false)) {
+                        require_once RMMIGRATE_PATH . 'includes/shared/restore-topology/bootstrap.php';
+                    }
+                    $recovery = Rmmigrate_Migration_Preflight::recovery_message_after_db_failure($job->get_progress());
+                    if ($recovery !== '') {
+                        $message = $message . ' ' . $recovery;
+                    }
+                }
+                Rmmigrate_Logger::log('Error: ' . sanitize_text_field($message));
                 Rmmigrate_Error_Recorder::record_from_throwable(
                     $e,
                     'job',
@@ -213,7 +243,7 @@ class Rmmigrate_Runner
                 );
                 $job->set_status(
                     Rmmigrate_Job::STATUS_ERROR,
-                    sanitize_text_field($e->getMessage()),
+                    sanitize_text_field($message),
                     Rmmigrate_Error_Codes::from_throwable($e)
                 );
             }
@@ -444,7 +474,7 @@ class Rmmigrate_Runner
         }
 
         $work_dir = Rmmigrate_Local_Storage::ensure_job_work_dir($job, true);
-        $work_rel = 'jobs/' . $job->get_id() . '/';
+        $work_rel = Rmmigrate_Local_Storage::work_dir_rel($job);
 
         $slug = Rmmigrate_Multisite_Scope::archive_name_slug($job);
 
@@ -539,7 +569,7 @@ class Rmmigrate_Runner
                 } else {
                     Rmmigrate_Filesystem::copy(trailingslashit($work_dir) . 'database.sql', $path);
                 }
-                $job->save_fields(array('local_path' => 'jobs/' . $job->get_id() . '/' . $name, 'file_size' => (int) @Rmmigrate_Filesystem::filesize($path)));
+                $job->save_fields(array('local_path' => Rmmigrate_Local_Storage::work_dir_rel($job) . $name, 'file_size' => (int) @Rmmigrate_Filesystem::filesize($path)));
                 $job->set_status(Rmmigrate_Job::STATUS_ARCHIVE_DONE);
                 $steps->advance_to(Rmmigrate_Build_Steps::STEP_FINALIZE);
             }
@@ -669,6 +699,7 @@ class Rmmigrate_Runner
                 Rmmigrate_Filesystem::delete($file->getPathname());
             }
         } catch (Exception $e) {
+            Rmmigrate_Logger::log('Best-effort operation failed: ' . $e->getMessage());
             // Ignore directory iteration errors, cleanup is best-effort.
         }
     }
@@ -722,7 +753,7 @@ class Rmmigrate_Runner
 
         Rmmigrate_Filesystem::delete($local);
         $job->save_fields(array(
-            'local_path' => 'jobs/' . $job->get_id() . '/' . basename($encrypted),
+            'local_path' => Rmmigrate_Local_Storage::work_dir_rel($job) . basename($encrypted),
             'file_size'  => Rmmigrate_Filesystem::filesize($encrypted),
         ));
         return true;
@@ -831,10 +862,16 @@ class Rmmigrate_Runner
         $rel = $job->data['local_path'] ?? '';
         if ($rel === '') {
             $progress = $job->get_progress();
-            $rel = 'jobs/' . $job->get_id() . '/' . basename($progress['archive']['zip_path'] ?? '');
+            $rel = Rmmigrate_Local_Storage::work_dir_rel($job) . basename($progress['archive']['zip_path'] ?? '');
         }
         $rel = ltrim((string) $rel, '/');
         $primary = trailingslashit(Rmmigrate_Plugin::backups_dir()) . $rel;
+        if ($rel !== '' && !Rmmigrate_Filesystem::exists($primary) && class_exists('Rmmigrate_Archive_Encryption', false)) {
+            $encrypted = Rmmigrate_Archive_Encryption::encrypted_path($primary);
+            if (Rmmigrate_Filesystem::exists($encrypted)) {
+                return $encrypted;
+            }
+        }
         if ($rel === '' || Rmmigrate_Filesystem::exists($primary)) {
             return $primary;
         }
@@ -999,7 +1036,7 @@ class Rmmigrate_Runner
             'body'      => array(
                 'action'       => 'rmmigrate_worker',
                 'job_id'       => $job_id,
-                'worker_token' => self::worker_token($job_id),
+                'worker_token' => self::worker_token($job_id, self::worker_token_ttl_for_job($job_id), self::worker_auth_site_for_job($job_id)),
             ),
         ));
         if (is_wp_error($response)) {
@@ -1022,12 +1059,39 @@ class Rmmigrate_Runner
         }
     }
 
-    public static function worker_token(int $job_id, int $ttl = 300): string
+    public static function worker_token(int $job_id, int $ttl = 300, string $site_url = ''): string
     {
         $expires = time() + max(60, $ttl);
-        $site = function_exists('site_url') ? (string) site_url() : '';
+        $site = $site_url !== '' ? $site_url : self::worker_auth_site_for_job($job_id);
+        if ($site === '' && function_exists('site_url')) {
+            $site = (string) site_url();
+        }
         $sig = substr(hash_hmac('sha256', $job_id . '|' . $expires . '|' . $site, wp_salt('auth')), 0, 32);
         return $expires . '.' . $sig;
+    }
+
+    private static function worker_token_ttl_for_job(int $job_id): int
+    {
+        $job = Rmmigrate_Job::get($job_id);
+        if ($job !== null && $job->is_restore()) {
+            return 7200;
+        }
+
+        return 300;
+    }
+
+    public static function worker_auth_site_for_job(int $job_id): string
+    {
+        $job = Rmmigrate_Job::get($job_id);
+        if ($job === null) {
+            return function_exists('site_url') ? (string) site_url() : '';
+        }
+        $progress = $job->get_progress();
+        if (!empty($progress['worker_auth_site'])) {
+            return (string) $progress['worker_auth_site'];
+        }
+
+        return function_exists('site_url') ? (string) site_url() : '';
     }
 
     /**
@@ -1052,15 +1116,15 @@ class Rmmigrate_Runner
             return false;
         }
 
-        $site = function_exists('site_url') ? (string) site_url() : '';
+        $site = self::worker_auth_site_for_job($job_id);
+        if ($site === '') {
+            self::log_worker_auth_failure($job_id, 'missing_worker_auth_site');
+            return false;
+        }
         $expected = substr(hash_hmac('sha256', $job_id . '|' . $expires . '|' . $site, wp_salt('auth')), 0, 32);
         if (!hash_equals($expected, $parts[1])) {
-            // Legacy tokens (pre site_url binding) remain valid until they expire.
-            $legacy = substr(hash_hmac('sha256', $job_id . '|' . $expires, wp_salt('auth')), 0, 32);
-            if (!hash_equals($legacy, $parts[1])) {
-                self::log_worker_auth_failure($job_id, 'invalid_token_signature');
-                return false;
-            }
+            self::log_worker_auth_failure($job_id, 'invalid_token_signature');
+            return false;
         }
 
         // Rate limit is applied after lock acquire in process() so waiters do not burn budget.
@@ -1193,6 +1257,15 @@ class Rmmigrate_Runner
         }
         delete_transient('rmmigrate_milestone_lock_acquired_' . $job_id);
         delete_transient(self::WAIT_BACKOFF_PREFIX . $job_id);
+    }
+
+    /**
+     * Whether the current request is the worker holding this job's lock.
+     */
+    public static function current_request_holds_job_lock(int $job_id): bool
+    {
+        return $job_id > 0
+            && (isset(self::$job_lock_handles[$job_id]) || self::$locked_job_id === $job_id);
     }
 
     public static function job_worker_is_idle(int $job_id): bool

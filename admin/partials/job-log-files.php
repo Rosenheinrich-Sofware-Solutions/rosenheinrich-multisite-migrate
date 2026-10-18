@@ -20,7 +20,7 @@ $rmmigrate_log_chunk = array(
 );
 $rmmigrate_log_lines = 0;
 
-if ($rmmigrate_view_log !== '' && Rmmigrate_Activity_Log::is_allowed_log_basename($rmmigrate_view_log)) {
+if ($rmmigrate_view_log !== '' && Rmmigrate_Activity_Log::current_user_can_read_log($rmmigrate_view_log)) {
     $rmmigrate_log_path = Rmmigrate_Activity_Log::logs_dir() . '/' . $rmmigrate_view_log;
     if (is_readable($rmmigrate_log_path)) {
         $rmmigrate_log_chunk = Rmmigrate_Activity_Log::read_file_chunk(

@@ -45,6 +45,7 @@ class Rmmigrate_DB_Dumper
     public function run_slice(int $budget_sec): bool
     {
         Rmmigrate_Local_Storage::ensure_job_work_dir($this->job, false);
+        $this->sql_path = trailingslashit($this->job->get_work_dir()) . 'database.sql';
 
         $this->restore_db_progress_from_backup();
 
@@ -81,6 +82,11 @@ class Rmmigrate_DB_Dumper
                 if (!$this->validate_mysqldump_size($tables)) {
                     return $this->fallback_php_dump($tables);
                 }
+                $db = $this->job->get_progress()['database'] ?? array();
+                if (empty($db['routines_done'])) {
+                    $this->append_database_routines();
+                    $this->job->update_progress(array('database' => array('routines_done' => true)));
+                }
                 $this->append_eof_marker();
                 $this->sync_sql_bytes_written();
                 $this->job->update_progress(array('database' => array('phase' => 'done')));
@@ -108,6 +114,10 @@ class Rmmigrate_DB_Dumper
                 $remaining_budget = max(1, (int) floor($budget_sec - (microtime(true) - $start)));
                 $done = $this->run_php_inserts_batch($remaining_budget);
                 if ($done) {
+                    if (empty($db['routines_done'])) {
+                        $this->append_database_routines();
+                        $this->job->update_progress(array('database' => array('routines_done' => true)));
+                    }
                     $this->append_eof_marker();
                     $this->sync_sql_bytes_written();
                     $this->job->update_progress(array('database' => array('phase' => 'done', 'insert_incomplete' => false)));
@@ -405,7 +415,7 @@ class Rmmigrate_DB_Dumper
                 $db_host['port'],
                 $db_host['socket'],
                 $tables,
-                array('--no-data'),
+                array('--no-data', '--skip-triggers'),
                 false,
                 $schema_budget
             );
@@ -492,7 +502,7 @@ class Rmmigrate_DB_Dumper
             $db_host['port'],
             $db_host['socket'],
             $batch,
-            array('--no-create-info', '--no-create-db', '--insert-ignore'),
+            array('--no-create-info', '--no-create-db', '--insert-ignore', '--skip-triggers'),
             true,
             $data_budget,
             $where
@@ -563,7 +573,7 @@ class Rmmigrate_DB_Dumper
             $db_host['port'],
             $db_host['socket'],
             $tables,
-            array('--no-create-info', '--no-create-db', '--insert-ignore'),
+            array('--no-create-info', '--no-create-db', '--insert-ignore', '--skip-triggers'),
             true,
             $bulk_budget
         );
@@ -673,7 +683,7 @@ class Rmmigrate_DB_Dumper
             $db_host['port'],
             $db_host['socket'],
             array($table),
-            array('--no-data'),
+            array('--no-data', '--skip-triggers'),
             $index > 0,
             $budget_sec
         );
@@ -1867,6 +1877,95 @@ class Rmmigrate_DB_Dumper
         $fh->close();
         Rmmigrate_Process::close($process);
         return 2;
+    }
+
+    private function append_database_routines(): void
+    {
+        global $wpdb;
+
+        $views = $this->scope->get_export_views();
+        $tables = $this->scope->get_tables();
+        if ($views === array() && $tables === array()) {
+            return;
+        }
+
+        $fh = Rmmigrate_Filesystem::open($this->sql_path, 'a');
+        if ($fh === false) {
+            return;
+        }
+
+        foreach ($views as $view) {
+            $view = (string) $view;
+            if ($view === '') {
+                continue;
+            }
+            $quoted = Rmmigrate_Snap_DB::quote_identifier($view);
+            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.NotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- View name from export scope; Rmmigrate_Snap_DB::quote_identifier().
+            $row = $wpdb->get_row('SHOW CREATE VIEW ' . $quoted, ARRAY_N);
+            if (!is_array($row) || empty($row[1])) {
+                continue;
+            }
+            $create_sql = Rmmigrate_Sql_Import_Ddl::strip_definer_clauses((string) $row[1]);
+            $this->write_php_export_sql($fh, 'DROP VIEW IF EXISTS ' . $quoted . ";\n" . $create_sql . ";\n\n");
+        }
+
+        if ($tables !== array() && defined('DB_NAME')) {
+            $placeholders = implode(',', array_fill(0, count($tables), '%s'));
+            $args = array_merge(array(DB_NAME), $tables);
+            // phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQL.NotPrepared -- Table names from export scope; IN list uses prepare placeholders.
+            $sql = $wpdb->prepare(
+                "SELECT TRIGGER_NAME, EVENT_OBJECT_TABLE
+                 FROM information_schema.TRIGGERS
+                 WHERE TRIGGER_SCHEMA = %s AND EVENT_OBJECT_TABLE IN ($placeholders)
+                 ORDER BY TRIGGER_NAME ASC",
+                ...$args
+            );
+            $rows = $wpdb->get_results($sql, ARRAY_A);
+            // phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQL.NotPrepared
+            $seen = array();
+            $trigger_block = false;
+            if (is_array($rows) && $rows !== array()) {
+                $this->write_php_export_sql($fh, "DELIMITER ;;\n");
+                $trigger_block = true;
+            }
+            if (is_array($rows)) {
+                // phpcs:disable WordPress.DB.PreparedSQL.NotPrepared -- SHOW CREATE TRIGGER uses quoted identifiers only.
+                foreach ($rows as $row) {
+                    if (is_object($row)) {
+                        $row = get_object_vars($row);
+                    }
+                    if (!is_array($row)) {
+                        continue;
+                    }
+                    $name = (string) ($row['TRIGGER_NAME'] ?? '');
+                    if ($name === '' || isset($seen[$name])) {
+                        continue;
+                    }
+                    $seen[$name] = true;
+                    $table = (string) ($row['EVENT_OBJECT_TABLE'] ?? '');
+                    if ($table === '') {
+                        continue;
+                    }
+                    $trigger_q = Rmmigrate_Snap_DB::quote_identifier($name);
+                    // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.NotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- Trigger name from information_schema; Rmmigrate_Snap_DB::quote_identifier().
+                    $create = $wpdb->get_row('SHOW CREATE TRIGGER ' . $trigger_q, ARRAY_N);
+                    if (!is_array($create) || empty($create[2])) {
+                        continue;
+                    }
+                    $this->write_php_export_sql(
+                        $fh,
+                        'DROP TRIGGER IF EXISTS ' . $trigger_q . ";;\n"
+                        . Rmmigrate_Sql_Import_Ddl::strip_definer_clauses((string) $create[2]) . ";;\n\n"
+                    );
+                }
+                // phpcs:enable WordPress.DB.PreparedSQL.NotPrepared
+            }
+            if ($trigger_block) {
+                $this->write_php_export_sql($fh, "DELIMITER ;\n");
+            }
+        }
+
+        $fh->close();
     }
 
     private function append_eof_marker(): void

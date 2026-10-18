@@ -69,7 +69,16 @@ class Rmmigrate_Ajax_Backup
     public static function dismiss_last_error(): void
     {
         self::verify_request();
-        self::assert_network_management();
+        if (!self::user_can_backup()) {
+            self::send_ajax_error(
+                __('You do not have permission to dismiss this notice.', 'rosenheinrich-multisite-migrate'),
+                403,
+                'system',
+                0,
+                array(),
+                'warning'
+            );
+        }
         $error = Rmmigrate_Job::resolve_admin_last_error(is_network_admin());
         if ((string) ($error['message'] ?? '') === '') {
             wp_send_json_success(array('dismissed' => false));
@@ -88,7 +97,7 @@ class Rmmigrate_Ajax_Backup
         Rmmigrate_Job::recover_stale_active();
 
         $input = array(
-            'scope'                      => Rmmigrate_Request_Input::post_text('scope', Rmmigrate_Multisite_Scope::SCOPE_NETWORK),
+            'scope'                      => Rmmigrate_Request_Input::post_text('scope', ''),
             'excluded_blogs'             => Rmmigrate_Request_Input::post_int_array('excluded_blogs'),
             'included_blogs'             => Rmmigrate_Request_Input::post_int_array('included_blogs'),
             'backup_profile'             => Rmmigrate_Request_Input::post_text('backup_profile', 'full'),

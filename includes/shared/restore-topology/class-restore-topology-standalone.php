@@ -1,5 +1,7 @@
 <?php
 
+require_once dirname(__DIR__) . '/safe-logger.php';
+
 if (!defined('ABSPATH')) {
     exit;
 }
@@ -153,7 +155,16 @@ class Rmmigrate_Restore_Topology_Standalone
     {
         $restore_mode = Rmmigrate_Restore_Topology_Manifest::restore_mode($manifest, $context);
         if ($restore_mode === 'subsite_on_network') {
-            return Rmmigrate_Restore_Topology_Network_Import::finalize($pdo, $manifest, $context);
+            $report = Rmmigrate_Restore_Topology_Network_Import::finalize($pdo, $manifest, $context);
+            $report['user_merge'] = Rmmigrate_Restore_Topology_User_Merge::run($pdo, $manifest, $context);
+            $report['caps_meta_remapped'] = $report['user_merge']['caps_meta_remapped']
+                ?? Rmmigrate_Restore_Topology_User_Merge::remap_caps_meta_without_user_merge(
+                    $pdo,
+                    $manifest,
+                    $context
+                );
+
+            return $report;
         }
         if ($restore_mode === 'network_to_subsite') {
             return Rmmigrate_Restore_Topology_Network_To_Subsite::finalize($pdo, $manifest, $context);
@@ -235,6 +246,31 @@ class Rmmigrate_Restore_Topology_Standalone
      * @param array<string,mixed> $context
      * @return array<string,mixed>
      */
+    /**
+     * @param array<string,mixed> $manifest
+     * @param array<string,mixed> $context
+     * @return array<string,mixed>
+     */
+    public static function apply_migration_network_urls_early(PDO $pdo, array $manifest, array $context): array
+    {
+        if (!Rmmigrate_Restore_Topology_Manifest::restore_as_multisite($manifest)) {
+            return array();
+        }
+        if (!empty($context['migration_network_domains_applied'])) {
+            return array('migration_network_domains_applied' => true);
+        }
+
+        $report = self::finalize_network_domains($pdo, $manifest, $context);
+        $report['migration_network_domains_applied'] = true;
+
+        return $report;
+    }
+
+    /**
+     * @param array<string,mixed> $manifest
+     * @param array<string,mixed> $context
+     * @return array<string,mixed>
+     */
     private static function finalize_network_domains(PDO $pdo, array $manifest, array $context): array
     {
         $report = array(
@@ -243,6 +279,9 @@ class Rmmigrate_Restore_Topology_Standalone
             'network_meta_updated'  => 0,
             'urls_updated'          => false,
         );
+        if (!empty($context['migration_network_domains_applied'])) {
+            return $report;
+        }
 
         $prefix = (string) ($context['db_prefix'] ?? $manifest['db_prefix'] ?? 'wp_');
         $base_prefix = self::base_table_prefix($prefix);
@@ -250,7 +289,29 @@ class Rmmigrate_Restore_Topology_Standalone
         // Primary site siteurl/home (blog 1 options table).
         $report['urls_updated'] = self::update_site_urls($pdo, $prefix, self::migration_map($context));
 
+        $path_report = self::finalize_network_paths($pdo, $manifest, $context, $base_prefix);
+        $report = array_merge($report, $path_report);
+
         $map = is_array($context['migration_map'] ?? null) ? $context['migration_map'] : array();
+        if (class_exists('Rmmigrate_Migration_Preflight', false)) {
+            $map = Rmmigrate_Migration_Preflight::enrich_migration_map_paths($map, $manifest);
+        }
+        $old_path = class_exists('Rmmigrate_Migration_Preflight', false)
+            ? Rmmigrate_Migration_Preflight::normalize_site_path((string) ($map['site_path']['old'] ?? '/'))
+            : '/';
+        $new_path = class_exists('Rmmigrate_Migration_Preflight', false)
+            ? Rmmigrate_Migration_Preflight::normalize_site_path((string) ($map['site_path']['new'] ?? '/'))
+            : '/';
+        $sitemeta = $base_prefix . 'sitemeta';
+        if ($old_path !== $new_path && self::table_exists($pdo, $sitemeta)) {
+            $report['network_meta_updated'] += self::update_network_siteurl_paths(
+                $pdo,
+                $sitemeta,
+                $old_path,
+                $new_path
+            );
+        }
+
         $old_host = self::url_host((string) ($map['site_url']['old'] ?? $map['old_url'] ?? ''));
         $new_host = self::url_host((string) ($map['site_url']['new'] ?? $map['new_url'] ?? ''));
         if ($old_host === '' || $new_host === '' || strcasecmp($old_host, $new_host) === 0) {
@@ -270,10 +331,177 @@ class Rmmigrate_Restore_Topology_Standalone
 
         $sitemeta = $base_prefix . 'sitemeta';
         if (self::table_exists($pdo, $sitemeta)) {
-            $report['network_meta_updated'] = self::update_network_siteurl_meta($pdo, $sitemeta, $old_host, $new_host);
+            $report['network_meta_updated'] += self::update_network_siteurl_meta($pdo, $sitemeta, $old_host, $new_host);
         }
 
         return $report;
+    }
+
+    /**
+     * @param array<string,mixed> $manifest
+     * @param array<string,mixed> $context
+     * @return array<string,int|bool>
+     */
+    private static function finalize_network_paths(PDO $pdo, array $manifest, array $context, string $base_prefix): array
+    {
+        $report = array(
+            'network_paths_updated' => 0,
+        );
+        if (!empty($context['migration_network_paths_applied'])) {
+            return $report;
+        }
+        if (!empty($manifest['subdomain_install'])) {
+            return $report;
+        }
+        $map = is_array($context['migration_map'] ?? null) ? $context['migration_map'] : array();
+        if (class_exists('Rmmigrate_Migration_Preflight', false)) {
+            $map = Rmmigrate_Migration_Preflight::enrich_migration_map_paths($map, $manifest);
+        }
+        $old_path = class_exists('Rmmigrate_Migration_Preflight', false)
+            ? Rmmigrate_Migration_Preflight::normalize_site_path((string) ($map['site_path']['old'] ?? '/'))
+            : '/';
+        $new_path = class_exists('Rmmigrate_Migration_Preflight', false)
+            ? Rmmigrate_Migration_Preflight::normalize_site_path((string) ($map['site_path']['new'] ?? '/'))
+            : '/';
+        if ($old_path === $new_path) {
+            return $report;
+        }
+
+        $blogs = $base_prefix . 'blogs';
+        if (self::table_exists($pdo, $blogs)) {
+            $report['network_paths_updated'] += self::update_network_path_column($pdo, $blogs, $old_path, $new_path);
+        }
+        $site = $base_prefix . 'site';
+        if (self::table_exists($pdo, $site)) {
+            $report['network_paths_updated'] += self::update_network_path_column($pdo, $site, $old_path, $new_path);
+        }
+
+        if ($report['network_paths_updated'] > 0) {
+            $report['migration_network_paths_applied'] = true;
+        }
+
+        return $report;
+    }
+
+    private static function update_network_path_column(PDO $pdo, string $table, string $old_path, string $new_path): int
+    {
+        if ($old_path === $new_path) {
+            return 0;
+        }
+        $table_q = self::quote_sql_identifier($table);
+        $pk = self::network_table_row_key_column($pdo, $table);
+        $select = $pdo->query("SELECT {$pk} AS row_id, path FROM {$table_q}");
+        if ($select === false) {
+            return 0;
+        }
+        $rows = $select->fetchAll(PDO::FETCH_ASSOC);
+        if (!is_array($rows) || $rows === array()) {
+            return 0;
+        }
+        $paths_by_id = array();
+        foreach ($rows as $row) {
+            $paths_by_id[(int) ($row['row_id'] ?? 0)] = (string) ($row['path'] ?? '');
+        }
+        $update = $pdo->prepare("UPDATE {$table_q} SET path = ? WHERE {$pk} = ?");
+        $updated = 0;
+        foreach ($rows as $row) {
+            $row_id = (int) ($row['row_id'] ?? 0);
+            $path = (string) ($row['path'] ?? '');
+            if ($row_id <= 0 || $path === '') {
+                continue;
+            }
+            $mapped = self::remap_network_path_once($path, $old_path, $new_path);
+            if ($mapped === $path) {
+                continue;
+            }
+            if (self::network_path_collision($paths_by_id, $row_id, $mapped)) {
+                continue;
+            }
+            $update->execute(array($mapped, $row_id));
+            $updated += $update->rowCount();
+            $paths_by_id[$row_id] = $mapped;
+        }
+
+        return $updated;
+    }
+
+    /**
+     * @param array<int,string> $paths_by_id
+     */
+    private static function network_path_collision(array $paths_by_id, int $blog_id, string $candidate): bool
+    {
+        $candidate_norm = self::normalize_network_path_for_compare($candidate);
+        foreach ($paths_by_id as $id => $path) {
+            if ((int) $id === $blog_id) {
+                continue;
+            }
+            if (self::normalize_network_path_for_compare($path) === $candidate_norm) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static function normalize_network_path_for_compare(string $path): string
+    {
+        if (class_exists('Rmmigrate_Migration_Preflight', false)) {
+            return Rmmigrate_Migration_Preflight::normalize_site_path($path);
+        }
+        $path = trim($path);
+        if ($path === '') {
+            return '/';
+        }
+        if ($path[0] !== '/') {
+            $path = '/' . $path;
+        }
+
+        return rtrim($path, '/') . '/';
+    }
+
+    private static function network_table_row_key_column(PDO $pdo, string $table): string
+    {
+        $table_q = self::quote_sql_identifier($table);
+        try {
+            $probe = $pdo->query("SELECT * FROM {$table_q} LIMIT 0");
+            if ($probe !== false) {
+                $columns = array();
+                for ($i = 0; $i < $probe->columnCount(); $i++) {
+                    $meta = $probe->getColumnMeta($i);
+                    if (is_array($meta) && isset($meta['name'])) {
+                        $columns[] = strtolower((string) $meta['name']);
+                    }
+                }
+                if (in_array('blog_id', $columns, true)) {
+                    return 'blog_id';
+                }
+                if (in_array('id', $columns, true)) {
+                    return 'id';
+                }
+            }
+        } catch (Throwable $e) {
+            rmmigrate_shared_log_best_effort_failure($e);
+        }
+
+        return 'blog_id';
+    }
+
+    private static function remap_network_path_once(string $path, string $old_path, string $new_path): string
+    {
+        if ($path === $old_path) {
+            return $new_path;
+        }
+        if ($new_path !== '/' && strlen($new_path) > strlen($old_path) && strncmp($path, $new_path, strlen($new_path)) === 0) {
+            return $path;
+        }
+        if ($old_path === '/' && strncmp($path, '/', 1) === 0 && $path !== '/') {
+            return $new_path . ltrim($path, '/');
+        }
+        if ($old_path !== '/' && strncmp($path, $old_path, strlen($old_path)) === 0) {
+            return $new_path . substr($path, strlen($old_path));
+        }
+
+        return $path;
     }
 
     private static function host_matches_migration(string $host, string $old_host): bool
@@ -315,27 +543,174 @@ class Rmmigrate_Restore_Topology_Standalone
 
     private static function update_network_domain_column(PDO $pdo, string $table, string $old_host, string $new_host): int
     {
-        $old_host_like = self::escape_like_literal($old_host);
+        $variants = self::migration_old_host_variants($old_host);
         $table_q = self::quote_sql_identifier($table);
-        $stmt = $pdo->prepare(
-            "UPDATE {$table_q} SET domain = CASE
-                WHEN domain = ? THEN ?
-                WHEN domain LIKE CONCAT('%.', ?) THEN CONCAT(SUBSTRING(domain, 1, CHAR_LENGTH(domain) - CHAR_LENGTH(?) - 1), '.', ?)
-                ELSE domain
-            END
-            WHERE domain = ? OR domain LIKE CONCAT('%.', ?)"
-        );
-        $stmt->execute(array(
-            $old_host,
-            $new_host,
-            $old_host_like,
-            $old_host,
-            $new_host,
-            $old_host,
-            $old_host_like,
-        ));
+        $pk = self::network_table_row_key_column($pdo, $table);
+        $select = $pdo->query("SELECT {$pk} AS row_id, domain FROM {$table_q}");
+        if ($select === false) {
+            return 0;
+        }
+        $rows = $select->fetchAll(PDO::FETCH_ASSOC);
+        if (!is_array($rows) || $rows === array()) {
+            return 0;
+        }
+        $update = $pdo->prepare("UPDATE {$table_q} SET domain = ? WHERE {$pk} = ?");
+        $updated = 0;
+        foreach ($rows as $row) {
+            $row_id = (int) ($row['row_id'] ?? 0);
+            $original = (string) ($row['domain'] ?? '');
+            if ($row_id <= 0 || $original === '') {
+                continue;
+            }
+            $mapped = $original;
+            foreach ($variants as $variant) {
+                $candidate = self::remap_network_domain($original, $variant, $new_host);
+                if ($candidate !== $original) {
+                    $mapped = $candidate;
+                    break;
+                }
+            }
+            if ($mapped === $original) {
+                continue;
+            }
+            $update->execute(array($mapped, $row_id));
+            $updated += $update->rowCount();
+        }
 
-        return $stmt->rowCount();
+        return $updated;
+    }
+
+    /**
+     * @return string[]
+     */
+    private static function migration_old_host_variants(string $old_host): array
+    {
+        $variants = array($old_host);
+        if (preg_match('/^([^:]+):\d+$/', $old_host, $matches)) {
+            $variants[] = (string) ($matches[1] ?? '');
+        }
+
+        return array_values(array_unique(array_filter($variants)));
+    }
+
+    private static function update_network_domain_column_for_host(PDO $pdo, string $table, string $old_host, string $new_host): int
+    {
+        $table_q = self::quote_sql_identifier($table);
+        $pk = self::network_table_row_key_column($pdo, $table);
+        $select = $pdo->query("SELECT {$pk} AS row_id, domain FROM {$table_q}");
+        if ($select === false) {
+            return 0;
+        }
+        $rows = $select->fetchAll(PDO::FETCH_ASSOC);
+        if (!is_array($rows) || $rows === array()) {
+            return 0;
+        }
+        $update = $pdo->prepare("UPDATE {$table_q} SET domain = ? WHERE {$pk} = ?");
+        $updated = 0;
+        foreach ($rows as $row) {
+            $row_id = (int) ($row['row_id'] ?? 0);
+            $domain = (string) ($row['domain'] ?? '');
+            if ($row_id <= 0 || $domain === '') {
+                continue;
+            }
+            $mapped = self::remap_network_domain($domain, $old_host, $new_host);
+            if ($mapped === $domain) {
+                continue;
+            }
+            $update->execute(array($mapped, $row_id));
+            $updated += $update->rowCount();
+        }
+
+        return $updated;
+    }
+
+    private static function remap_network_domain(string $domain, string $old_host, string $new_host): string
+    {
+        if (strcasecmp($domain, $old_host) === 0) {
+            return $new_host;
+        }
+        $suffix = '.' . $old_host;
+        if (strlen($domain) > strlen($suffix) && strcasecmp(substr($domain, -strlen($suffix)), $suffix) === 0) {
+            return substr($domain, 0, -strlen($suffix)) . '.' . $new_host;
+        }
+
+        return $domain;
+    }
+
+    private static function update_network_siteurl_paths(
+        PDO $pdo,
+        string $table,
+        string $old_path,
+        string $new_path
+    ): int {
+        if ($old_path === $new_path) {
+            return 0;
+        }
+        $table_q = self::quote_sql_identifier($table);
+        $select = $pdo->prepare("SELECT meta_id, meta_value FROM {$table_q} WHERE meta_key = 'siteurl'");
+        $select->execute();
+        $updated = 0;
+        $update = $pdo->prepare("UPDATE {$table_q} SET meta_value = ? WHERE meta_id = ?");
+        while ($row = $select->fetch(PDO::FETCH_ASSOC)) {
+            $meta_id = (int) ($row['meta_id'] ?? 0);
+            $value = (string) ($row['meta_value'] ?? '');
+            if ($meta_id <= 0 || $value === '') {
+                continue;
+            }
+            $new_value = self::replace_url_path($value, $old_path, $new_path);
+            if ($new_value === $value) {
+                continue;
+            }
+            $update->execute(array($new_value, $meta_id));
+            $updated += $update->rowCount();
+        }
+
+        return $updated;
+    }
+
+    private static function replace_url_path(string $url, string $old_path, string $new_path): string
+    {
+        $parsed = function_exists('wp_parse_url')
+            ? wp_parse_url($url)
+            : parse_url($url); // phpcs:ignore WordPress.WP.AlternativeFunctions.parse_url_parse_url -- installer may run without WP.
+        if (!is_array($parsed)) {
+            return $url;
+        }
+        $path = (string) ($parsed['path'] ?? '');
+        if ($path === '') {
+            $path = '/';
+        }
+        $mapped = self::remap_network_path_once($path, $old_path, $new_path);
+        if ($mapped === $path) {
+            return $url;
+        }
+        $parsed['path'] = $mapped;
+        $rebuilt = '';
+        if (!empty($parsed['scheme'])) {
+            $rebuilt .= $parsed['scheme'] . '://';
+        }
+        if (!empty($parsed['user'])) {
+            $rebuilt .= $parsed['user'];
+            if (!empty($parsed['pass'])) {
+                $rebuilt .= ':' . $parsed['pass'];
+            }
+            $rebuilt .= '@';
+        }
+        if (!empty($parsed['host'])) {
+            $rebuilt .= $parsed['host'];
+        }
+        if (!empty($parsed['port'])) {
+            $rebuilt .= ':' . (int) $parsed['port'];
+        }
+        $rebuilt .= $mapped;
+        if (!empty($parsed['query'])) {
+            $rebuilt .= '?' . $parsed['query'];
+        }
+        if (!empty($parsed['fragment'])) {
+            $rebuilt .= '#' . $parsed['fragment'];
+        }
+
+        return $rebuilt;
     }
 
     private static function update_network_siteurl_meta(PDO $pdo, string $table, string $old_host, string $new_host): int
@@ -364,6 +739,10 @@ class Rmmigrate_Restore_Topology_Standalone
 
     private static function url_host(string $url): string
     {
+        if (class_exists('Rmmigrate_Migration_Preflight', false)) {
+            return Rmmigrate_Migration_Preflight::network_domain_from_url($url);
+        }
+
         $url = trim($url);
         if ($url === '') {
             return '';
@@ -371,11 +750,19 @@ class Rmmigrate_Restore_Topology_Standalone
         if (strpos($url, '//') === false) {
             $url = '//' . $url;
         }
-        $host = function_exists('wp_parse_url')
-            ? wp_parse_url($url, PHP_URL_HOST)
-            : parse_url($url, PHP_URL_HOST); // phpcs:ignore WordPress.WP.AlternativeFunctions.parse_url_parse_url -- standalone restore runs without WP; wp_parse_url() unavailable, used when present.
+        $parsed = function_exists('wp_parse_url')
+            ? wp_parse_url($url)
+            : parse_url($url); // phpcs:ignore WordPress.WP.AlternativeFunctions.parse_url_parse_url -- standalone restore runs without WP; wp_parse_url() unavailable, used when present.
+        if (!is_array($parsed)) {
+            return '';
+        }
+        $host = (string) ($parsed['host'] ?? '');
+        if ($host === '') {
+            return '';
+        }
+        $port = isset($parsed['port']) ? (int) $parsed['port'] : 0;
 
-        return is_string($host) ? $host : '';
+        return $port > 0 ? $host . ':' . $port : $host;
     }
 
     public static function update_options_table(PDO $pdo, string $prefix, string $base_prefix): int
@@ -391,9 +778,9 @@ class Rmmigrate_Restore_Topology_Standalone
 
         $table_q = self::quote_sql_identifier($table);
         $stmt = $pdo->prepare(
-            "UPDATE {$table_q} SET option_name = CONCAT(?, SUBSTRING(option_name, CHAR_LENGTH(?) + 1)) WHERE option_name LIKE ? ESCAPE '\\\\'"
+            "UPDATE {$table_q} SET option_name = ? WHERE option_name = ?"
         );
-        $stmt->execute(array($base_prefix, $prefix, self::escape_like_literal($prefix) . '%'));
+        $stmt->execute(array($base_prefix . 'user_roles', $prefix . 'user_roles'));
 
         return $stmt->rowCount();
     }
@@ -415,7 +802,11 @@ class Rmmigrate_Restore_Topology_Standalone
 
     private static function table_exists(PDO $pdo, string $table): bool
     {
-        return Rmmigrate_Topology_Db_Connection::table_exists($pdo, $table);
+        if (class_exists('Rmmigrate_Topology_Db_Connection', false)) {
+            return Rmmigrate_Topology_Db_Connection::table_exists($pdo, $table);
+        }
+
+        return false;
     }
 
     private static function escape_like_literal(string $value): string
@@ -461,6 +852,7 @@ class Rmmigrate_Restore_Topology_Standalone
         try {
             $driver = (string) $pdo->getAttribute(PDO::ATTR_DRIVER_NAME);
         } catch (Throwable $e) {
+            rmmigrate_shared_log_best_effort_failure($e);
             $driver = 'mysql';
         }
 

@@ -215,15 +215,21 @@ class Rmmigrate_File_Restorer
         $root = $this->job->get_restore_root();
         $files_root = wp_normalize_path($files_root);
 
+        $skip_server_config = $this->should_preserve_live_server_config();
         $wp_config = $files_root . 'wp-config.php';
-        $skip_wp_config = $this->should_skip_wp_config_restore();
+        $skip_wp_config = $skip_server_config || $this->should_skip_wp_config_restore();
         if (!$skip_wp_config && Rmmigrate_Filesystem::exists($wp_config)) {
             $queue[] = array('src' => $wp_config, 'dest' => $root . 'wp-config.php', 'replace' => false);
         }
 
         $htaccess = $files_root . '.htaccess';
-        if (Rmmigrate_Filesystem::exists($htaccess)) {
+        if (!$skip_server_config && Rmmigrate_Filesystem::exists($htaccess)) {
             $queue[] = array('src' => $htaccess, 'dest' => $root . '.htaccess', 'replace' => false);
+        }
+
+        $web_config = $files_root . 'web.config';
+        if (!$skip_server_config && Rmmigrate_Filesystem::exists($web_config)) {
+            $queue[] = array('src' => $web_config, 'dest' => $root . 'web.config', 'replace' => false);
         }
 
         if (Rmmigrate_Archive_Index::has_core_files($files_root)) {
@@ -275,6 +281,9 @@ class Rmmigrate_File_Restorer
                 $rel = substr($src, strlen($content_root));
                 $dest = trailingslashit(WP_CONTENT_DIR) . $rel;
                 if ($uploads_only && !$this->dest_under_allowed_roots($dest, $allowed_roots)) {
+                    continue;
+                }
+                if ($this->should_skip_migration_plugin_file($rel)) {
                     continue;
                 }
                 $replace = $this->should_replace_in_file($src);
@@ -380,6 +389,44 @@ class Rmmigrate_File_Restorer
             wp_mkdir_p($dest_dir);
         }
 
+        $htaccess = $this->maybe_adapt_htaccess_contents($src, $dest);
+        if ($htaccess !== null) {
+            if ($this->destination_matches_contents($dest, $htaccess)) {
+                return $unchanged;
+            }
+            if (Rmmigrate_Filesystem::put_contents($dest, $htaccess) === false) {
+                Rmmigrate_Logger::log(
+                    sprintf(
+                        /* translators: 1: file name, 2: destination path */
+                        __('Could not restore %1$s (%2$s); keeping the destination and continuing.', 'rosenheinrich-multisite-migrate'),
+                        basename($src),
+                        $dest
+                    )
+                );
+                return array('missing' => 0, 'skipped' => 1, 'unchanged' => 0);
+            }
+            return $none;
+        }
+
+        $webconfig = $this->maybe_adapt_webconfig_contents($src, $dest);
+        if ($webconfig !== null) {
+            if ($this->destination_matches_contents($dest, $webconfig)) {
+                return $unchanged;
+            }
+            if (Rmmigrate_Filesystem::put_contents($dest, $webconfig) === false) {
+                Rmmigrate_Logger::log(
+                    sprintf(
+                        /* translators: 1: file name, 2: destination path */
+                        __('Could not restore %1$s (%2$s); keeping the destination and continuing.', 'rosenheinrich-multisite-migrate'),
+                        basename($src),
+                        $dest
+                    )
+                );
+                return array('missing' => 0, 'skipped' => 1, 'unchanged' => 0);
+            }
+            return $none;
+        }
+
         if ($search_replace !== null && !empty($item['replace'])) {
             $contents = Rmmigrate_Filesystem::get_contents($src);
             if ($contents !== false) {
@@ -438,5 +485,136 @@ class Rmmigrate_File_Restorer
         }
 
         return is_file(ABSPATH . 'wp-config.php');
+    }
+
+    private function should_preserve_live_server_config(): bool
+    {
+        if (!class_exists('Rmmigrate_Restore_Topology_Compatibility', false)) {
+            require_once RMMIGRATE_PATH . 'includes/shared/restore-topology/bootstrap.php';
+        }
+        $progress = $this->job->get_progress();
+        $manifest = is_array($progress['manifest'] ?? null) ? $progress['manifest'] : array();
+        if ($manifest === array()) {
+            $path = trailingslashit($this->job->get_work_dir()) . 'extracted/manifest.json';
+            if (Rmmigrate_Filesystem::exists($path)) {
+                $json = Rmmigrate_Filesystem::get_contents($path);
+                if ($json !== false) {
+                    $decoded = json_decode($json, true);
+                    if (is_array($decoded)) {
+                        $manifest = $decoded;
+                    }
+                }
+            }
+        }
+        if ($manifest === array()) {
+            return false;
+        }
+        $destination = Rmmigrate_Restore_Topology_Destination::probe_for_plugin();
+        $state = array_merge(
+            $progress,
+            array('migration_map' => $this->job->get_migration_map())
+        );
+
+        return Rmmigrate_Restore_Topology_Compatibility::is_network_slot_restore($state, $manifest, $destination);
+    }
+
+    private function maybe_adapt_htaccess_contents(string $src, string $dest): ?string
+    {
+        if ($this->job->get_restore_type() !== Rmmigrate_Job::RESTORE_TYPE_MIGRATION) {
+            return null;
+        }
+        $root_htaccess = wp_normalize_path($this->job->get_restore_root() . '.htaccess');
+        if (wp_normalize_path($dest) !== $root_htaccess) {
+            return null;
+        }
+        if (!class_exists('Rmmigrate_Htaccess_Migration', false)) {
+            require_once RMMIGRATE_PATH . 'includes/shared/class-htaccess-migration.php';
+        }
+        $raw = Rmmigrate_Filesystem::get_contents($src);
+        if ($raw === false) {
+            return null;
+        }
+        $map = $this->job->get_migration_map();
+        $manifest = $this->job->get_progress()['manifest'] ?? array();
+        if (!is_array($manifest)) {
+            $manifest = array();
+        }
+        if (!class_exists('Rmmigrate_Migration_Preflight', false)) {
+            require_once RMMIGRATE_PATH . 'includes/shared/restore-topology/bootstrap.php';
+        }
+        $map = Rmmigrate_Migration_Preflight::enrich_migration_map_paths($map, $manifest);
+
+        return Rmmigrate_Htaccess_Migration::rewrite_for_migration(
+            $raw,
+            (string) ($map['site_path']['old'] ?? '/'),
+            (string) ($map['site_path']['new'] ?? '/'),
+            !empty($manifest['subdomain_install'])
+        );
+    }
+
+    private function maybe_adapt_webconfig_contents(string $src, string $dest): ?string
+    {
+        if ($this->job->get_restore_type() !== Rmmigrate_Job::RESTORE_TYPE_MIGRATION) {
+            return null;
+        }
+        $root_config = wp_normalize_path($this->job->get_restore_root() . 'web.config');
+        if (wp_normalize_path($dest) !== $root_config) {
+            return null;
+        }
+        if (!class_exists('Rmmigrate_Webconfig_Migration', false)) {
+            require_once RMMIGRATE_PATH . 'includes/shared/class-webconfig-migration.php';
+        }
+        $raw = Rmmigrate_Filesystem::get_contents($src);
+        if ($raw === false) {
+            return null;
+        }
+        $map = $this->job->get_migration_map();
+        $manifest = $this->job->get_progress()['manifest'] ?? array();
+        if (!is_array($manifest)) {
+            $manifest = array();
+        }
+        if (!class_exists('Rmmigrate_Migration_Preflight', false)) {
+            require_once RMMIGRATE_PATH . 'includes/shared/restore-topology/bootstrap.php';
+        }
+        $map = Rmmigrate_Migration_Preflight::enrich_migration_map_paths($map, $manifest);
+
+        return Rmmigrate_Webconfig_Migration::rewrite_for_migration(
+            $raw,
+            (string) ($map['site_path']['old'] ?? '/'),
+            (string) ($map['site_path']['new'] ?? '/'),
+            !empty($manifest['subdomain_install'])
+        );
+    }
+
+    /**
+     * Keep the destination copy of Multisite Migrate active during migration file restore.
+     */
+    private function should_skip_migration_plugin_file(string $relative_under_wp_content): bool
+    {
+        if ($this->job->get_restore_type() !== Rmmigrate_Job::RESTORE_TYPE_MIGRATION) {
+            return false;
+        }
+        $rel = strtolower(ltrim(str_replace('\\', '/', $relative_under_wp_content), '/'));
+        if (strpos($rel, 'plugins/') !== 0) {
+            return false;
+        }
+        $slug = substr($rel, strlen('plugins/'));
+        $slug = strtok($slug, '/');
+        if (!is_string($slug) || $slug === '') {
+            return false;
+        }
+        $protected = array(
+            'rosenheinrich-multisite-migrate',
+            'multisite-migrate',
+            'multisite-migrate-backup-migration',
+        );
+        if (defined('RMMIGRATE_BASENAME')) {
+            $dir = dirname((string) RMMIGRATE_BASENAME);
+            if ($dir !== '.' && $dir !== '') {
+                $protected[] = strtolower($dir);
+            }
+        }
+
+        return in_array(strtolower($slug), $protected, true);
     }
 }

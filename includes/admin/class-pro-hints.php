@@ -15,6 +15,8 @@ if (!defined('ABSPATH')) {
  *     never tracks the user passively (guideline 7),
  *   - states plainly that the feature lives in a separate download.
  */
+if (!class_exists('Rmmigrate_Pro_Hints', false)) {
+
 final class Rmmigrate_Pro_Hints
 {
     use Rmmigrate_Ajax_Base;
@@ -148,4 +150,6 @@ final class Rmmigrate_Pro_Hints
     {
         return current_user_can('manage_options') || current_user_can('manage_network');
     }
+}
+
 }

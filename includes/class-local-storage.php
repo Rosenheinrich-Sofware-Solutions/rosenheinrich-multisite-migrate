@@ -60,13 +60,30 @@ class Rmmigrate_Local_Storage
         }
         $work_dir = $job->get_work_dir();
         if (!Rmmigrate_Filesystem::exists($work_dir)) {
+            self::delete_legacy_control_dir($job, $work_dir);
             return;
         }
         if (Rmmigrate_Filesystem::is_dir($work_dir)) {
             Rmmigrate_Filesystem::delete_directory($work_dir);
+            self::delete_legacy_control_dir($job, $work_dir);
             return;
         }
         Rmmigrate_Filesystem::delete($work_dir);
+        self::delete_legacy_control_dir($job, $work_dir);
+    }
+
+    /**
+     * Jobs with a random work directory still use jobs/<id>/ for lock and cancel flag files.
+     */
+    private static function delete_legacy_control_dir(Rmmigrate_Job $job, string $work_dir): void
+    {
+        $legacy = trailingslashit(Rmmigrate_Plugin::backups_dir()) . self::legacy_work_dir_rel($job->get_id());
+        if (untrailingslashit(wp_normalize_path($legacy)) === untrailingslashit(wp_normalize_path($work_dir))) {
+            return;
+        }
+        if (Rmmigrate_Filesystem::is_dir($legacy)) {
+            Rmmigrate_Filesystem::delete_directory($legacy);
+        }
     }
 
     /**
@@ -102,8 +119,45 @@ class Rmmigrate_Local_Storage
         return (string) $number . ' ' . $units[$unit];
     }
 
+    /**
+     * Relative work directory of a job (below the backups root), with trailing slash.
+     *
+     * Returns the directory recorded in progress (random suffix for new jobs) or the
+     * legacy jobs/<id>/ path for jobs that predate per-job random directory names.
+     */
+    public static function work_dir_rel(Rmmigrate_Job $job): string
+    {
+        $progress = $job->get_progress();
+        $recorded = $progress['init']['work_dir'] ?? '';
+        if (is_string($recorded) && self::is_own_work_dir_rel($recorded, $job->get_id())) {
+            return trailingslashit(ltrim($recorded, '/'));
+        }
+
+        return self::legacy_work_dir_rel($job->get_id());
+    }
+
+    /**
+     * Legacy, guessable job directory. Still holds worker lock and cancel flag files.
+     */
+    public static function legacy_work_dir_rel(int $job_id): string
+    {
+        return 'jobs/' . $job_id . '/';
+    }
+
     private static function normalize_work_dir_rel(Rmmigrate_Job $job): string
     {
-        return 'jobs/' . $job->get_id() . '/';
+        $progress = $job->get_progress();
+        $recorded = $progress['init']['work_dir'] ?? '';
+        if (is_string($recorded) && self::is_own_work_dir_rel($recorded, $job->get_id())) {
+            // Keep the recorded directory: random for new jobs, jobs/<id>/ for older ones.
+            return trailingslashit(ltrim($recorded, '/'));
+        }
+
+        return 'jobs/' . $job->get_id() . '-' . bin2hex(random_bytes(16)) . '/';
+    }
+
+    private static function is_own_work_dir_rel(string $rel, int $job_id): bool
+    {
+        return 1 === preg_match('#^/?jobs/' . $job_id . '(?:-[a-f0-9]{32})?/?$#', $rel);
     }
 }

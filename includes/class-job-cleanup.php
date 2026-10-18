@@ -417,4 +417,51 @@ class Rmmigrate_Job_Cleanup
         );
         self::schedule_purge(min(300, 5 * $attempts));
     }
+
+    public static function cancel_flag_path(int $job_id): string
+    {
+        return trailingslashit(Rmmigrate_Plugin::backups_dir()) . 'jobs/' . $job_id . '/.cancel-requested';
+    }
+
+    public static function write_cancel_flag(int $job_id): bool
+    {
+        if ($job_id <= 0) {
+            return false;
+        }
+        $job = class_exists('Rmmigrate_Job', false) ? Rmmigrate_Job::get($job_id) : null;
+        if ($job !== null && in_array($job->get_status(), array(
+            Rmmigrate_Job::STATUS_COMPLETE,
+            Rmmigrate_Job::STATUS_ERROR,
+            Rmmigrate_Job::STATUS_CANCELLED,
+        ), true)) {
+            return true;
+        }
+        $path = self::cancel_flag_path($job_id);
+        if (!Rmmigrate_Filesystem::ensure_parent_dir($path)) {
+            return false;
+        }
+        $written = Rmmigrate_Filesystem::put_contents($path, (string) time());
+
+        return $written !== false;
+    }
+
+    public static function clear_cancel_flag(int $job_id): void
+    {
+        if ($job_id <= 0) {
+            return;
+        }
+        $path = self::cancel_flag_path($job_id);
+        if (is_file($path)) {
+            wp_delete_file($path);
+        }
+    }
+
+    public static function cancel_flag_requested(int $job_id): bool
+    {
+        if ($job_id <= 0) {
+            return false;
+        }
+
+        return is_file(self::cancel_flag_path($job_id));
+    }
 }

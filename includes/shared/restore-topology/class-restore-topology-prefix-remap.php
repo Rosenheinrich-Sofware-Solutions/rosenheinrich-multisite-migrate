@@ -129,6 +129,82 @@ class Rmmigrate_Restore_Topology_Prefix_Remap
         return $report;
     }
 
+    /**
+     * @return array<string,int>
+     */
+    public static function remap_network_prefixes(PDO $pdo, string $from_base, string $to_base): array
+    {
+        $report = array(
+            'tables_renamed'         => 0,
+            'option_names_remapped'  => 0,
+            'usermeta_keys_remapped' => 0,
+        );
+        if ($from_base === '' || $to_base === '' || $from_base === $to_base) {
+            return $report;
+        }
+
+        $table_names = Rmmigrate_Topology_Db_Connection::list_tables_with_prefix($pdo, $from_base);
+        foreach ($table_names as $old_table) {
+            $old_table = (string) $old_table;
+            if ($old_table === '' || strncmp($old_table, $from_base, strlen($from_base)) !== 0) {
+                continue;
+            }
+            if (self::is_plugin_runtime_table($old_table)) {
+                continue;
+            }
+            $suffix = substr($old_table, strlen($from_base));
+            $new_table = $to_base . $suffix;
+            if ($new_table === $old_table) {
+                continue;
+            }
+            if (self::table_exists($pdo, $new_table)) {
+                if (self::is_plugin_runtime_table($new_table)) {
+                    continue;
+                }
+                $pdo->exec('DROP TABLE IF EXISTS `' . str_replace('`', '``', $new_table) . '`');
+            }
+            $pdo->exec(
+                'RENAME TABLE `' . str_replace('`', '``', $old_table) . '` TO `'
+                . str_replace('`', '``', $new_table) . '`'
+            );
+            $report['tables_renamed']++;
+        }
+
+        $usermeta = $to_base . 'usermeta';
+        $report['usermeta_keys_remapped'] = self::remap_usermeta_keys($pdo, $usermeta, $from_base, $to_base);
+
+        foreach (Rmmigrate_Topology_Db_Connection::list_tables_with_prefix($pdo, $to_base) as $table) {
+            $table = (string) $table;
+            if ($table === '' || !str_ends_with($table, 'options')) {
+                continue;
+            }
+            $report['option_names_remapped'] += self::remap_option_names($pdo, $table, $from_base, $to_base);
+        }
+
+        return $report;
+    }
+
+    /**
+     * @return array<string,int>
+     */
+    public static function remap_imported_blog_keys(PDO $pdo, string $from_prefix, string $to_prefix): array
+    {
+        $report = array(
+            'option_names_remapped'  => 0,
+            'usermeta_keys_remapped' => 0,
+        );
+        if ($from_prefix === '' || $to_prefix === '' || $from_prefix === $to_prefix) {
+            return $report;
+        }
+
+        $options = $to_prefix . 'options';
+        if (self::table_exists($pdo, $options)) {
+            $report['option_names_remapped'] = self::remap_option_names($pdo, $options, $from_prefix, $to_prefix);
+        }
+
+        return $report;
+    }
+
     public static function remap_option_names(PDO $pdo, string $table, string $from, string $to): int
     {
         if (!self::table_exists($pdo, $table)) {
@@ -136,6 +212,20 @@ class Rmmigrate_Restore_Topology_Prefix_Remap
         }
 
         $quoted_table = self::quote_table_name($table);
+        if (self::is_base_blog_table_prefix($from)) {
+            $updated = 0;
+            foreach (self::blog_bound_option_names($from) as $from_name) {
+                $to_name = $to . substr($from_name, strlen($from));
+                $stmt = $pdo->prepare(
+                    "UPDATE {$quoted_table} SET option_name = ? WHERE option_name = ?"
+                );
+                $stmt->execute(array($to_name, $from_name));
+                $updated += $stmt->rowCount();
+            }
+
+            return $updated;
+        }
+
         $from_start = strlen($from) + 1;
         $like = str_replace(array('\\', '_', '%'), array('\\\\', '\\_', '\\%'), $from) . '%';
         $stmt = $pdo->prepare(
@@ -144,6 +234,27 @@ class Rmmigrate_Restore_Topology_Prefix_Remap
         $stmt->execute(array($to, $from_start, $like, $from_start));
 
         return $stmt->rowCount();
+    }
+
+    private static function is_base_blog_table_prefix(string $prefix): bool
+    {
+        if ($prefix === '') {
+            return false;
+        }
+
+        return !preg_match('/_\d+_$/', $prefix);
+    }
+
+    /**
+     * Option keys that belong to a blog slot (not arbitrary wp_* plugin options).
+     *
+     * @return string[]
+     */
+    private static function blog_bound_option_names(string $prefix): array
+    {
+        return array(
+            $prefix . 'user_roles',
+        );
     }
 
     private static function remap_usermeta_keys(PDO $pdo, string $table, string $from, string $to): int

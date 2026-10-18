@@ -16,6 +16,7 @@ class Rmmigrate_Deactivator
         wp_clear_scheduled_hook('rmmigrate_worker_cron');
         wp_clear_scheduled_hook('rmmigrate_purge_deletes');
         wp_clear_scheduled_hook('rmmigrate_deferred_hosting_detect');
+        wp_clear_scheduled_hook('rmmigrate_storage_self_check');
         wp_clear_scheduled_hook('rmmigrate_deferred_retention_prune');
         wp_clear_scheduled_hook('rmmigrate_tick');
         delete_transient('rmmigrate_lock');
@@ -56,10 +57,6 @@ class Rmmigrate_Deactivator
 
     private static function sibling_commercial_remains_active(): bool
     {
-        if (class_exists('Rmmigrate_Pro_Edition_Exclusion', false)) {
-            return Rmmigrate_Pro_Edition_Exclusion::commercial_is_active_early();
-        }
-
         $free_basenames = array(
             'rosenheinrich-multisite-migrate/multisite-migrate.php',
             'multisite-migrate/multisite-migrate.php',

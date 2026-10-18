@@ -414,7 +414,7 @@ class Rmmigrate_Daf_Archiver
 
         if ($file_index >= $total) {
             self::verify_finalized_archive($daf_path, $byte_offset);
-            $rel = 'jobs/' . $this->job->get_id() . '/' . basename($daf_path);
+            $rel = Rmmigrate_Local_Storage::work_dir_rel($this->job) . basename($daf_path);
             $this->job->save_fields(array(
                 'local_path' => $rel,
                 'file_size'  => Rmmigrate_Filesystem::filesize($daf_path),
@@ -475,6 +475,16 @@ class Rmmigrate_Daf_Archiver
                 esc_html__('DAF archive failed its integrity check (size mismatch). The backup may be incomplete — please try again.', 'rosenheinrich-multisite-migrate')
             );
         }
+
+        if (!class_exists('Rmmigrate_Manifest', false)) {
+            require_once RMMIGRATE_PATH . 'includes/class-manifest.php';
+        }
+        if (Rmmigrate_Manifest::read_from_archive($daf_path) === null) {
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+            throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::DAF_CORRUPT),
+                esc_html__('DAF archive failed its integrity check (manifest missing). The backup may be incomplete — please try again.', 'rosenheinrich-multisite-migrate')
+            );
+        }
     }
 
     /**
@@ -515,6 +525,10 @@ class Rmmigrate_Daf_Archiver
         $htaccess = ABSPATH . '.htaccess';
         if (Rmmigrate_Filesystem::exists($htaccess)) {
             $queue[] = array('path' => $htaccess, 'archive' => 'files/.htaccess');
+        }
+        $web_config = ABSPATH . 'web.config';
+        if (Rmmigrate_Filesystem::exists($web_config)) {
+            $queue[] = array('path' => $web_config, 'archive' => 'files/web.config');
         }
         foreach ($files as $f) {
             $queue[] = array('path' => $f['path'], 'archive' => $f['archive']);

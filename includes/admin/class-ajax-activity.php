@@ -167,6 +167,17 @@ class Rmmigrate_Ajax_Activity
             );
         }
 
+        if (!Rmmigrate_Activity_Log::current_user_can_read_log($log)) {
+            self::send_ajax_error(
+                __('Permission denied.', 'rosenheinrich-multisite-migrate'),
+                403,
+                'system',
+                0,
+                array('phase' => 'log_chunk'),
+                'warning'
+            );
+        }
+
         $path = Rmmigrate_Activity_Log::logs_dir() . '/' . $log;
         if (!Rmmigrate_Filesystem::is_readable($path)) {
             self::send_ajax_error(

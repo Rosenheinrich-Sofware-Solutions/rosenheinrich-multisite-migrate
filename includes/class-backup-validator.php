@@ -192,16 +192,30 @@ class Rmmigrate_Validator
             return array('type' => 'venc');
         }
 
+        return self::probe_payload_type($path);
+    }
+
+    /**
+     * Detect archive type from magic bytes (extension may be a decrypt temp suffix).
+     *
+     * @return array{type:string}|null
+     */
+    public static function probe_payload_type(string $path): ?array
+    {
+        if (!Rmmigrate_Filesystem::is_readable($path) || Rmmigrate_Filesystem::filesize($path) < 4) {
+            return null;
+        }
+
         $head = Rmmigrate_Filesystem::get_contents($path, 0, 8);
         if ($head === false) {
             return null;
         }
 
-        if ($ext === 'daf' && $head === Rmmigrate_Daf_Archiver::MAGIC) {
+        if ($head === Rmmigrate_Daf_Archiver::MAGIC) {
             return array('type' => 'daf');
         }
 
-        if ($ext === 'zip' && strlen($head) >= 2 && $head[0] === 'P' && $head[1] === 'K') {
+        if (strlen($head) >= 2 && $head[0] === 'P' && $head[1] === 'K') {
             return array('type' => 'zip');
         }
 
@@ -317,6 +331,9 @@ class Rmmigrate_Validator
             $zip->close();
         }
         if ($type === 'daf') {
+            if ((int) Rmmigrate_Filesystem::filesize($path) < strlen(Rmmigrate_Daf_Archiver::MAGIC) + 8) {
+                return new WP_Error('mm_invalid_archive', __('Invalid backup archive.', 'rosenheinrich-multisite-migrate'));
+            }
             $head = Rmmigrate_Filesystem::get_contents($path, 0, 8);
             if ($head === false) {
                 return new WP_Error('mm_daf_open', __('Cannot open backup archive.', 'rosenheinrich-multisite-migrate'));
@@ -329,6 +346,13 @@ class Rmmigrate_Validator
                         Rmmigrate_Daf_Archiver::legacy_error_message($legacy)
                     );
                 }
+                return new WP_Error('mm_daf', __('Invalid DAF archive — file may be corrupt or incomplete.', 'rosenheinrich-multisite-migrate'));
+            }
+            if (!class_exists('Rmmigrate_Manifest', false)) {
+                require_once RMMIGRATE_PATH . 'includes/class-manifest.php';
+            }
+            $manifest = Rmmigrate_Manifest::read_from_archive($path);
+            if ($manifest === null) {
                 return new WP_Error('mm_daf', __('Invalid DAF archive — file may be corrupt or incomplete.', 'rosenheinrich-multisite-migrate'));
             }
         }

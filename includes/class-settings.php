@@ -11,6 +11,48 @@ class Rmmigrate_Settings
     /** @var array<string,mixed>|null */
     private static $cache = null;
 
+    /**
+     * Secrets and per-site credentials that never leave the site in a settings export
+     * and are ignored when a settings file is imported (e.g. the peer connection key).
+     *
+     * @return array<int,string>
+     */
+    public static function non_portable_keys(): array
+    {
+        return array('archive_passphrase');
+    }
+
+    /**
+     * Settings as written to the export file.
+     *
+     * @param array<string,mixed> $settings
+     * @return array<string,mixed>
+     */
+    public static function export_payload(array $settings): array
+    {
+        foreach (self::non_portable_keys() as $key) {
+            unset($settings[$key]);
+        }
+
+        return $settings;
+    }
+
+    /**
+     * Merge an imported settings file: known keys only, never secrets or the peer key.
+     * Mirrors the defaults() allowlist so arbitrary keys (e.g. mysqldump_path) cannot be injected.
+     *
+     * @param array<string,mixed> $current
+     * @param array<mixed>        $decoded
+     * @return array<string,mixed>
+     */
+    public static function import_merge(array $current, array $decoded): array
+    {
+        $allowed_keys = array_diff(array_keys(self::defaults()), self::non_portable_keys());
+        $safe_decoded = array_intersect_key($decoded, array_flip($allowed_keys));
+
+        return array_merge($current, $safe_decoded);
+    }
+
     public static function defaults(): array
     {
         return array(
@@ -52,6 +94,7 @@ class Rmmigrate_Settings
             'log_view_lines'            => 200,
             'admin_safe_mode'           => false,
             'local_storage_path'        => '',
+            // Legacy key kept for saved settings; protection files are always written (no toggle).
             'storage_htaccess'          => true,
             'installer_brand_name'      => '',
             'installer_brand_logo'      => '',
@@ -385,7 +428,6 @@ class Rmmigrate_Settings
                 'server_throttle'         => sanitize_key(wp_unslash($post['server_throttle'] ?? 'off')),
                 'max_build_minutes'       => max(5, (int) ($post['max_build_minutes'] ?? 90)),
                 'local_storage_path'      => sanitize_text_field(wp_unslash($post['local_storage_path'] ?? '')),
-                'storage_htaccess'        => !empty($post['storage_htaccess']),
                 'kickoff_mode'            => sanitize_key(wp_unslash($post['kickoff_mode'] ?? 'auto')),
                 'lock_mode'               => sanitize_key(wp_unslash($post['lock_mode'] ?? 'auto')),
                 'archive_mode_manual'     => !empty($post['archive_mode_manual']),

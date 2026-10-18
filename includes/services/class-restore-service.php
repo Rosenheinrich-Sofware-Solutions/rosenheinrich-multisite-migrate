@@ -310,6 +310,15 @@ final class Rmmigrate_Restore_Service
         $topology = array();
         if (is_array($manifest)) {
             $topology = self::parse_topology($params, $manifest);
+            if (is_array($topology['topology_error'] ?? null)) {
+                $topology_error = $topology['topology_error'];
+                // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Structured service exception payload.
+                throw new Rmmigrate_Service_Exception(
+                    esc_html((string) ($topology_error['message'] ?? '')),
+                    array('recovery_hint' => esc_html((string) ($topology_error['recovery_hint'] ?? ''))),
+                    sanitize_key((string) ($topology_error['gate'] ?? 'topology_subsite_on_network_target_unresolved'))
+                );
+            }
             $destination = Rmmigrate_Restore_Topology_Destination::probe_for_plugin();
             $gate_state = array_merge(
                 array(
@@ -335,12 +344,46 @@ final class Rmmigrate_Restore_Service
             }
 
             $topology = self::apply_topology_extras($topology, $params, $manifest);
+
+            if ($restore_type === Rmmigrate_Job::RESTORE_TYPE_MIGRATION) {
+                if (!class_exists('Rmmigrate_Migration_Preflight', false)) {
+                    require_once RMMIGRATE_PATH . 'includes/shared/restore-topology/bootstrap.php';
+                }
+                $migration_map = Rmmigrate_Migration_Preflight::normalize_migration_map($migration_map, $manifest);
+                if (Rmmigrate_Migration_Preflight::will_drop_network_tables($manifest)) {
+                    $topology['wp_config_policy'] = 'merge';
+                }
+            }
         }
 
         $safety_id = (int) ($params['safety_job_id'] ?? 0);
         $use_safety_snapshot = array_key_exists('safety_snapshot', $params)
             ? !empty($params['safety_snapshot'])
             : true;
+        if (is_array($manifest)) {
+            if (!class_exists('Rmmigrate_Migration_Preflight', false)) {
+                require_once RMMIGRATE_PATH . 'includes/shared/restore-topology/bootstrap.php';
+            }
+            if (Rmmigrate_Migration_Preflight::will_drop_network_tables($manifest)) {
+                $use_safety_snapshot = true;
+                if (array_key_exists('safety_snapshot', $params) && empty($params['safety_snapshot'])) {
+                    if ($safety_id <= 0 || !Rmmigrate_Safety_Snapshot::is_complete($safety_id)) {
+                        // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Structured service exception payload.
+                        throw new Rmmigrate_Service_Exception(
+                            esc_html(__('Full network migration requires a safety backup before replacing database tables.', 'rosenheinrich-multisite-migrate')),
+                            array(
+                                'recovery_hint' => esc_html__(
+                                    'Enable “Create safety backup before restore” and wait for it to complete.',
+                                    'rosenheinrich-multisite-migrate'
+                                ),
+                            ),
+                            sanitize_key(Rmmigrate_Error_Codes::VALIDATION)
+                        );
+                    }
+                    $use_safety_snapshot = false;
+                }
+            }
+        }
         if ($use_safety_snapshot && $safety_id <= 0) {
             $safety_id = Rmmigrate_Safety_Snapshot::create_before_restore($source, $mode);
             if ($safety_id <= 0) {
@@ -375,14 +418,44 @@ final class Rmmigrate_Restore_Service
             );
         }
 
+        if ($restore_type === Rmmigrate_Job::RESTORE_TYPE_MIGRATION && is_array($manifest)) {
+            if (!class_exists('Rmmigrate_Migration_Preflight', false)) {
+                require_once RMMIGRATE_PATH . 'includes/shared/restore-topology/bootstrap.php';
+            }
+            $migration_map = Rmmigrate_Migration_Preflight::normalize_migration_map($migration_map, $manifest);
+            $preflight = Rmmigrate_Migration_Preflight::validate_before_restore(
+                $manifest,
+                $migration_map,
+                array(
+                    'restore_type'    => $restore_type,
+                    'safety_snapshot' => $use_safety_snapshot,
+                    'safety_job_id'   => $safety_id,
+                )
+            );
+            if ($preflight !== null) {
+                // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Structured service exception payload.
+                throw new Rmmigrate_Service_Exception(
+                    esc_html((string) $preflight['message']),
+                    array(
+                        'recovery_hint' => esc_html((string) $preflight['recovery_hint']),
+                    ),
+                    sanitize_key((string) $preflight['code'])
+                );
+            }
+        }
+
         $archive_passphrase = (string) ($params['archive_passphrase'] ?? '');
-        $job = Rmmigrate_Job::create_restore($source_id, $mode, array(
+        $create_options = array(
             'restore_type'         => $restore_type,
             'migration_map'      => $migration_map,
             'archive_passphrase' => $archive_passphrase,
             'topology'           => $topology,
             'safety_job_id'      => $safety_id,
-        ));
+        );
+        if (array_key_exists('user_merge', $params)) {
+            $create_options['user_merge'] = !empty($params['user_merge']);
+        }
+        $job = Rmmigrate_Job::create_restore($source_id, $mode, $create_options);
 
         $kick = !empty($params['kick_worker']);
         if ($kick) {
@@ -493,6 +566,11 @@ final class Rmmigrate_Restore_Service
             $topology['import_skip_tables'] = Rmmigrate_Restore_Topology_Ui::normalize_import_skip_tables(
                 $manifest,
                 array_map('strval', $skip)
+            );
+        } elseif (!empty($topology['import_skip_tables']) && is_array($topology['import_skip_tables'])) {
+            $topology['import_skip_tables'] = Rmmigrate_Restore_Topology_Ui::normalize_import_skip_tables(
+                $manifest,
+                array_map('strval', $topology['import_skip_tables'])
             );
         }
 

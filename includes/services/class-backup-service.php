@@ -17,7 +17,16 @@ final class Rmmigrate_Backup_Service
         $triggered_by = (string) ($input['triggered_by'] ?? 'manual');
         $is_cron = ($triggered_by === 'cron');
 
-        $scope = (string) ($input['scope'] ?? Rmmigrate_Multisite_Scope::SCOPE_NETWORK);
+        $scope = (string) ($input['scope'] ?? '');
+        if ($scope === '') {
+            if (!is_multisite()) {
+                $scope = Rmmigrate_Multisite_Scope::SCOPE_NETWORK;
+            } elseif (!$is_cron && !current_user_can('manage_network')) {
+                $scope = Rmmigrate_Multisite_Scope::SCOPE_SUBSITE;
+            } else {
+                $scope = Rmmigrate_Multisite_Scope::SCOPE_NETWORK;
+            }
+        }
         if (!is_multisite()) {
             $scope = Rmmigrate_Multisite_Scope::SCOPE_NETWORK;
         } elseif (!$is_cron && !current_user_can('manage_network') && $scope !== Rmmigrate_Multisite_Scope::SCOPE_SUBSITE) {
@@ -209,7 +218,20 @@ final class Rmmigrate_Backup_Service
             throw Rmmigrate_Service_Exception::not_found(esc_html(__('Job not found.', 'rosenheinrich-multisite-migrate')));
         }
         Rmmigrate_Job_Preflight::assert_can_view_job($job);
-        $job->cancel();
+        if ($job_id > 0 && class_exists('Rmmigrate_Job_Cleanup', false)) {
+            if (!Rmmigrate_Job_Cleanup::write_cancel_flag($job_id)) {
+                if (Rmmigrate_Runner::job_worker_is_idle($job_id)) {
+                    $job->cancel();
+                    return;
+                }
+                // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Structured service exception payload.
+                throw new Rmmigrate_Service_Exception(
+                    esc_html(__('Could not request job cancellation on this host.', 'rosenheinrich-multisite-migrate')),
+                    array(),
+                    sanitize_key(Rmmigrate_Error_Codes::PERMISSION_DENIED)
+                );
+            }
+        }
     }
 
     /**

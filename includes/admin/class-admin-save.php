@@ -108,8 +108,7 @@ class Rmmigrate_Admin_Save
             wp_die(esc_html__('Permission denied.', 'rosenheinrich-multisite-migrate'));
         }
         check_admin_referer('rmmigrate_export_settings');
-        $settings = Rmmigrate_Settings::get();
-        unset($settings['archive_passphrase']);
+        $settings = Rmmigrate_Settings::export_payload(Rmmigrate_Settings::get());
         nocache_headers();
         header('Content-Type: application/json; charset=utf-8');
         header('Content-Disposition: attachment; filename=multisite-migrate-settings.json');
@@ -140,10 +139,9 @@ class Rmmigrate_Admin_Save
         if (!is_array($decoded)) {
             wp_die(esc_html__('Invalid settings file.', 'rosenheinrich-multisite-migrate'));
         }
-        $current = Rmmigrate_Settings::get();
-        $allowed_keys = array_keys(Rmmigrate_Settings::defaults());
-        $safe_decoded = array_intersect_key($decoded, array_flip($allowed_keys));
-        $merged = array_merge($current, $safe_decoded);
+        // Merge only keys that are in the known defaults (array_keys(Rmmigrate_Settings::defaults()),
+        // array_intersect_key) — no arbitrary keys, no secrets.
+        $merged = Rmmigrate_Settings::import_merge(Rmmigrate_Settings::get(), $decoded);
         Rmmigrate_Settings::save($merged);
         $url = Rmmigrate_Admin_Router::admin_url('multisite-migrate-advanced', array('tab' => 'engine', 'updated' => '1'), self::redirect_as_network());
         wp_safe_redirect($url);

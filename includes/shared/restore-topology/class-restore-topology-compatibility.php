@@ -99,6 +99,7 @@ class Rmmigrate_Restore_Topology_Compatibility
      */
     public static function validate_topology(array $state, array $manifest, array $destination, bool $installer_context = false): ?array
     {
+        $state = self::hydrate_subsite_on_network_state($state);
         $restore_mode = Rmmigrate_Restore_Topology_Manifest::restore_mode($manifest, $state);
         if ($restore_mode === 'subsite_on_network') {
             $map = is_array($state['site_owr_map'] ?? null) ? $state['site_owr_map'] : array();
@@ -107,6 +108,23 @@ class Rmmigrate_Restore_Topology_Compatibility
                     'topology_subsite_on_network_map',
                     __('Subsite-on-network import requires a target blog mapping (blog ID and URL).', 'rosenheinrich-multisite-migrate'),
                     __('On the deploy step, choose “Import as subsite on this network” and enter the target URL (and optional existing blog ID).', 'rosenheinrich-multisite-migrate')
+                );
+            }
+            $entry = is_array($map[0] ?? null) ? $map[0] : array();
+            $target_blog_id = (int) ($entry['target_blog_id'] ?? 0);
+            if (trim((string) ($entry['target_url'] ?? '')) === '' && $target_blog_id <= 0) {
+                return self::gate(
+                    'topology_subsite_on_network_map',
+                    __('Subsite-on-network import requires a target blog mapping (blog ID and URL).', 'rosenheinrich-multisite-migrate'),
+                    __('On the deploy step, choose “Import as subsite on this network” and enter the target URL (and optional existing blog ID).', 'rosenheinrich-multisite-migrate')
+                );
+            }
+            $source_blog_id = (int) ($manifest['blog_id'] ?? 0);
+            if ($target_blog_id === 1) {
+                return self::gate(
+                    'topology_subsite_on_network_main',
+                    __('Subsite backups cannot target the network main site (blog 1). Choose another blog slot or use a network-scope backup.', 'rosenheinrich-multisite-migrate'),
+                    __('On the deploy step, pick an existing subsite URL/blog ID other than the main site, or restore a full network backup when migrating the entire installation.', 'rosenheinrich-multisite-migrate')
                 );
             }
 
@@ -134,6 +152,9 @@ class Rmmigrate_Restore_Topology_Compatibility
         $restore_network = Rmmigrate_Restore_Topology_Manifest::restore_as_multisite($manifest);
 
         if ($backup_subsite) {
+            if (self::allows_subsite_on_network_slot_restore($state, $manifest, $destination)) {
+                return null;
+            }
             if (self::allows_subsite_full_overwrite($state, $manifest, $destination)) {
                 return null;
             }
@@ -158,6 +179,16 @@ class Rmmigrate_Restore_Topology_Compatibility
         }
 
         if (!$restore_network) {
+            $topology_import = sanitize_key((string) ($state['topology_import'] ?? ''));
+            $resolved_mode = Rmmigrate_Restore_Topology_Manifest::restore_mode($manifest, $state);
+            if (
+                $topology_import === 'subsite_on_network'
+                || (string) ($state['restore_mode'] ?? '') === 'subsite_on_network'
+                || $resolved_mode === 'subsite_on_network'
+            ) {
+                return null;
+            }
+
             return self::gate(
                 'topology_to_network',
                 __('The destination is already a WordPress multisite network. This backup cannot be imported as a subsite on that network yet.', 'rosenheinrich-multisite-migrate'),
@@ -194,6 +225,9 @@ class Rmmigrate_Restore_Topology_Compatibility
         if ($restore_mode === 'subsite_on_network') {
             return false;
         }
+        if (self::allows_subsite_on_network_slot_restore($state, $manifest, $destination)) {
+            return false;
+        }
 
         return true;
     }
@@ -214,6 +248,82 @@ class Rmmigrate_Restore_Topology_Compatibility
         $db_action = (string) ($state['db_action'] ?? '');
 
         return $db_action === 'empty';
+    }
+
+    /**
+     * Same-server overwrite of a subsite backup into its existing network slot.
+     *
+     * @param array<string,mixed> $state
+     * @param array<string,mixed> $manifest
+     * @param array<string,mixed> $destination
+     */
+    /**
+     * @param array<string,mixed> $state
+     * @return array<string,mixed>
+     */
+    private static function hydrate_subsite_on_network_state(array $state): array
+    {
+        $topology_import = sanitize_key((string) ($state['topology_import'] ?? ''));
+        if ($topology_import === 'subsite_on_network' && (string) ($state['restore_mode'] ?? '') === '') {
+            $state['restore_mode'] = 'subsite_on_network';
+        }
+        if (
+            (string) ($state['restore_mode'] ?? '') !== 'subsite_on_network'
+            && $topology_import !== 'subsite_on_network'
+        ) {
+            return $state;
+        }
+        $map = is_array($state['site_owr_map'] ?? null) ? $state['site_owr_map'] : array();
+        if ($map !== array()) {
+            return $state;
+        }
+        $target_url = esc_url_raw((string) ($state['topology_target_url'] ?? ''));
+        $target_blog_id = (int) ($state['topology_target_blog_id'] ?? $state['target_blog_id'] ?? 0);
+        if ($target_url === '' && $target_blog_id <= 0) {
+            return $state;
+        }
+        $state['site_owr_map'] = array(
+            array(
+                'target_blog_id' => $target_blog_id,
+                'target_url'     => $target_url,
+            ),
+        );
+
+        return $state;
+    }
+
+    public static function allows_subsite_on_network_slot_restore(array $state, array $manifest, array $destination): bool
+    {
+        if (empty($destination['is_multisite'])) {
+            return false;
+        }
+        if (($manifest['scope'] ?? '') !== 'subsite') {
+            return false;
+        }
+        $source_blog = (int) ($manifest['blog_id'] ?? 0);
+        if ($source_blog <= 0) {
+            return false;
+        }
+        $target_blog = (int) ($state['target_blog_id'] ?? 0);
+
+        return $target_blog > 0 && $target_blog === $source_blog;
+    }
+
+    /**
+     * Restore into an existing network blog slot (never rewrite live wp-config / server config).
+     *
+     * @param array<string,mixed> $state
+     * @param array<string,mixed> $manifest
+     * @param array<string,mixed> $destination
+     */
+    public static function is_network_slot_restore(array $state, array $manifest, array $destination): bool
+    {
+        $restore_mode = Rmmigrate_Restore_Topology_Manifest::restore_mode($manifest, $state);
+        if ($restore_mode === 'subsite_on_network' || $restore_mode === 'network_to_subsite') {
+            return true;
+        }
+
+        return self::allows_subsite_on_network_slot_restore($state, $manifest, $destination);
     }
 
     /**

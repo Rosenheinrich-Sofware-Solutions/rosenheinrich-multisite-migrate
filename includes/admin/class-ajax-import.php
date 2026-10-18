@@ -114,17 +114,15 @@ class Rmmigrate_Ajax_Import
             define('WP_IMPORTING', true);
         }
 
+        $user_id = (int) get_current_user_id();
         $upload_id = Rmmigrate_Request_Input::post_text('upload_id');
         $filename = Rmmigrate_Request_Input::post_file_name('filename', 'backup.zip');
         $chunk_index = Rmmigrate_Request_Input::post_int('chunk_index');
         $total_chunks = Rmmigrate_Request_Input::post_int('total_chunks', 1);
+        $file_total_bytes = Rmmigrate_Request_Input::post_int('file_total_bytes');
         $err_ctx = array('upload_id' => $upload_id, 'filename' => $filename, 'source' => 'local_chunk');
 
-        if ($total_chunks < 1) {
-            self::import_error(__('Invalid chunk count.', 'rosenheinrich-multisite-migrate'), $err_ctx);
-        }
-
-        if ($filename === '' || !Rmmigrate_Path_Safety::is_valid_upload_id($upload_id)) {
+        if ($filename === '') {
             self::import_error(__('Invalid upload.', 'rosenheinrich-multisite-migrate'), $err_ctx);
         }
 
@@ -133,10 +131,35 @@ class Rmmigrate_Ajax_Import
             self::import_error(__('Invalid file extension.', 'rosenheinrich-multisite-migrate'), $err_ctx);
         }
 
+        if ($chunk_index === 0 && $upload_id === '') {
+            $upload_id = Rmmigrate_Import_Chunk_Session_Core::mint_upload_id($user_id);
+        }
+        $err_ctx['upload_id'] = $upload_id;
+
+        if (!Rmmigrate_Import_Chunk_Session_Core::is_valid_upload_id($upload_id)) {
+            self::import_error(__('Invalid upload.', 'rosenheinrich-multisite-migrate'), $err_ctx);
+        }
+
+        $session_result = Rmmigrate_Import_Chunk_Session_Core::begin_or_validate_session(
+            $user_id,
+            $upload_id,
+            $file_total_bytes,
+            $total_chunks,
+            $filename,
+            $ext,
+            $chunk_index === 0
+        );
+        if (empty($session_result['ok'])) {
+            self::import_chunk_session_error((string) ($session_result['code'] ?? 'unknown'), $err_ctx);
+        }
+        /** @var array{file_total_bytes:int,total_chunks:int} $import_session */
+        $import_session = $session_result['session'];
+
         Rmmigrate_Plugin::ensure_backup_root();
         $import_dir = Rmmigrate_Plugin::backups_dir() . '/imports/';
         wp_mkdir_p($import_dir);
-        $part_path = $import_dir . $upload_id . '.part';
+        $storage_base = self::import_chunk_storage_basename($user_id, $upload_id);
+        $part_path = $import_dir . $storage_base . '.part';
         if (!Rmmigrate_Path_Safety::path_within_dir($import_dir, $part_path)) {
             self::import_error(__('Invalid upload path.', 'rosenheinrich-multisite-migrate'), $err_ctx);
         }
@@ -190,12 +213,25 @@ class Rmmigrate_Ajax_Import
         }
         $bytes_written = (int) $append;
 
+        if (Rmmigrate_Import_Chunk_Session_Core::would_exceed_total($import_session, $bytes_written)) {
+            Rmmigrate_Filesystem::delete($part_path);
+            Rmmigrate_Import_Chunk_Session_Core::delete_session($user_id, $upload_id);
+            self::import_error(__('Uploaded data exceeds the declared archive size.', 'rosenheinrich-multisite-migrate'), $err_ctx);
+        }
+
         if ($chunk_index + 1 < $total_chunks) {
             wp_send_json_success(array(
                 'complete'      => false,
                 'chunk'         => $chunk_index,
                 'bytes_written' => $bytes_written,
+                'upload_id'     => $upload_id,
             ));
+        }
+
+        if (!Rmmigrate_Import_Chunk_Session_Core::validate_completed_size($import_session, $bytes_written)) {
+            Rmmigrate_Filesystem::delete($part_path);
+            Rmmigrate_Import_Chunk_Session_Core::delete_session($user_id, $upload_id);
+            self::import_error(__('Incomplete upload: assembled size does not match the declared archive size.', 'rosenheinrich-multisite-migrate'), $err_ctx);
         }
 
         $disk = Rmmigrate_Validator::validate_import_disk_space($part_path);
@@ -204,7 +240,7 @@ class Rmmigrate_Ajax_Import
             self::import_error($disk->get_error_message(), array_merge($err_ctx, array('phase' => 'disk')));
         }
 
-        $final = $import_dir . $upload_id . '.' . $ext;
+        $final = $import_dir . $storage_base . '.' . $ext;
         if (!Rmmigrate_Path_Safety::path_within_dir($import_dir, $final)) {
             Rmmigrate_Filesystem::delete($part_path);
             self::import_error(__('Invalid upload path.', 'rosenheinrich-multisite-migrate'), $err_ctx);
@@ -219,13 +255,37 @@ class Rmmigrate_Ajax_Import
                 $final,
                 Rmmigrate_Request_Input::post_text('archive_passphrase')
             );
-            wp_send_json_success(array_merge($result, array('complete' => true)));
+            Rmmigrate_Import_Chunk_Session_Core::delete_session($user_id, $upload_id);
+            wp_send_json_success(array_merge($result, array('complete' => true, 'upload_id' => $upload_id)));
         } catch (Rmmigrate_Service_Exception $e) {
             if (Rmmigrate_Filesystem::exists($final)) {
                 Rmmigrate_Filesystem::delete($final);
             }
+            Rmmigrate_Import_Chunk_Session_Core::delete_session($user_id, $upload_id);
             self::import_error($e->getMessage(), array_merge($err_ctx, array('phase' => 'validate')));
         }
+    }
+
+    private static function import_chunk_storage_basename(int $user_id, string $upload_id): string
+    {
+        return max(0, $user_id) . '_' . $upload_id;
+    }
+
+    /**
+     * @param array<string,mixed> $err_ctx
+     */
+    private static function import_chunk_session_error(string $code, array $err_ctx): void
+    {
+        if ($code === 'file_total_bytes') {
+            self::import_error(__('Invalid or missing archive size for chunked upload.', 'rosenheinrich-multisite-migrate'), $err_ctx);
+        }
+        if ($code === 'total_chunks') {
+            self::import_error(__('Invalid chunk count.', 'rosenheinrich-multisite-migrate'), $err_ctx);
+        }
+        if ($code === 'session_missing' || $code === 'session_mismatch') {
+            self::import_error(__('Upload session expired or does not match. Restart the import.', 'rosenheinrich-multisite-migrate'), $err_ctx);
+        }
+        self::import_error(__('Invalid upload.', 'rosenheinrich-multisite-migrate'), $err_ctx);
     }
 
     /**
@@ -459,6 +519,7 @@ class Rmmigrate_Ajax_Import
             $result = Rmmigrate_Import_Service::import_and_restore($job_id);
             wp_send_json_success($result);
         } catch (Rmmigrate_Service_Exception $e) {
+            Rmmigrate_Logger::log('Best-effort operation failed: ' . $e->getMessage());
             self::restore_error($e->getMessage(), $job_id, array('phase' => 'start', 'service_code' => $e->get_code_key()));
         }
     }

@@ -16,6 +16,8 @@ class Rmmigrate_Manifest
 
     const SIGN_CONTEXT = 'manifest-sign';
 
+    const SEAL_CONTEXT = 'rmmigrate-site-seal-v1';
+
     /**
      * @return array<string,mixed>
      */
@@ -64,7 +66,15 @@ class Rmmigrate_Manifest
             $home_url = $is_network && is_multisite()
                 ? network_home_url()
                 : ($primary_blog_id > 0 ? get_home_url($primary_blog_id) : home_url());
-            $db_prefix = $primary_blog_id > 0 ? $wpdb->get_blog_prefix($primary_blog_id) : $wpdb->prefix;
+            if (in_array($job_scope, array(
+                Rmmigrate_Multisite_Scope::SCOPE_NETWORK,
+                Rmmigrate_Multisite_Scope::SCOPE_NETWORK_FILTERED,
+                Rmmigrate_Multisite_Scope::SCOPE_NETWORK_INCLUDED,
+            ), true)) {
+                $db_prefix = $wpdb->base_prefix;
+            } else {
+                $db_prefix = $primary_blog_id > 0 ? $wpdb->get_blog_prefix($primary_blog_id) : $wpdb->prefix;
+            }
             $manifest_blog_id = self::manifest_blog_id($job, $primary_blog_id);
 
             $manifest = array(
@@ -98,6 +108,7 @@ class Rmmigrate_Manifest
                 'excluded_blogs' => $job->get_excluded_blogs(),
                 'included_blogs' => $job->get_included_blogs(),
                 'archive_file'   => $zip_name,
+                'database_sha256' => self::database_digest($job),
                 'root_files'     => self::root_files_list(),
                 'rmmigrate_edition_tier' => apply_filters('rmmigrate_manifest_tier', 'free'),
                 'sql_import_transactions'        => Rmmigrate_Engine_Config::sql_import_transactions(),
@@ -359,13 +370,25 @@ class Rmmigrate_Manifest
         return hash_hmac('sha256', $archive_name . '|' . $unsigned_json, wp_salt('auth'));
     }
 
-    public static function installer_entry_basename(string $install_token): string
+    /**
+     * Random installer entry filename. The name no longer derives from the install token,
+     * so a published installer URL reveals nothing about the token.
+     *
+     * @param string $install_token Unused; kept for backward-compatible calls.
+     */
+    public static function installer_entry_basename(string $install_token = ''): string
     {
-        $slug = (string) preg_replace('/[^a-z0-9]/i', '', substr($install_token, 0, 12));
-        if ($slug === '') {
-            $slug = bin2hex(random_bytes(6));
-        }
-        return 'mm-installer-' . strtolower($slug) . '.php';
+        unset($install_token);
+
+        return 'mm-installer-' . bin2hex(random_bytes(8)) . '.php';
+    }
+
+    /**
+     * True for names produced by installer_entry_basename() (not the legacy token-derived ones).
+     */
+    public static function is_random_installer_entry_basename(string $name): bool
+    {
+        return 1 === preg_match('/^mm-installer-[a-f0-9]{16}\.php$/', $name);
     }
 
     public static function sign(array $manifest, string $archive_name): array
@@ -413,11 +436,56 @@ class Rmmigrate_Manifest
     }
 
     /**
+     * SHA-256 of the job's database.sql (empty when the dump does not exist yet).
+     */
+    public static function database_digest(Rmmigrate_Job $job): string
+    {
+        $progress = $job->get_progress();
+        if (empty($job->data['id']) && empty($progress['init']['work_dir'])) {
+            return '';
+        }
+        $sql_path = trailingslashit($job->get_work_dir()) . 'database.sql';
+        if (!is_file($sql_path) || !is_readable($sql_path)) {
+            return '';
+        }
+        $digest = hash_file('sha256', $sql_path);
+
+        return is_string($digest) ? $digest : '';
+    }
+
+    /**
+     * Name-independent seal: proves the manifest was produced on this installation
+     * (keyed by the site's auth salt), even after the archive was renamed on upload.
+     *
+     * @param array<string,mixed> $manifest
+     */
+    public static function site_seal(array $manifest): string
+    {
+        unset($manifest['site_seal']);
+
+        return hash_hmac('sha256', self::SEAL_CONTEXT . '|' . self::unsigned_json($manifest), wp_salt('auth'));
+    }
+
+    /**
+     * @param array<string,mixed> $manifest
+     */
+    public static function verify_site_seal(array $manifest): bool
+    {
+        $seal = $manifest['site_seal'] ?? '';
+        if (!is_string($seal) || !preg_match('/^[a-f0-9]{64}$/i', $seal)) {
+            return false;
+        }
+
+        return hash_equals(self::site_seal($manifest), strtolower($seal));
+    }
+
+    /**
      * @param array<string,mixed> $manifest
      */
     public static function write(string $path, array $manifest, string $archive_name = ''): void
     {
         if ($archive_name !== '') {
+            $manifest['site_seal'] = self::site_seal($manifest);
             $manifest = self::sign($manifest, $archive_name);
         }
         Rmmigrate_Filesystem::put_contents($path, wp_json_encode($manifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));

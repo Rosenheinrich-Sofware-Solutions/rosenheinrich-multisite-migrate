@@ -371,8 +371,14 @@ class Rmmigrate_Zip_Extract_Core
 
             $name = $entry['name'];
             if ( Rmmigrate_Path_Safety_Core::resolve_extract_dest( $extract_dir, $name ) === null ) {
-                $extracted++;
-                continue;
+                self::raise_pipeline(
+                    Rmmigrate_Error_Codes::EXTRACT_FAILED,
+                    sprintf(
+                        /* translators: %s: zip entry path */
+                        __( 'Archive entry "%s" is not safe to extract.', 'rosenheinrich-multisite-migrate' ),
+                        $name
+                    )
+                );
             }
 
             if ( $zip->extractTo( $extract_dir, array( $name ) ) === false ) {

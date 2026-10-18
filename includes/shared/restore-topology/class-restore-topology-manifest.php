@@ -50,6 +50,14 @@ class Rmmigrate_Restore_Topology_Manifest
             return 'standalone';
         }
         if (self::restore_as_multisite($manifest)) {
+            $scope = (string) ($manifest['scope'] ?? '');
+            if ($scope === 'network_included') {
+                return 'network_included';
+            }
+            if ($scope === 'network_filtered') {
+                return 'network_filtered';
+            }
+
             return 'network';
         }
 

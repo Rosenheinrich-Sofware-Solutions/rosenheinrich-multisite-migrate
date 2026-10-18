@@ -17,6 +17,10 @@ class Rmmigrate_Restore_Topology_Wp_Config
             return 'nothing';
         }
 
+        if (Rmmigrate_Restore_Topology_Compatibility::is_network_slot_restore($state, $manifest, $destination)) {
+            return 'keep';
+        }
+
         if (empty($destination['has_wp_config'])) {
             return 'keep';
         }
@@ -109,13 +113,19 @@ class Rmmigrate_Restore_Topology_Wp_Config
             return false;
         }
 
+        $manifest = is_array($state['manifest'] ?? null) ? $state['manifest'] : array();
+        $destination = is_array($state['destination'] ?? null) ? $state['destination'] : array();
+        if (!empty($destination['is_multisite'])
+            && Rmmigrate_Restore_Topology_Compatibility::is_network_slot_restore($state, $manifest, $destination)) {
+            return false;
+        }
+
         $dest_path = rtrim($abspath, '/\\') . '/wp-config.php';
         $exists = is_file($dest_path);
         if ($exists && $policy === 'keep') {
             return false;
         }
 
-        $manifest = is_array($state['manifest'] ?? null) ? $state['manifest'] : array();
         $prefix = self::resolve_table_prefix($state, $manifest);
 
         if ($policy === 'merge' && ($exists || is_file($backup_wp_config_path))) {
@@ -307,8 +317,12 @@ class Rmmigrate_Restore_Topology_Wp_Config
         string $prefix,
         string $destination_contents = ''
     ): string {
-        if (!Rmmigrate_Restore_Topology_Manifest::restore_as_multisite($manifest)
-            || Rmmigrate_Restore_Topology_Manifest::is_subsite_standalone_restore($manifest)) {
+        $destination = is_array($state['destination'] ?? null) ? $state['destination'] : array();
+        $slot_restore = !empty($destination['is_multisite'])
+            && Rmmigrate_Restore_Topology_Compatibility::is_network_slot_restore($state, $manifest, $destination);
+        if (!$slot_restore
+            && (!Rmmigrate_Restore_Topology_Manifest::restore_as_multisite($manifest)
+                || Rmmigrate_Restore_Topology_Manifest::is_subsite_standalone_restore($manifest))) {
             $contents = Rmmigrate_Restore_Topology_Standalone::strip_multisite_wp_config($contents);
         }
 
@@ -340,7 +354,7 @@ class Rmmigrate_Restore_Topology_Wp_Config
             }
         }
 
-        if (in_array('table_prefix', $merge_constants, true)) {
+        if (in_array('table_prefix', $merge_constants, true) && !$slot_restore) {
             $assignment = '$table_prefix = \'' . self::escape_wp_config_single_quoted($prefix) . '\';';
             if (preg_match('/\$table_prefix\s*=/', $contents)) {
                 $contents = self::preg_replace_literal(

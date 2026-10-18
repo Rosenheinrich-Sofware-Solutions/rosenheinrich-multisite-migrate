@@ -124,7 +124,7 @@ final class Rmmigrate_Import_Service
                     new WP_Error('mm_passphrase', __('Enter the archive passphrase for encrypted .venc files.', 'rosenheinrich-multisite-migrate'))
                 );
             }
-            $plain_path = $path . '.import-probe.tmp';
+            $plain_path = $path . '.import-probe.daf';
             try {
                 Rmmigrate_Archive_Encryption::set_runtime_passphrase($archive_passphrase);
                 $decrypted = Rmmigrate_Archive_Encryption::decrypt_file($path, $plain_path);

@@ -346,6 +346,179 @@ class Rmmigrate_Multisite_Scope
     }
 
     /**
+     * Database views in the same prefix scope as {@see get_tables()}.
+     *
+     * @return string[]
+     */
+    public function get_export_views(): array
+    {
+        global $wpdb;
+
+        $cache_key = 'mm_all_views_' . md5((defined('DB_NAME') ? DB_NAME : '') . '|' . $wpdb->base_prefix);
+        $cache_ttl = Rmmigrate_Job::get_active() !== null ? 0 : 3600;
+        $all = $cache_ttl > 0 ? wp_cache_get($cache_key, 'rmmigrate') : false;
+        if ($all === false) {
+            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery -- Plugin: list views for scoped export.
+            $all = $wpdb->get_col("SHOW FULL TABLES WHERE Table_type = 'VIEW'");
+            if ($cache_ttl > 0) {
+                wp_cache_set($cache_key, $all, 'rmmigrate', $cache_ttl);
+            }
+        }
+        if (!is_array($all)) {
+            return array();
+        }
+
+        $views = $this->views_for_export_scope($all);
+
+        $settings = Rmmigrate_Settings::get();
+
+        return self::apply_table_excludes(array_values(array_unique($views)), $this->resolve_table_exclude_patterns($settings));
+    }
+
+    /**
+     * @param string[] $all_views
+     * @return string[]
+     */
+    private function views_for_export_scope(array $all_views): array
+    {
+        global $wpdb;
+
+        if ($this->scope === self::SCOPE_NETWORK) {
+            return $this->views_with_base_prefix($all_views);
+        }
+
+        if ($this->scope === self::SCOPE_NETWORK_FILTERED) {
+            return $this->views_for_network_filtered($all_views);
+        }
+
+        if ($this->scope === self::SCOPE_NETWORK_INCLUDED) {
+            if ($this->included_blog_ids === array()) {
+                return array();
+            }
+            $merged = array();
+            foreach ($this->included_blog_ids as $blog_id) {
+                $merged = array_merge($merged, $this->views_for_subsite_blog($all_views, (int) $blog_id));
+            }
+
+            return array_values(array_unique($merged));
+        }
+
+        $blog_id = $this->blog_id > 0 ? $this->blog_id : (int) get_current_blog_id();
+
+        return $this->views_for_subsite_blog($all_views, $blog_id);
+    }
+
+    /**
+     * @param string[] $all_views
+     * @return string[]
+     */
+    private function views_with_base_prefix(array $all_views): array
+    {
+        global $wpdb;
+        $base = (string) $wpdb->base_prefix;
+        $views = array();
+        foreach ($all_views as $view) {
+            $view = (string) $view;
+            if ($view !== '' && strpos($view, $base) === 0) {
+                $views[] = $view;
+            }
+        }
+
+        return $views;
+    }
+
+    /**
+     * @param string[] $all_views
+     * @return string[]
+     */
+    private function views_for_network_filtered(array $all_views): array
+    {
+        global $wpdb;
+        $base = (string) $wpdb->base_prefix;
+        $excluded_blog_ids = array_fill_keys($this->excluded_blog_ids, true);
+        foreach ($this->get_tables_to_filter() as $table) {
+            if (preg_match('/^' . preg_quote($base, '/') . '(\d+)_/', (string) $table, $matches)) {
+                $excluded_blog_ids[(int) $matches[1]] = true;
+            }
+        }
+
+        $views = array();
+        foreach ($this->views_with_base_prefix($all_views) as $view) {
+            if (preg_match('/^' . preg_quote($base, '/') . '(\d+)_/', $view, $matches)) {
+                if (!empty($excluded_blog_ids[(int) $matches[1]])) {
+                    continue;
+                }
+            } elseif (!empty($excluded_blog_ids[1])) {
+                if (
+                    strpos($view, $base) === 0
+                    && !preg_match('/^' . preg_quote($base, '/') . '\d+_/', $view)
+                ) {
+                    continue;
+                }
+            }
+            $views[] = $view;
+        }
+
+        return $views;
+    }
+
+    /**
+     * @param string[] $all_views
+     */
+    private function views_for_subsite_blog(array $all_views, int $blog_id): array
+    {
+        global $wpdb;
+        $prefix = (string) $wpdb->get_blog_prefix($blog_id);
+        $base = (string) $wpdb->base_prefix;
+        $views = array();
+        foreach ($all_views as $view) {
+            $view = (string) $view;
+            if ($view === '' || strpos($view, $prefix) !== 0) {
+                continue;
+            }
+            if ($prefix === $base && preg_match('/^' . preg_quote($base, '/') . '\d+_/', $view)) {
+                continue;
+            }
+            $views[] = $view;
+        }
+
+        return $views;
+    }
+
+    /**
+     * @return string[]
+     */
+    private function export_table_prefixes(): array
+    {
+        global $wpdb;
+
+        if ($this->scope === self::SCOPE_SUBSITE) {
+            $blog_id = $this->blog_id > 0 ? $this->blog_id : (int) get_current_blog_id();
+            if ($blog_id > 1) {
+                return array((string) $wpdb->get_blog_prefix($blog_id));
+            }
+
+            return array((string) $wpdb->base_prefix);
+        }
+
+        if ($this->scope === self::SCOPE_NETWORK_INCLUDED) {
+            $prefixes = array();
+            foreach ($this->included_blog_ids as $blog_id) {
+                $blog_id = (int) $blog_id;
+                if ($blog_id > 1) {
+                    $prefixes[] = (string) $wpdb->get_blog_prefix($blog_id);
+                } else {
+                    $prefixes[] = (string) $wpdb->base_prefix;
+                }
+            }
+
+            return array_values(array_unique($prefixes));
+        }
+
+        return array((string) $wpdb->base_prefix);
+    }
+
+    /**
      * @param array<string,mixed>|null $settings
      * @return string[]
      */
@@ -674,10 +847,29 @@ class Rmmigrate_Multisite_Scope
             // Leftover installer safety snapshots under web root (not size-gated).
             // Must match Rmmigrate_Install_Cleanup::STATE_DIR.
             untrailingslashit(wp_normalize_path(ABSPATH)) . '/.multisite-migrate-installer',
-            $wp_content . '/duplicator-backups',
             $wp_content . '/cache',
             $wp_content . '/debug.log',
         );
+
+        $vendor_backup_dirs = apply_filters(
+            'rmmigrate_default_backup_path_excludes',
+            array(
+                $wp_content . '/duplicator-backups',
+                $wp_content . '/updraft',
+                $wp_content . '/ai1wm-backups',
+                $wp_content . '/backupwordpress',
+                $wp_content . '/wpvividbackups',
+                $wp_content . '/backwpup',
+            ),
+            $wp_content
+        );
+        if (is_array($vendor_backup_dirs)) {
+            foreach ($vendor_backup_dirs as $dir) {
+                if (is_string($dir) && $dir !== '') {
+                    $excludes[] = wp_normalize_path($dir);
+                }
+            }
+        }
 
         if (Rmmigrate_Engine_Config::storage_filter_self()) {
             foreach (Rmmigrate_Engine_Config::self_storage_exclude_paths() as $root) {
