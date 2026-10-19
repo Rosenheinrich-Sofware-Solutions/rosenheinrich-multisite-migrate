@@ -627,7 +627,7 @@ final class Rmmigrate_Telemetry
             ),
             array(
                 'title' => __('Backup, import, and restore outcomes', 'rosenheinrich-multisite-migrate'),
-                'detail' => __('Success or failure with error category, phase, and a short message (file paths removed) — not backup contents.', 'rosenheinrich-multisite-migrate'),
+                'detail' => __('Success or failure with error category, phase, and a short message (file paths removed). For failures also coarse diagnostics: archive format, file-count ranges, start mode, and minutes without progress — not backup contents.', 'rosenheinrich-multisite-migrate'),
             ),
             array(
                 'title' => __('Environment snapshot', 'rosenheinrich-multisite-migrate'),
@@ -1137,8 +1137,83 @@ final class Rmmigrate_Telemetry
         if ($duration > 0) {
             $props['duration_ms'] = $duration;
         }
+        if ($status === Rmmigrate_Job::STATUS_ERROR) {
+            $props = array_merge($props, self::job_failure_diagnostics($job, $progress, $service_code));
+        }
 
         return $props;
+    }
+
+    /**
+     * Coarse, non-personal diagnostics for failed jobs: archive format, file-count ranges,
+     * start (kickoff) mode, whole minutes without progress and why a time limit fired.
+     * No paths, names, sizes or URLs.
+     *
+     * @param array<string,mixed> $progress
+     * @return array<string,mixed>
+     */
+    private static function job_failure_diagnostics(Rmmigrate_Job $job, array $progress, string $service_code): array
+    {
+        $diag = array();
+        $archive = is_array($progress['archive'] ?? null) ? $progress['archive'] : array();
+        $hosting = class_exists('Rmmigrate_Hosting_Detection');
+        if ($hosting && !$job->is_restore()) {
+            $mode = Rmmigrate_Hosting_Detection::effective_archive_mode_for_job($job);
+            if ($mode === 'zip' || $mode === 'daf') {
+                $diag['archive_mode'] = $mode;
+            }
+        }
+        if (isset($archive['total_files'])) {
+            $diag['files_total'] = self::count_bucket((int) $archive['total_files']);
+            $diag['file_index'] = self::count_bucket((int) ($archive['file_index'] ?? 0));
+        }
+        if ($hosting) {
+            $kickoff = sanitize_key(Rmmigrate_Hosting_Detection::effective_kickoff_mode());
+            if ($kickoff !== '') {
+                $diag['kickoff_mode'] = $kickoff;
+            }
+        }
+        $limit = is_array($progress['time_limit'] ?? null) ? $progress['time_limit'] : array();
+        $since = (int) ($limit['elapsed_since_progress'] ?? 0);
+        $last_progress_at = (int) ($progress['last_progress_at'] ?? 0);
+        if ($since <= 0 && $last_progress_at > 0) {
+            $since = max(0, time() - $last_progress_at);
+        }
+        if ($since > 0) {
+            $diag['elapsed_since_progress'] = (int) floor($since / 60);
+        }
+        $reason = sanitize_key((string) ($limit['reason'] ?? ''));
+        if ($service_code === Rmmigrate_Error_Codes::TIME_LIMIT
+            && in_array($reason, array('hard_cap', 'stall', 'archive_stale'), true)
+        ) {
+            $diag['time_limit_reason'] = $reason;
+        }
+
+        return $diag;
+    }
+
+    /**
+     * Order-of-magnitude bucket so exact file counts are never sent.
+     */
+    private static function count_bucket(int $count): string
+    {
+        if ($count <= 0) {
+            return '0';
+        }
+        if ($count < 100) {
+            return '1-99';
+        }
+        if ($count < 1000) {
+            return '100-999';
+        }
+        if ($count < 10000) {
+            return '1k-10k';
+        }
+        if ($count < 100000) {
+            return '10k-100k';
+        }
+
+        return '100k+';
     }
 
     /**

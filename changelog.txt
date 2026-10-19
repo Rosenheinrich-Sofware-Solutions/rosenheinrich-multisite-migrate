@@ -1,3 +1,8 @@
+= 1.2.21 – 2026-10-19 =
+* Fix: Improved reliability of long-running backups and restores.
+* Fix: Better error diagnostics.
+* Security: Additional hardening.
+
 = 1.2.20 – 2026-10-17 =
 * Fix: Various bug fixes and stability improvements.
 * Security: Additional hardening.

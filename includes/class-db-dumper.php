@@ -23,6 +23,8 @@ class Rmmigrate_DB_Dumper
     const MYSQLDUMP_DATA_BULK_BUDGET_SEC = 600;
     const MYSQLDUMP_DATA_BATCH_BUDGET_SEC = 120;
     const MYSQLDUMP_SCHEMA_BULK_BUDGET_SEC = 180;
+    /** Repeats of one interrupted mysqldump pass before the rest of the data goes to PHP inserts. */
+    private const MYSQLDUMP_REPEAT_HANDOFF = 2;
     const PROGRESS_BACKUP_FILE       = 'database.progress.bak.json';
     const TABLE_META_FILE            = 'database.table_meta.json';
 
@@ -382,6 +384,25 @@ class Rmmigrate_DB_Dumper
         $index = (int) ($db['mysqldump_table_index'] ?? 0);
         $total = count($tables);
 
+        if ($index < $total) {
+            $repeats = $this->register_mysqldump_attempt(implode(':', array(
+                $phase,
+                (string) $index,
+                (string) (int) ($db['mysqldump_data_batch_size'] ?? 0),
+                (string) ($db['mysqldump_data_mode'] ?? ''),
+            )));
+            if ($repeats < 0) {
+                return $this->fallback_php_dump($tables, 'sql realign failed after an interrupted mysqldump pass');
+            }
+            if ($repeats >= self::MYSQLDUMP_REPEAT_HANDOFF) {
+                $reason = sprintf('mysqldump pass at table %d of %d was interrupted %d times', $index + 1, $total, $repeats);
+                if ($phase === 'data') {
+                    return $this->switch_remaining_mysqldump_data_to_php($tables, $index, $reason);
+                }
+                return $this->fallback_php_dump($tables, $reason);
+            }
+        }
+
         if ($phase === 'schema') {
             if ($index >= $total) {
                 $data_start = Rmmigrate_Filesystem::exists($this->sql_path)
@@ -448,6 +469,42 @@ class Rmmigrate_DB_Dumper
         }
 
         return $this->run_mysqldump_data_slice($tables, $index, $total, $budget_sec);
+    }
+
+    /**
+     * A request that dies inside a mysqldump pass (host timeout, kill) never records an outcome,
+     * so the next slice would start the same pass again on top of the partial output, forever.
+     * Count attempts per pass and rewind the SQL file to where the pass started.
+     *
+     * @return int Earlier attempts at this pass, or -1 when the SQL file could not be rewound.
+     */
+    private function register_mysqldump_attempt(string $key): int
+    {
+        $db = $this->job->get_progress()['database'] ?? array();
+        $prev = is_array($db['mysqldump_attempt'] ?? null) ? $db['mysqldump_attempt'] : array();
+        $size = Rmmigrate_Filesystem::exists($this->sql_path) ? (int) Rmmigrate_Filesystem::filesize($this->sql_path) : 0;
+        $count = 1;
+        $start = $size;
+        if ((string) ($prev['key'] ?? '') === $key) {
+            $count = max(1, (int) ($prev['count'] ?? 1)) + 1;
+            $start = max(0, (int) ($prev['start_bytes'] ?? 0));
+            if ($size > $start) {
+                if (!self::realign_sql_file_to_checkpoint($this->sql_path, $start)) {
+                    return -1;
+                }
+                Rmmigrate_Logger::log(sprintf('mysqldump pass was interrupted; discarded %d partial bytes before retrying', $size - $start));
+                $this->sync_sql_bytes_written();
+            }
+        }
+        $this->job->update_progress(array('database' => array(
+            'mysqldump_attempt' => array(
+                'key'         => $key,
+                'count'       => $count,
+                'start_bytes' => $start,
+            ),
+        ),));
+
+        return $count - 1;
     }
 
     /**

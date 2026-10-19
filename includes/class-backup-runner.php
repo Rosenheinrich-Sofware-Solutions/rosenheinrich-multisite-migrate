@@ -11,6 +11,9 @@ class Rmmigrate_Runner
     /** @var int|null Job ID holding the SQL lock in this request. */
     private static $sql_lock_owner = null;
 
+    /** @var string Owner token stored with the SQL lock so a stolen lock is never refreshed or released. */
+    private static $sql_lock_token = '';
+
     /** @var int|null Job ID with an acquired worker lock in this request. */
     private static $locked_job_id = null;
 
@@ -383,6 +386,17 @@ class Rmmigrate_Runner
         } elseif ($last_progress_at <= 0) {
             $last_progress_at = $started;
         }
+        $heartbeat_at = self::latest_heartbeat_at($progress);
+        if ($heartbeat_at > $last_progress_at) {
+            // Long single steps (one large archive entry, a long scan) only beat a heartbeat.
+            $last_progress_at = $heartbeat_at;
+            $job->update_progress(array('last_progress_at' => $last_progress_at));
+        }
+
+        $phase_key = self::phase_clock_key($job);
+        if ($phase_key !== '' && (int) ($progress[$phase_key] ?? 0) <= 0) {
+            $job->update_progress(array($phase_key => time()));
+        }
 
         $progress = $job->get_progress();
         $archive_progress = is_array($progress['archive'] ?? null) ? $progress['archive'] : array();
@@ -394,6 +408,7 @@ class Rmmigrate_Runner
             && $last_progress_at > 0
             && (time() - $last_progress_at) >= $archive_stale_sec
         ) {
+            self::record_time_limit_reason($job, 'archive_stale', $last_progress_at);
             // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
             throw Rmmigrate_Job_Exception::raise(
                 sanitize_key(Rmmigrate_Error_Codes::TIME_LIMIT),
@@ -411,12 +426,22 @@ class Rmmigrate_Runner
         }
         $hard_cap = max($max * 4, 8 * HOUR_IN_SECONDS);
         if ($elapsed > $hard_cap) {
+            self::record_time_limit_reason($job, 'hard_cap', $last_progress_at);
             // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
             throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::TIME_LIMIT),
                 esc_html(__('Backup build exceeded maximum time limit.', 'rosenheinrich-multisite-migrate'))
             );
         }
-        if ($elapsed <= $max) {
+        // The hard cap counts from job start; the soft limit of a long phase (archive,
+        // finalize) counts from the start of that phase, so earlier phases do not eat its budget.
+        $phase_elapsed = $elapsed;
+        if ($phase_key !== '') {
+            $phase_started = (int) ($progress[$phase_key] ?? 0);
+            if ($phase_started > 0) {
+                $phase_elapsed = time() - $phase_started;
+            }
+        }
+        if ($phase_elapsed <= $max) {
             return;
         }
 
@@ -425,10 +450,60 @@ class Rmmigrate_Runner
             return;
         }
 
+        self::record_time_limit_reason($job, 'stall', $last_progress_at);
         // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
         throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::TIME_LIMIT),
             esc_html(__('Backup build exceeded maximum time limit.', 'rosenheinrich-multisite-migrate'))
         );
+    }
+
+    /**
+     * Progress key that records when the current long phase started ('' when the soft
+     * limit counts from job start).
+     */
+    private static function phase_clock_key(Rmmigrate_Job $job): string
+    {
+        $status = $job->get_status();
+        if ($status === Rmmigrate_Job::STATUS_ARCHIVING) {
+            return 'archive_started_at';
+        }
+        if ($status === Rmmigrate_Job::STATUS_ARCHIVE_DONE) {
+            return 'finalize_started_at';
+        }
+
+        return '';
+    }
+
+    /**
+     * Keep why the time limit fired, as non-personal diagnostics for the error report.
+     */
+    private static function record_time_limit_reason(Rmmigrate_Job $job, string $reason, int $last_progress_at): void
+    {
+        $job->update_progress(array(
+            'time_limit' => array(
+                'reason'                 => $reason,
+                'elapsed_since_progress' => $last_progress_at > 0 ? max(0, time() - $last_progress_at) : 0,
+            ),
+        ));
+    }
+
+    /**
+     * Newest work heartbeat (file scan or archive entry) that is not in the future.
+     *
+     * @param array<string,mixed> $progress
+     */
+    private static function latest_heartbeat_at(array $progress): int
+    {
+        $now = time();
+        $latest = 0;
+        foreach (array('file_scan', 'archive') as $section) {
+            $at = is_array($progress[$section] ?? null) ? (int) ($progress[$section]['heartbeat_at'] ?? 0) : 0;
+            if ($at > $latest && $at <= $now) {
+                $latest = $at;
+            }
+        }
+
+        return $latest;
     }
 
     /**
@@ -441,6 +516,7 @@ class Rmmigrate_Runner
         $db = is_array($progress['database'] ?? null) ? $progress['database'] : array();
         $archive = is_array($progress['archive'] ?? null) ? $progress['archive'] : array();
         $scan = is_array($progress['file_scan'] ?? null) ? $progress['file_scan'] : array();
+        $fin = is_array($progress['finalize'] ?? null) ? $progress['finalize'] : array();
 
         return implode('|', array(
             (string) ($progress['step'] ?? ''),
@@ -450,8 +526,15 @@ class Rmmigrate_Runner
             (string) ($db['rows_done'] ?? ''),
             (string) ($archive['file_index'] ?? ''),
             (string) ($archive['bytes_written'] ?? ''),
+            (string) ($archive['byte_offset'] ?? ''),
+            (string) ($archive['entry_source_offset'] ?? ''),
             (string) ($scan['path_index'] ?? ''),
             (string) ($scan['cursor'] ?? ''),
+            (string) ($scan['wp_core_cursor'] ?? ''),
+            !empty($scan['wp_core_done']) ? '1' : '',
+            (string) ($fin['phase'] ?? ''),
+            (string) ($fin['hash_index'] ?? ''),
+            (string) ($fin['encrypt_offset'] ?? ''),
         ));
     }
 
@@ -545,6 +628,9 @@ class Rmmigrate_Runner
     {
         if ($job->skips_files()) {
             if ($job->get_status() < Rmmigrate_Job::STATUS_ARCHIVE_DONE) {
+                if (!empty($job->get_progress()['archive']['db_only_daf'])) {
+                    return self::db_only_daf_slice($job, $scope, $steps);
+                }
                 $work_dir = $job->get_work_dir();
                 $manifest = Rmmigrate_Manifest::with_core_detection(
                     Rmmigrate_Manifest::build($job, $scope, 0),
@@ -567,7 +653,26 @@ class Rmmigrate_Runner
                     $zip->addFile(trailingslashit($work_dir) . 'manifest.json', 'manifest.json');
                     $zip->close();
                 } else {
-                    Rmmigrate_Filesystem::copy(trailingslashit($work_dir) . 'database.sql', $path);
+                    // DAF: write a real DAF (sliced) around database.sql and manifest.json. A raw
+                    // SQL copy under a .daf name was rejected by restore as an invalid archive.
+                    RMMIGRATE_IO::write_json_atomic(trailingslashit($work_dir) . 'daf-queue.json', array(
+                        array('path' => trailingslashit($work_dir) . 'database.sql', 'archive' => 'database.sql'),
+                        array('path' => trailingslashit($work_dir) . 'manifest.json', 'archive' => 'manifest.json'),
+                    ));
+                    $job->update_progress(array(
+                        'archive_mode' => 'daf',
+                        'archive'      => array(
+                            'format'          => 'daf',
+                            'file_list_built' => true,
+                            'db_only_daf'     => true,
+                            'total_files'     => 2,
+                            'file_index'      => 0,
+                            'archive_path'    => $path,
+                            'archive_name'    => $name,
+                            'byte_offset'     => strlen(Rmmigrate_Daf_Archiver::MAGIC),
+                        ),
+                    ));
+                    return self::db_only_daf_slice($job, $scope, $steps);
                 }
                 $job->save_fields(array('local_path' => Rmmigrate_Local_Storage::work_dir_rel($job) . $name, 'file_size' => (int) @Rmmigrate_Filesystem::filesize($path)));
                 $job->set_status(Rmmigrate_Job::STATUS_ARCHIVE_DONE);
@@ -576,6 +681,7 @@ class Rmmigrate_Runner
             return array('message' => $job->get_progress_message());
         }
 
+        self::pin_archive_mode($job);
         $archiver = Rmmigrate_Archive_Factory::create_archiver($job, $scope);
         $done = $archiver->run_slice(self::remaining_budget_sec());
 
@@ -589,6 +695,34 @@ class Rmmigrate_Runner
                 Rmmigrate_Logger::log('Archive complete');
             }
             return array('message' => $job->get_progress_message());
+        }
+
+        return array('message' => $job->get_progress_message());
+    }
+
+    /**
+     * Pin the archive format on the job so a settings/hosting change or the ZipArchive fallback
+     * cannot switch the archiver in the middle of an archive.
+     */
+    private static function pin_archive_mode(Rmmigrate_Job $job): void
+    {
+        $mode = Rmmigrate_Hosting_Detection::effective_archive_mode_for_job($job);
+        if ((string) ($job->get_progress()['archive_mode'] ?? '') !== $mode) {
+            $job->update_progress(array('archive_mode' => $mode));
+        }
+    }
+
+    /**
+     * Database-only DAF backups run the regular sliced DAF writer over the two queued entries.
+     *
+     * @return array{message:string}
+     */
+    private static function db_only_daf_slice(Rmmigrate_Job $job, Rmmigrate_Multisite_Scope $scope, Rmmigrate_Build_Steps $steps): array
+    {
+        $archiver = new Rmmigrate_Daf_Archiver($job, $scope);
+        if ($archiver->run_slice(self::remaining_budget_sec())) {
+            $job->set_status(Rmmigrate_Job::STATUS_ARCHIVE_DONE);
+            $steps->advance_to(Rmmigrate_Build_Steps::STEP_FINALIZE);
         }
 
         return array('message' => $job->get_progress_message());
@@ -734,6 +868,11 @@ class Rmmigrate_Runner
         $offset = (int) ($fin['encrypt_offset'] ?? 0);
         $result = Rmmigrate_Archive_Encryption::encrypt_slice($local, $encrypted, $offset, max(1, $budget_sec));
         if ($result === null) {
+            $space = Rmmigrate_Validator::validate_disk_space_for_bytes(0);
+            if (is_wp_error($space)) {
+                // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+                throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::DISK_SPACE), esc_html($space->get_error_message()));
+            }
             // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
             throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::ENCRYPT_FAILED),
                 esc_html__('Could not encrypt backup archive.', 'rosenheinrich-multisite-migrate')
@@ -1408,105 +1547,113 @@ class Rmmigrate_Runner
 
         register_shutdown_function(static function () {
             self::$reserved_memory = null; // Free the reserved memory immediately
+            self::handle_process_shutdown(error_get_last());
+        });
+    }
 
-            $job_id = self::$locked_job_id;
-            if ($job_id === null) {
-                return;
-            }
+    /**
+     * End of a worker request: record a fatal error that ended the slice, then release the lock.
+     *
+     * @param array<string,mixed>|null $error Result of error_get_last().
+     */
+    private static function handle_process_shutdown(?array $error): void
+    {
+        $job_id = self::$locked_job_id;
+        if ($job_id === null) {
+            return;
+        }
 
-            $error = error_get_last();
-            $fatal_types = array(E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR, E_USER_ERROR);
-            if (is_array($error) && in_array($error['type'], $fatal_types, true)) {
-                $job = Rmmigrate_Job::get($job_id);
-                if ($job !== null && !in_array($job->get_status(), array(
-                    Rmmigrate_Job::STATUS_COMPLETE,
-                    Rmmigrate_Job::STATUS_CANCELLED,
-                    Rmmigrate_Job::STATUS_ERROR,
-                    Rmmigrate_Job::STATUS_DELETING,
-                ), true)) {
-                    Rmmigrate_Logger::for_job($job_id);
-                    $fatal_message = (string) ($error['message'] ?? 'unknown');
-                    $fatal_file = (string) ($error['file'] ?? 'unknown');
-                    $fatal_line = (string) ($error['line'] ?? '0');
+        $fatal_types = array(E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR, E_USER_ERROR);
+        if (is_array($error) && in_array($error['type'], $fatal_types, true)) {
+            $job = Rmmigrate_Job::get($job_id);
+            if ($job !== null && !in_array($job->get_status(), array(
+                Rmmigrate_Job::STATUS_COMPLETE,
+                Rmmigrate_Job::STATUS_CANCELLED,
+                Rmmigrate_Job::STATUS_ERROR,
+                Rmmigrate_Job::STATUS_DELETING,
+            ), true)) {
+                Rmmigrate_Logger::for_job($job_id);
+                $fatal_message = (string) ($error['message'] ?? 'unknown');
+                $fatal_file = (string) ($error['file'] ?? 'unknown');
+                $fatal_line = (string) ($error['line'] ?? '0');
 
-                    Rmmigrate_Logger::log("Fatal Error: {$fatal_message}");
-                    Rmmigrate_Logger::log("Location: {$fatal_file} on line {$fatal_line}");
+                Rmmigrate_Logger::log("Fatal Error: {$fatal_message}");
+                Rmmigrate_Logger::log("Location: {$fatal_file} on line {$fatal_line}");
 
-                    $progress = $job->get_progress();
-                    Rmmigrate_Logger::log(self::format_crash_state_message($job, $progress));
+                $progress = $job->get_progress();
+                Rmmigrate_Logger::log(self::format_crash_state_message($job, $progress));
 
-                    if (stripos($fatal_message, 'allowed memory size') !== false) {
-                        $exception = new RuntimeException(
-                            __('PHP ran out of memory during the backup. Use Settings → Database → mysqldump or raise memory_limit.', 'rosenheinrich-multisite-migrate')
-                        );
-                        $service_code = 'memory_limit';
-                        $message = Rmmigrate_User_Error_Messages::format($exception);
-                        Rmmigrate_Error_Recorder::record(
-                            array(
-                                'code'     => $service_code,
-                                'message'  => $message,
-                                'job_type' => $job->is_restore() ? 'restore' : (string) $job->get_job_type(),
-                                'source'   => 'fatal',
+                if (stripos($fatal_message, 'allowed memory size') !== false) {
+                    $exception = new RuntimeException(
+                        __('PHP ran out of memory during the backup. Use Settings → Database → mysqldump or raise memory_limit.', 'rosenheinrich-multisite-migrate')
+                    );
+                    $service_code = 'memory_limit';
+                    $message = Rmmigrate_User_Error_Messages::format($exception);
+                    Rmmigrate_Error_Recorder::record(
+                        array(
+                            'code'     => $service_code,
+                            'message'  => $message,
+                            'job_type' => $job->is_restore() ? 'restore' : (string) $job->get_job_type(),
+                            'source'   => 'fatal',
+                        )
+                    );
+                    $job->set_status(Rmmigrate_Job::STATUS_ERROR, $message, $service_code);
+                    if ($job->is_restore()) {
+                        Rmmigrate_Restore_Runner::disable_maintenance();
+                    }
+                } elseif (Rmmigrate_Error_Codes::is_php_execution_timeout($fatal_message)) {
+                    // Soft yield: chunked workers are designed to continue on the next request.
+                    // Marking ERROR here orphaned resumable archives behind a sticky last_error banner.
+                    $timeouts = (int) ($progress['php_execution_timeouts'] ?? 0) + 1;
+                    $job->update_progress(array('php_execution_timeouts' => $timeouts));
+                    if ($timeouts < self::MAX_PHP_EXECUTION_TIMEOUTS) {
+                        Rmmigrate_Logger::log(
+                            sprintf(
+                                'PHP max_execution_time hit mid-slice (%d/%d); leaving job active for continuation.',
+                                $timeouts,
+                                self::MAX_PHP_EXECUTION_TIMEOUTS
                             )
                         );
-                        $job->set_status(Rmmigrate_Job::STATUS_ERROR, $message, $service_code);
-                        if ($job->is_restore()) {
-                            Rmmigrate_Restore_Runner::disable_maintenance();
-                        }
-                    } elseif (Rmmigrate_Error_Codes::is_php_execution_timeout($fatal_message)) {
-                        // Soft yield: chunked workers are designed to continue on the next request.
-                        // Marking ERROR here orphaned resumable archives behind a sticky last_error banner.
-                        $timeouts = (int) ($progress['php_execution_timeouts'] ?? 0) + 1;
-                        $job->update_progress(array('php_execution_timeouts' => $timeouts));
-                        if ($timeouts < self::MAX_PHP_EXECUTION_TIMEOUTS) {
-                            Rmmigrate_Logger::log(
-                                sprintf(
-                                    'PHP max_execution_time hit mid-slice (%d/%d); leaving job active for continuation.',
-                                    $timeouts,
-                                    self::MAX_PHP_EXECUTION_TIMEOUTS
-                                )
-                            );
-                            self::schedule_continuation($job_id);
-                        } else {
-                            $exception = new RuntimeException(
-                                __('PHP max_execution_time hit repeatedly.', 'rosenheinrich-multisite-migrate')
-                            );
-                            $message = Rmmigrate_User_Error_Messages::format($exception);
-                            Rmmigrate_Error_Recorder::record(
-                                array(
-                                    'code'     => Rmmigrate_Error_Codes::TIME_LIMIT,
-                                    'message'  => $message,
-                                    'job_type' => $job->is_restore() ? 'restore' : (string) $job->get_job_type(),
-                                    'source'   => 'fatal',
-                                )
-                            );
-                            $job->set_status(Rmmigrate_Job::STATUS_ERROR, $message, Rmmigrate_Error_Codes::TIME_LIMIT);
-                            if ($job->is_restore()) {
-                                Rmmigrate_Restore_Runner::disable_maintenance();
-                            }
-                        }
+                        self::schedule_continuation($job_id);
                     } else {
-                        $exception = new RuntimeException(__('Worker stopped unexpectedly.', 'rosenheinrich-multisite-migrate'));
-                        $service_code = 'worker_stopped';
+                        $exception = new RuntimeException(
+                            __('PHP max_execution_time hit repeatedly.', 'rosenheinrich-multisite-migrate')
+                        );
                         $message = Rmmigrate_User_Error_Messages::format($exception);
                         Rmmigrate_Error_Recorder::record(
                             array(
-                                'code'     => $service_code,
+                                'code'     => Rmmigrate_Error_Codes::TIME_LIMIT,
                                 'message'  => $message,
                                 'job_type' => $job->is_restore() ? 'restore' : (string) $job->get_job_type(),
                                 'source'   => 'fatal',
                             )
                         );
-                        $job->set_status(Rmmigrate_Job::STATUS_ERROR, $message, $service_code);
+                        $job->set_status(Rmmigrate_Job::STATUS_ERROR, $message, Rmmigrate_Error_Codes::TIME_LIMIT);
                         if ($job->is_restore()) {
                             Rmmigrate_Restore_Runner::disable_maintenance();
                         }
                     }
+                } else {
+                    $exception = new RuntimeException(__('Worker stopped unexpectedly.', 'rosenheinrich-multisite-migrate'));
+                    $service_code = 'worker_stopped';
+                    $message = Rmmigrate_User_Error_Messages::format($exception);
+                    Rmmigrate_Error_Recorder::record(
+                        array(
+                            'code'     => $service_code,
+                            'message'  => $message,
+                            'job_type' => $job->is_restore() ? 'restore' : (string) $job->get_job_type(),
+                            'source'   => 'fatal',
+                        )
+                    );
+                    $job->set_status(Rmmigrate_Job::STATUS_ERROR, $message, $service_code);
+                    if ($job->is_restore()) {
+                        Rmmigrate_Restore_Runner::disable_maintenance();
+                    }
                 }
             }
+        }
 
-            self::release_process_lock($job_id);
-        });
+        self::release_process_lock($job_id);
     }
 
     private static function release_process_lock(int $job_id): void
@@ -1619,8 +1766,9 @@ class Rmmigrate_Runner
 
         if (Rmmigrate_Hosting_Detection::effective_lock_mode() === 'sql') {
             if (self::$sql_lock_owner === $job_id) {
-                self::release_sql_job_lock($job_id);
-                self::clear_worker_lease($job_id);
+                if (self::release_sql_job_lock($job_id)) {
+                    self::clear_worker_lease($job_id);
+                }
             }
             return;
         }
@@ -1638,7 +1786,8 @@ class Rmmigrate_Runner
         }
 
         $option  = self::SQL_LOCK_PREFIX . $job_id;
-        $expires = time() + 120;
+        $token   = wp_generate_password(16, false, false);
+        $expires = (time() + 120) . ':' . $token;
         $acquired = false;
 
         if (add_site_option($option, $expires)) {
@@ -1657,6 +1806,7 @@ class Rmmigrate_Runner
 
         if ($acquired) {
             self::$sql_lock_owner = $job_id;
+            self::$sql_lock_token = $token;
             return true;
         }
 
@@ -1664,19 +1814,49 @@ class Rmmigrate_Runner
         return false;
     }
 
-    private static function release_sql_job_lock(int $job_id): void
+    private static function release_sql_job_lock(int $job_id): bool
     {
-        delete_site_option(self::sql_lock_option($job_id));
+        $released = true;
+        $option   = self::sql_lock_option($job_id);
+        if (self::$sql_lock_token !== '') {
+            $current = (string) get_site_option($option, '');
+            $parts   = explode(':', $current, 2);
+            if (($parts[1] ?? '') === self::$sql_lock_token) {
+                delete_site_option($option);
+            } else {
+                $released = false;
+            }
+        } else {
+            delete_site_option($option);
+        }
         if (self::$sql_lock_owner === $job_id) {
             self::$sql_lock_owner = null;
+            self::$sql_lock_token = '';
         }
+
+        return $released;
     }
 
     public static function refresh_sql_lock(int $job_id): void
     {
-        if (Rmmigrate_Hosting_Detection::effective_lock_mode() === 'sql') {
-            update_site_option(self::sql_lock_option($job_id), time() + 120);
+        if (Rmmigrate_Hosting_Detection::effective_lock_mode() !== 'sql') {
+            return;
         }
+        // Only the owner may extend the lock. A worker whose lock expired during a long step (and
+        // was taken over) must not overwrite the new owner's lock, nor release it later.
+        if (self::$sql_lock_owner !== $job_id || self::$sql_lock_token === '') {
+            return;
+        }
+        $option  = self::sql_lock_option($job_id);
+        $current = (string) get_site_option($option, '');
+        $parts   = explode(':', $current, 2);
+        if (($parts[1] ?? '') !== self::$sql_lock_token) {
+            self::$sql_lock_owner = null;
+            self::$sql_lock_token = '';
+            Rmmigrate_Logger::log('SQL worker lock was taken over by another worker; this request stops refreshing it.');
+            return;
+        }
+        update_site_option($option, (time() + 120) . ':' . self::$sql_lock_token);
     }
 
     private static function sql_lock_option(int $job_id): string

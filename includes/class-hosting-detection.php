@@ -200,13 +200,13 @@ class Rmmigrate_Hosting_Detection
     {
         $settings = Rmmigrate_Settings::get();
         if (!empty($settings['archive_mode_manual'])) {
-            return ($settings['archive_mode'] ?? 'zip') === 'daf' ? 'daf' : 'zip';
+            return (($settings['archive_mode'] ?? 'zip') === 'daf' || self::zip_extension_missing()) ? 'daf' : 'zip';
         }
         $mode = (string) ($settings['archive_mode'] ?? 'zip');
         if ($mode === 'daf') {
             return 'daf';
         }
-        if (!class_exists('ZipArchive')) {
+        if (self::zip_extension_missing()) {
             return 'daf';
         }
         if ($max_exec === null) {
@@ -234,14 +234,30 @@ class Rmmigrate_Hosting_Detection
      */
     public static function effective_archive_mode_for_job(?Rmmigrate_Job $job): string
     {
+        $mode = '';
+        $archive_started = false;
         if ($job !== null) {
             $progress = $job->get_progress();
             $override = (string) ($progress['archive_mode'] ?? $progress['init']['archive_mode'] ?? '');
             if ($override === 'zip' || $override === 'daf') {
-                return $override;
+                $mode = $override;
             }
+            $archive_started = !empty($progress['archive']['file_list_built']);
         }
-        return self::effective_archive_mode();
+        if ($mode === '') {
+            $mode = self::effective_archive_mode();
+        }
+        // A ZIP cannot be built without ZipArchive: build a job that has not started archiving as DAF
+        // instead of failing it after the database dump. A ZIP already in progress keeps its format.
+        if ($mode === 'zip' && !$archive_started && self::zip_extension_missing()) {
+            return 'daf';
+        }
+        return $mode;
+    }
+
+    private static function zip_extension_missing(): bool
+    {
+        return !class_exists('ZipArchive');
     }
 
     public static function worker_budget_sec(?int $max_exec = null): int

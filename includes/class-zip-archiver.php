@@ -9,6 +9,18 @@ class Rmmigrate_Zip_Archiver
     private const QUEUE_FILE = 'zip-queue.json';
     private const MAX_ADD_FILES_PER_SLICE = 1000;
 
+    /** Uncompressed bytes added per slice; close() rewrites and deflates them in one go. */
+    private const MAX_ADD_BYTES_PER_SLICE = 134217728;
+
+    /** Entries at least this large are stored, not deflated, so close() stays short. */
+    private const STORE_UNCOMPRESSED_MIN_BYTES = 33554432;
+
+    /** A slice that died this many times at the same file is retried with a single file. */
+    private const SLICE_REPEAT_SHRINK = 2;
+
+    /** A slice that died this many times at the same file switches the backup to DAF. */
+    private const SLICE_REPEAT_SWITCH_DAF = 3;
+
     /** @var string|null Unit tests: force ZipArchive::close failure with this status string. */
     public static $unit_test_simulate_zip_close_status = null;
 
@@ -145,6 +157,13 @@ class Rmmigrate_Zip_Archiver
             }
         }
 
+        $repeats = $this->register_slice_attempt($file_index);
+        $this->cleanup_libzip_temp_files($zip_path);
+        if ($repeats >= self::SLICE_REPEAT_SWITCH_DAF) {
+            $this->switch_to_daf($zip_path, $work_dir, $file_index, $repeats);
+            return false;
+        }
+
         $zip = new ZipArchive();
         $open_flags = $resume ? ZipArchive::CREATE : (ZipArchive::CREATE | ZipArchive::OVERWRITE);
         $open_res = $zip->open($zip_path, $open_flags);
@@ -181,11 +200,22 @@ class Rmmigrate_Zip_Archiver
         } elseif ($zip_size > 100 * 1024 * 1024) {
             $max_add = 500;
         }
+        $max_slice_bytes = self::slice_max_bytes();
+        if ($repeats >= self::SLICE_REPEAT_SHRINK) {
+            // The previous attempts at this file never finished; retry with a single file.
+            $max_add = 1;
+            $max_slice_bytes = 0;
+            Rmmigrate_Logger::log(sprintf('ZIP slice at file %d was interrupted %d times - retrying with a single file.', $file_index, $repeats));
+        }
+        $store_min_bytes = self::store_min_bytes();
+        $can_store = method_exists($zip, 'setCompressionName') && defined('ZipArchive::CM_STORE');
         $processed = 0;
         $added = 0;
+        $added_bytes = 0;
         while ($file_index < $total
             && ((microtime(true) - $start) < $add_budget_sec || $processed === 0)
             && $added < $max_add
+            && ($added_bytes < $max_slice_bytes || $added === 0)
         ) {
             Rmmigrate_Runner::touch_worker_lease($this->job->get_id());
             $item = $queue[$file_index];
@@ -217,7 +247,12 @@ class Rmmigrate_Zip_Archiver
                             )
                         );
                     }
+                    if ($can_store && $size >= $store_min_bytes) {
+                        // Deflating a large entry happens inside close() and can outlast the request.
+                        $zip->setCompressionName($item['archive'], ZipArchive::CM_STORE);
+                    }
                     $added++;
+                    $added_bytes += max(0, $size);
                 }
             }
             $file_index++;
@@ -273,6 +308,7 @@ class Rmmigrate_Zip_Archiver
         ),));
 
         if ($file_index >= $total) {
+            $this->cleanup_libzip_temp_files($zip_path);
             $rel = Rmmigrate_Local_Storage::work_dir_rel($this->job) . basename($zip_path);
             $this->job->save_fields(array(
                 'local_path' => $rel,
@@ -282,6 +318,98 @@ class Rmmigrate_Zip_Archiver
         }
 
         return false;
+    }
+
+    /**
+     * Count attempts that start at the same queue position. A slice that finishes always
+     * advances file_index, so a repeat means the previous request died (timeout, kill)
+     * before it could save progress.
+     *
+     * @return int Number of earlier attempts at this position.
+     */
+    private function register_slice_attempt(int $file_index): int
+    {
+        $archive = $this->job->get_progress()['archive'] ?? array();
+        $attempt = is_array($archive['slice_attempt'] ?? null) ? $archive['slice_attempt'] : array();
+        $same = isset($attempt['file_index']) && (int) $attempt['file_index'] === $file_index;
+        $count = $same ? max(0, (int) ($attempt['count'] ?? 0)) + 1 : 1;
+        $this->job->update_progress(array(
+            'archive' => array(
+                'slice_attempt' => array(
+                    'file_index' => $file_index,
+                    'count'      => $count,
+                ),
+            ),
+        ));
+
+        return $count - 1;
+    }
+
+    /**
+     * Remove libzip temp files (<archive>.XXXXXX) left behind when a request died inside close().
+     * Only this job's worker touches its archive, so any match is stale.
+     */
+    private function cleanup_libzip_temp_files(string $zip_path): int
+    {
+        if ($zip_path === '') {
+            return 0;
+        }
+        $dir = dirname($zip_path);
+        $base = basename($zip_path);
+        $candidates = glob(trailingslashit($dir) . '*', GLOB_NOSORT);
+        if (!is_array($candidates)) {
+            return 0;
+        }
+        $removed = 0;
+        $pattern = '/^' . preg_quote($base, '/') . '\\.[A-Za-z0-9]{6}$/';
+        foreach ($candidates as $candidate) {
+            if (preg_match($pattern, basename($candidate)) !== 1 || !is_file($candidate)) {
+                continue;
+            }
+            if (Rmmigrate_Filesystem::delete($candidate)) {
+                $removed++;
+            }
+        }
+        if ($removed > 0) {
+            Rmmigrate_Logger::log(sprintf('Removed %d leftover ZIP temp file(s).', $removed));
+        }
+
+        return $removed;
+    }
+
+    /**
+     * Give up on ZIP for this backup and restart the archive step in the resumable DAF format.
+     */
+    private function switch_to_daf(string $zip_path, string $work_dir, int $file_index, int $repeats): void
+    {
+        $archive = $this->job->get_progress()['archive'] ?? array();
+        if ($zip_path !== '' && Rmmigrate_Filesystem::exists($zip_path)) {
+            Rmmigrate_Filesystem::delete($zip_path);
+        }
+        $queue_path = trailingslashit($work_dir) . self::QUEUE_FILE;
+        if (Rmmigrate_Filesystem::exists($queue_path)) {
+            Rmmigrate_Filesystem::delete($queue_path);
+        }
+        $this->job->replace_progress_section('archive', array(
+            'skipped_large' => (int) ($archive['skipped_large'] ?? 0),
+            'zip_fallback'  => array(
+                'file_index' => $file_index,
+                'repeats'    => $repeats,
+                'at'         => time(),
+            ),
+        ));
+        $this->job->update_progress(array('archive_mode' => 'daf'));
+        Rmmigrate_Logger::log(sprintf('ZIP slice at file %d was interrupted %d times - switching this backup to the DAF format.', $file_index, $repeats));
+    }
+
+    private static function slice_max_bytes(): int
+    {
+        return self::MAX_ADD_BYTES_PER_SLICE;
+    }
+
+    private static function store_min_bytes(): int
+    {
+        return self::STORE_UNCOMPRESSED_MIN_BYTES;
     }
 
     /**

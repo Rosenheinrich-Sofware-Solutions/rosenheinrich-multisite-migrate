@@ -561,6 +561,9 @@ class Rmmigrate_Job
         return (bool) get_transient('rmmigrate_milestone_lock_acquired_' . $job_id);
     }
 
+    /** A job waiting for its queued cron worker is not stale before this age (backup hard cap). */
+    const CRON_WAIT_CAP_SECONDS = 28800;
+
     public static function is_stale(self $job, ?int $threshold_seconds = null): bool
     {
         $status = $job->get_status();
@@ -589,7 +592,32 @@ class Rmmigrate_Job
             return false;
         }
 
+        if ($age < self::CRON_WAIT_CAP_SECONDS && self::is_waiting_for_cron_worker($job->get_id())) {
+            return false;
+        }
+
         return true;
+    }
+
+    /**
+     * The next slice is queued in WP-Cron and has not run yet: either it is due later
+     * (backoff), or the site runs workers through cron only and nobody has visited since.
+     * Such a job is waiting, not dead (the backup hard cap still ends it).
+     */
+    private static function is_waiting_for_cron_worker(int $job_id): bool
+    {
+        if ($job_id <= 0 || !function_exists('wp_next_scheduled') || !class_exists('Rmmigrate_Hosting_Detection')) {
+            return false;
+        }
+        $next = wp_next_scheduled(Rmmigrate_Hosting_Detection::CRON_HOOK, array($job_id));
+        if ($next === false || (int) $next <= 0) {
+            return false;
+        }
+        if ((int) $next > time()) {
+            return true;
+        }
+
+        return Rmmigrate_Hosting_Detection::effective_kickoff_mode() === 'cron';
     }
 
     /**

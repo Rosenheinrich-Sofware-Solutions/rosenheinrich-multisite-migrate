@@ -143,6 +143,7 @@ class Rmmigrate_Daf_Archiver
         $last_hb = microtime(true);
         $max_file_bytes = Rmmigrate_Settings::get_max_archive_file_bytes();
         $preserve_entry_resume = false;
+        $write_failed = false;
         $resume_entry_source_offset = 0;
         $resume_entry_total_bytes = 0;
 
@@ -210,6 +211,7 @@ class Rmmigrate_Daf_Archiver
 
                 if (Rmmigrate_Filesystem::fwrite_raw($fh, $header) === false) {
                     RMMIGRATE_IO::truncate_file($daf_path, $entry_start);
+                    $write_failed = true;
                     break;
                 }
             }
@@ -269,6 +271,7 @@ class Rmmigrate_Daf_Archiver
                         'byte_offset'         => (int) ftell($fh),
                         'entry_source_offset' => $uncompressed_len - $remaining,
                         'entry_total_bytes'   => (int) $uncompressed_len,
+                        'heartbeat_at'        => time(),
                     ),));
                 }
                 // fread() returns at most one stream chunk (often 8 KB) per call, so
@@ -322,11 +325,13 @@ class Rmmigrate_Daf_Archiver
                 if (Rmmigrate_Filesystem::fwrite_raw($fh, $block_header) === false) {
                     RMMIGRATE_IO::truncate_file($daf_path, $block_start);
                     $entry_ok = false;
+                    $write_failed = true;
                     break;
                 }
                 if ($block !== '' && Rmmigrate_Filesystem::fwrite_raw($fh, $block) === false) {
                     RMMIGRATE_IO::truncate_file($daf_path, $block_start);
                     $entry_ok = false;
+                    $write_failed = true;
                     break;
                 }
                 $remaining -= strlen($chunk);
@@ -411,6 +416,16 @@ class Rmmigrate_Daf_Archiver
             'skipped_large'       => (int) ($archive['skipped_large'] ?? 0),
             'skipped_unreadable'  => (int) ($archive['skipped_unreadable'] ?? 0),
         ),));
+
+        // A failed write was rolled back to the last block; when the disk is (nearly) full that
+        // will not heal by retrying, so fail now with the disk-space code instead of stalling.
+        if ($write_failed) {
+            $space = Rmmigrate_Validator::validate_disk_space_for_bytes(0);
+            if (is_wp_error($space)) {
+                // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+                throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::DISK_SPACE), esc_html($space->get_error_message()));
+            }
+        }
 
         if ($file_index >= $total) {
             self::verify_finalized_archive($daf_path, $byte_offset);

@@ -8,6 +8,9 @@ require_once __DIR__ . '/shared/class-topology-db-connection.php';
 
 class Rmmigrate_Restore_Runner
 {
+    /** Slices in a row without any restore-state change before the stall limit may fire. */
+    const RESTORE_STALL_MIN_SLICES = 3;
+
     /**
      * @return array{message:string}
      */
@@ -31,6 +34,8 @@ class Rmmigrate_Restore_Runner
             return self::step_init($job);
         }
 
+        self::assert_restore_progress($job, $step);
+
         switch ($step) {
             case Rmmigrate_Restore_Build_Steps::STEP_EXTRACT:
                 return self::step_extract($job, $steps);
@@ -47,6 +52,74 @@ class Rmmigrate_Restore_Runner
         }
 
         return array('message' => $job->get_status_label());
+    }
+
+    /**
+     * A restore slice that keeps returning without moving any cursor (entry index, SQL offset,
+     * file queue, search-replace table) would otherwise loop forever with maintenance mode on.
+     * Fail it once no slice changed the restore state for RESTORE_STALL_MIN_SLICES slices and for
+     * at least the stale-job window; the worker's catch rolls back and lifts maintenance mode.
+     */
+    private static function assert_restore_progress(Rmmigrate_Job $job, string $step): void
+    {
+        $progress = $job->get_progress();
+        $fingerprint = self::restore_progress_fingerprint($job, $step, $progress);
+        $now = time();
+        $last_at = (int) ($progress['restore_last_progress_at'] ?? 0);
+        if ($last_at <= 0 || (string) ($progress['restore_progress_fingerprint'] ?? '') !== $fingerprint) {
+            $job->update_progress(array(
+                'restore_progress_fingerprint' => $fingerprint,
+                'restore_last_progress_at'     => $now,
+                'restore_stall_slices'         => 0,
+            ));
+            return;
+        }
+
+        $stalled = (int) ($progress['restore_stall_slices'] ?? 0) + 1;
+        $job->update_progress(array('restore_stall_slices' => $stalled));
+        if ($stalled < self::RESTORE_STALL_MIN_SLICES
+            || ($now - $last_at) < Rmmigrate_Job::stale_threshold_seconds()) {
+            return;
+        }
+
+        // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+        throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::TIME_LIMIT),
+            esc_html(__('Restore stopped making progress.', 'rosenheinrich-multisite-migrate'))
+        );
+    }
+
+    /**
+     * Restore state minus clocks and the stall bookkeeping itself, so only real movement counts.
+     */
+    private static function restore_progress_fingerprint(Rmmigrate_Job $job, string $step, array $progress): string
+    {
+        unset(
+            $progress['restore_progress_fingerprint'],
+            $progress['restore_last_progress_at'],
+            $progress['restore_stall_slices'],
+            $progress['php_execution_timeouts']
+        );
+
+        return md5($job->get_status() . '|' . $step . '|' . (string) wp_json_encode(self::strip_progress_clocks($progress)));
+    }
+
+    /**
+     * @param array<mixed> $data
+     * @return array<mixed>
+     */
+    private static function strip_progress_clocks(array $data): array
+    {
+        foreach ($data as $key => $value) {
+            if (is_string($key) && substr($key, -3) === '_at') {
+                unset($data[$key]);
+                continue;
+            }
+            if (is_array($value)) {
+                $data[$key] = self::strip_progress_clocks($value);
+            }
+        }
+
+        return $data;
     }
 
     /**
