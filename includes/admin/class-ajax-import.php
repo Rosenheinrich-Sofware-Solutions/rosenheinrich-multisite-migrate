@@ -8,6 +8,12 @@ class Rmmigrate_Ajax_Import
 {
     use Rmmigrate_Ajax_Base;
 
+    /** Attempts to lock an import part file before the chunk fails (backoff 0.1, 0.2, 0.4, 0.8 s). */
+    const PART_LOCK_ATTEMPTS = 5;
+
+    /** First retry delay in microseconds; doubles per attempt. */
+    const PART_LOCK_RETRY_BASE_US = 100000;
+
     public static function register(): void
     {
         add_action('wp_ajax_rmmigrate_import_local', array(__CLASS__, 'import_local'));
@@ -437,13 +443,36 @@ class Rmmigrate_Ajax_Import
     /**
      * @return int|'offset_mismatch'|false|WP_Error
      */
-    private static function append_import_chunk(string $part_path, string $chunk, int $chunk_index, int $expected_offset)
+    /**
+     * Open and exclusively lock the part file, retrying with a short backoff while another
+     * request (a retried duplicate chunk, antivirus, a slow network share) still holds it.
+     *
+     * @return resource|false
+     */
+    private static function open_locked_import_part(string $part_path)
     {
-        $fh = Rmmigrate_Filesystem::open_lock($part_path, 'cb');
-        if ($fh === false || !Rmmigrate_Filesystem::try_exclusive_lock($fh)) {
+        $delay_us = self::PART_LOCK_RETRY_BASE_US;
+        for ($attempt = 1; $attempt <= self::PART_LOCK_ATTEMPTS; $attempt++) {
+            $fh = Rmmigrate_Filesystem::open_lock($part_path, 'cb');
+            if ($fh !== false && Rmmigrate_Filesystem::try_exclusive_lock($fh)) {
+                return $fh;
+            }
             if (is_resource($fh)) {
                 Rmmigrate_Filesystem::release_lock($fh);
             }
+            if ($attempt < self::PART_LOCK_ATTEMPTS) {
+                usleep($delay_us);
+                $delay_us *= 2;
+            }
+        }
+
+        return false;
+    }
+
+    private static function append_import_chunk(string $part_path, string $chunk, int $chunk_index, int $expected_offset)
+    {
+        $fh = self::open_locked_import_part($part_path);
+        if ($fh === false) {
             return false;
         }
 

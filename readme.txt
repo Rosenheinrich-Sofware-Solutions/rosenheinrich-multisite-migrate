@@ -4,7 +4,7 @@ Tags: multisite, site-migration, wordpress-migration, migrate-wordpress, clone-s
 Requires at least: 6.2
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.2.21
+Stable tag: 1.2.22
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -241,169 +241,15 @@ Backup and restore run as background-style chunked jobs. They are designed not t
 
 == Changelog ==
 
-= 1.2.21 – 2026-10-19 =
+= 1.2.22 – 2026-10-22 =
 * Fix: Improved reliability of long-running backups and restores.
-* Fix: Better error diagnostics.
-* Security: Additional hardening.
-
-= 1.2.20 – 2026-10-17 =
-* Fix: Various bug fixes and stability improvements.
-* Security: Additional hardening.
-
-= 1.2.19 – 2026-10-15 =
-* Fix: SQL imports with mysqldump triggers and routines (DELIMITER).
-* Fix: More reliable backup archives with clearer errors and cleanup after failures.
-* Security: Safer ZIP restore and protected backup folders by default.
-
-= 1.2.18 – 2026-10-15 =
-* Fix restores that failed at the final step on multisite networks with a MySQL syntax error when updating blog domains.
-
-= 1.2.17 – 2026-10-13 =
-* Fix chunked import uploads on hosts with tight PHP upload limits by auto-adjusting chunk size and retrying when the server drops file parts.
-
-= 1.2.16 – 2026-10-11 =
-* Improved mobile layout on admin screens (action buttons wrap correctly, larger tap targets).
-* Show the schedule day-of-month field only for monthly schedules.
-* Improved verify-restore banner and data tables on small screens.
-* Small improvements and bug fixes.
-
-= 1.2.15 – 2026-10-06 =
-* Fix DAF restore extract failures ("Invalid DAF archive entry") when short fread reads occur on network or buffered filesystems.
-* Harden chunked import resume, URL byte-range downloads, and peer transfer chunk offsets.
-* Harden filesystem append and exclusive writes so short fwrite results fail instead of silently truncating archives.
-
-= 1.2.14 – 2026-10-02 =
-* Fix chunked import failures ("Empty chunk" / oversized chunk) by preferring FormData file parts over php://input.
-
-= 1.2.13 – 2026-09-22 =
-* Minor bug fixes.
-
-= 1.2.12 – 2026-09-21 =
-* Automatic cleanup of deleted backup records and improved archive table display.
 
 Older entries are in changelog.txt, which ships with the plugin, and the full history is published at [https://multisitemigrate.rosenheinrich.com/changelog/](https://multisitemigrate.rosenheinrich.com/changelog/).
 
 == Upgrade Notice ==
 
-= 1.2.21 =
+= 1.2.22 =
 Bug fixes and stability improvements. Recommended update.
-
-= 1.2.20 =
-Bug fixes and stability improvements. Recommended update.
-
-= 1.2.19 =
-Bug fixes and security hardening. Recommended update.
-
-= 1.2.18 =
-Fix for network restore failures at the final migration step. Recommended update.
-
-= 1.2.17 =
-Fix for chunked import failures on strict upload limits. Recommended update.
-
-= 1.2.16 =
-Improved mobile admin layout and monthly-only day-of-month on schedules. Recommended update.
-
-= 1.2.15 =
-Fix for DAF restore extract "Invalid DAF archive entry" on network imports. Recommended update.
-
-= 1.2.14 =
-Fix for chunked import Empty chunk / oversized chunk failures. Recommended update.
-
-= 1.2.13 =
-Minor bug fixes. Recommended update.
-
-= 1.2.12 =
-Automatic cleanup of deleted backup records and improved table display. Recommended update.
-
-= 1.2.11 =
-Improved import error messages with actionable server-error guidance. Recommended update.
-
-= 1.2.10 =
-Bug fixes. Recommended update.
-
-= 1.2.6 =
-Stops extra scheduled backups and activity-log spam; Network Admin times display in UTC. Recommended update.
-
-= 1.2.5 =
-Fixes Setup Wizard redirect when activating other plugins. Recommended update.
-
-= 1.2.4 =
-Requires WordPress 6.2+ again; AI Agents (MCP) still need WordPress 6.9+. Recommended update.
-
-= 1.2.3 =
-More reliable backups when another job is already running, and when a large database dump takes longer than expected. Recommended update.
-
-= 1.2.2 =
-Bug fixes and improvements for AI Agents (MCP) connection and setup. Recommended update.
-
-= 1.2.1 =
-Bug fixes and UI improvements. Recommended update.
-
-= 1.2.0 =
-Hardening, bug fixes, and performance improvements across backup, restore, and archive handling. Recommended update.
-
-= 1.1.9 =
-More reliable restore workers on short PHP time limits; sliced decrypt, clearer timeout logs, and continue when `.htaccess` cannot be overwritten. Recommended update.
-
-= 1.1.8 =
-Bug fixes. Recommended update.
-
-= 1.1.7 =
-Bug fixes for activation, settings, delete/uninstall cleanup, archive extraction, and OAuth Bearer. Recommended update.
-
-= 1.1.6 =
-Local scheduled backups and email notifications; recommended update.
-
-= 1.1.5 =
-Maintenance release. Recommended update.
-
-= 1.1.4 =
-Performance updates. Recommended update.
-
-= 1.1.3 =
-OAuth Bearer pass-through for foreign REST tokens. Recommended update.
-
-= 1.1.2 =
-Plugin naming and readme for Backup, Restore & AI / MCP. Recommended update.
-
-= 1.1.1 =
-UI and performance optimizations. Recommended update.
-
-= 1.1.0 =
-Bug fixes. Recommended update.
-
-= 1.0.10 =
-Inline backup create wizard, clearer Destination/Review steps, and Health/Activity polish. Recommended update.
-
-= 1.0.9 =
-Prevents previous local backups from being packed into new Full-network archives. Recommended update.
-
-= 1.0.8 =
-Performance optimizations. Recommended update.
-
-= 1.0.7 =
-Bug fixes and performance optimizations. Recommended update.
-
-= 1.0.6 =
-Hardened logs, restore compatibility, and optional revision exclusion. Recommended update.
-
-= 1.0.5 =
-Critical database export fix for SQLite and Playground. Recommended update.
-
-= 1.0.4 =
-Bug fixes and performance optimizations.
-
-= 1.0.3 =
-Faster backup deletion via background purge, optimized admin UI, plus job reliability fixes.
-
-= 1.0.2 =
-Bug fix release with admin UI improvements.
-
-= 1.0.1 =
-Maintenance release with bug fixes and performance improvements.
-
-= 1.0.0 =
-First public release.
 
 == Screenshots ==
 

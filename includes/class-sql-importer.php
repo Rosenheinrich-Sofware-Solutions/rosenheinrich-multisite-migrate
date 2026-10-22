@@ -16,6 +16,12 @@ class Rmmigrate_SQL_Importer
 
     const GUARD_SCAN_BUFFER_FILE = 'import-guard-scan.dat';
 
+    /** Resume point (offset, delimiter and unparsed buffer) written as one atomic file. */
+    const CHECKPOINT_FILE = 'import-checkpoint.dat';
+
+    /** "<checkpoint token>:<n>": the first n statements after that checkpoint are applied. */
+    const APPLIED_MARKER_FILE = 'import-applied.dat';
+
     /** @var array<string,mixed>|null|false Cached guard policy (false = not computed yet). */
     private $guard_policy = false;
 
@@ -27,6 +33,12 @@ class Rmmigrate_SQL_Importer
 
     /** @var bool */
     private $transaction_open = false;
+
+    /** @var string Checkpoint the applied-statement marker refers to. */
+    private $marker_token = '';
+
+    /** @var int Last statement applied inside the open transaction (marked on commit). */
+    private $pending_marker = 0;
 
     public function __construct(Rmmigrate_Job $job)
     {
@@ -55,7 +67,8 @@ class Rmmigrate_SQL_Importer
             return true;
         }
 
-        $offset = (int) ($import['offset'] ?? 0);
+        $checkpoint = $this->load_checkpoint();
+        $offset = $checkpoint !== null ? $checkpoint['offset'] : (int) ($import['offset'] ?? 0);
         if ($offset === 0) {
             $this->preflight_routine_privileges($sql_path);
             $this->preflight_subsite_on_network_prefix_rewrite();
@@ -68,7 +81,12 @@ class Rmmigrate_SQL_Importer
                 $import = array();
             }
         }
-        $buffer = $this->load_buffer($import);
+        $buffer = $checkpoint !== null ? $checkpoint['buffer'] : $this->load_buffer($import);
+        // Statements after this resume point that a crashed worker already applied are skipped.
+        $this->marker_token = $checkpoint !== null ? $checkpoint['token'] : 'o' . $offset;
+        $this->pending_marker = 0;
+        $skip_through = $this->load_applied_marker($this->marker_token);
+        $statement_no = 0;
         $rows_done = (int) ($import['rows'] ?? 0);
         $total_bytes = (int) ($import['total'] ?? 0);
         if ($total_bytes <= 0) {
@@ -78,7 +96,7 @@ class Rmmigrate_SQL_Importer
         if (!is_array($set_queries)) {
             $set_queries = array();
         }
-        $parser = new Rmmigrate_Sql_Import_Stream_Parser((string) ($import['sql_delimiter'] ?? ';'));
+        $parser = new Rmmigrate_Sql_Import_Stream_Parser($checkpoint !== null ? $checkpoint['delimiter'] : (string) ($import['sql_delimiter'] ?? ';'));
         $import_warnings = is_array($import['warnings'] ?? null) ? $import['warnings'] : array();
 
         if ($offset > 0 && $set_queries !== array()) {
@@ -124,13 +142,19 @@ class Rmmigrate_SQL_Importer
                 if ($chunk === false || $chunk === '') {
                     if ($buffer !== '') {
                         $statement = trim($buffer);
-                        if ($statement !== '' && $this->is_executable($statement) && !$this->should_skip_statement($statement)) {
+                        $statement_no++;
+                        if ($statement !== ''
+                            && $this->is_executable($statement)
+                            && !$this->already_applied($statement, $statement_no, $skip_through)
+                            && !$this->should_skip_statement($statement)
+                        ) {
                             $this->execute_statement($statement, $import_warnings);
+                            $this->note_statement_applied($statement_no);
                             $executed++;
                         }
                     }
                     $handle->close();
-                    $this->delete_buffer();
+                    $this->commit_import_transaction();
                     $this->job->update_progress(array(
                         'import' => array(
                             'done'          => true,
@@ -142,7 +166,9 @@ class Rmmigrate_SQL_Importer
                             'warnings'      => array_values(array_unique($import_warnings)),
                         ),
                     ));
-                    $this->commit_import_transaction();
+                    $this->delete_buffer();
+                    $this->delete_work_file(self::CHECKPOINT_FILE);
+                    $this->delete_work_file(self::APPLIED_MARKER_FILE);
                     return true;
                 }
 
@@ -150,12 +176,16 @@ class Rmmigrate_SQL_Importer
                 $extracted = $parser->extract_completed_statements($buffer);
                 $buffer = $extracted['remainder'];
                 foreach ($extracted['statements'] as $statement) {
+                    $statement_no++;
                     if ($this->is_set_statement($statement)) {
                         $set_queries[] = $statement;
                     }
                     if ($this->is_executable($statement)) {
-                        if (!$this->should_skip_statement($statement)) {
+                        if (!$this->already_applied($statement, $statement_no, $skip_through)
+                            && !$this->should_skip_statement($statement)
+                        ) {
                             $this->execute_statement($statement, $import_warnings);
+                            $this->note_statement_applied($statement_no);
                             $executed++;
                         }
                     }
@@ -169,7 +199,12 @@ class Rmmigrate_SQL_Importer
             }
 
             $handle->close();
-            $this->save_buffer($buffer);
+            // Commit (which marks the applied statements), then move the resume point in one
+            // atomic write; the progress below only mirrors it for status and older readers.
+            $this->commit_import_transaction();
+            if ($this->save_checkpoint($offset, $buffer, $parser->delimiter())) {
+                $this->delete_buffer();
+            }
             $import_progress = array(
                 'offset'        => $offset,
                 'total'         => $total_bytes,
@@ -184,7 +219,6 @@ class Rmmigrate_SQL_Importer
             $this->job->update_progress(array(
                 'import' => $import_progress,
             ));
-            $this->commit_import_transaction();
 
             return false;
         } catch (Throwable $e) {
@@ -193,6 +227,117 @@ class Rmmigrate_SQL_Importer
             }
             $this->rollback_import_transaction();
             throw $e;
+        }
+    }
+
+    /**
+     * @return array{offset:int,buffer:string,delimiter:string,token:string}|null
+     */
+    private function load_checkpoint(): ?array
+    {
+        $path = $this->work_file(self::CHECKPOINT_FILE);
+        if (!Rmmigrate_Filesystem::exists($path)) {
+            return null;
+        }
+        $raw = Rmmigrate_Filesystem::get_contents($path);
+        $newline = is_string($raw) ? strpos($raw, "\n") : false;
+        if ($newline === false) {
+            Rmmigrate_Logger::log('SQL import checkpoint is unreadable - resuming from the job progress.');
+            return null;
+        }
+        $head = json_decode(substr($raw, 0, $newline), true);
+        $buffer = (string) substr($raw, $newline + 1);
+        if (!is_array($head)
+            || !isset($head['offset'], $head['token'], $head['buffer_bytes'])
+            || (int) $head['buffer_bytes'] !== strlen($buffer)
+        ) {
+            Rmmigrate_Logger::log('SQL import checkpoint is unreadable - resuming from the job progress.');
+            return null;
+        }
+
+        return array(
+            'offset'    => (int) $head['offset'],
+            'buffer'    => $buffer,
+            'delimiter' => (string) ($head['delimiter'] ?? ';'),
+            'token'     => (string) $head['token'],
+        );
+    }
+
+    /**
+     * Offset, delimiter and buffer in one write-and-rename, so a crash can never pair a new
+     * buffer with an old offset.
+     */
+    private function save_checkpoint(int $offset, string $buffer, string $delimiter): bool
+    {
+        $head = wp_json_encode(array(
+            'offset'       => $offset,
+            'delimiter'    => $delimiter,
+            'token'        => 'c' . $offset . '-' . wp_generate_password(8, false, false),
+            'buffer_bytes' => strlen($buffer),
+        ));
+        if (is_string($head) && RMMIGRATE_IO::write_atomic($this->work_file(self::CHECKPOINT_FILE), $head . "\n" . $buffer)) {
+            $this->delete_work_file(self::APPLIED_MARKER_FILE);
+            return true;
+        }
+        // An older checkpoint must not win over the newer progress offset.
+        $this->delete_work_file(self::CHECKPOINT_FILE);
+        $this->delete_work_file(self::APPLIED_MARKER_FILE);
+        $this->save_buffer($buffer);
+
+        return false;
+    }
+
+    private function load_applied_marker(string $token): int
+    {
+        $path = $this->work_file(self::APPLIED_MARKER_FILE);
+        $raw = Rmmigrate_Filesystem::exists($path) ? Rmmigrate_Filesystem::get_contents($path) : false;
+        if (!is_string($raw) || !preg_match('/^([A-Za-z0-9-]+):(\d+)$/', trim($raw), $m) || $m[1] !== $token) {
+            return 0;
+        }
+        Rmmigrate_Logger::log(sprintf('SQL import resumes after an interrupted slice: %d statements were already applied and are skipped.', (int) $m[2]));
+
+        return (int) $m[2];
+    }
+
+    /**
+     * A statement counts as applied once it is committed: at once outside a transaction,
+     * otherwise when the transaction commits (a rolled-back one is replayed).
+     */
+    private function note_statement_applied(int $statement_no): void
+    {
+        if ($this->transaction_open) {
+            $this->pending_marker = $statement_no;
+            return;
+        }
+        $this->write_applied_marker($statement_no);
+    }
+
+    private function write_applied_marker(int $statement_no): void
+    {
+        if ($this->marker_token === '' || $statement_no <= 0) {
+            return;
+        }
+        Rmmigrate_Filesystem::put_contents($this->work_file(self::APPLIED_MARKER_FILE), $this->marker_token . ':' . $statement_no);
+    }
+
+    /**
+     * Session SET statements are replayed anyway; the new connection needs them.
+     */
+    private function already_applied(string $statement, int $statement_no, int $skip_through): bool
+    {
+        return $statement_no <= $skip_through && !$this->is_set_statement($statement);
+    }
+
+    private function work_file(string $name): string
+    {
+        return trailingslashit($this->job->get_work_dir()) . $name;
+    }
+
+    private function delete_work_file(string $name): void
+    {
+        $path = $this->work_file($name);
+        if (Rmmigrate_Filesystem::exists($path)) {
+            Rmmigrate_Filesystem::delete($path);
         }
     }
 
@@ -1030,6 +1175,10 @@ class Rmmigrate_SQL_Importer
             return;
         }
         $this->transaction_open = false;
+        if ($this->pending_marker > 0) {
+            $this->write_applied_marker($this->pending_marker);
+            $this->pending_marker = 0;
+        }
     }
 
     private function rollback_import_transaction(): void
@@ -1041,5 +1190,6 @@ class Rmmigrate_SQL_Importer
         // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Plugin: custom plugin tables; values use prepare().
         $wpdb->query('ROLLBACK');
         $this->transaction_open = false;
+        $this->pending_marker = 0;
     }
 }

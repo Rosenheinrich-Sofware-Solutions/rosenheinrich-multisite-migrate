@@ -28,6 +28,9 @@ class Rmmigrate_Daf_Archiver
      */
     const BLOCK_BYTES = 4194304;
 
+    /** Archive restarts allowed after the file was found shorter than its checkpoint. */
+    const REALIGN_MAX_RECOVERIES = 2;
+
     /** @var Rmmigrate_Job */
     private $job;
 
@@ -99,7 +102,8 @@ class Rmmigrate_Daf_Archiver
         $queue = $this->load_queue($work_dir);
         $total = count($queue);
 
-        $this->ensure_valid_archive($daf_path, $file_index, $archive);
+        $archive = $this->ensure_valid_archive($daf_path, $file_index, $archive);
+        $file_index = (int) ($archive['file_index'] ?? $file_index);
 
         if (!Rmmigrate_Filesystem::exists($daf_path)) {
             $archive['entry_source_offset'] = 0;
@@ -110,13 +114,14 @@ class Rmmigrate_Daf_Archiver
 
         $byte_checkpoint = max(strlen(self::MAGIC), (int) ($archive['byte_offset'] ?? strlen(self::MAGIC)));
         if (Rmmigrate_Filesystem::exists($daf_path)) {
+            clearstatcache(true, $daf_path);
             $actual_size = (int) Rmmigrate_Filesystem::filesize($daf_path);
             if ($actual_size < $byte_checkpoint) {
-                $clamped = max(strlen(self::MAGIC), $actual_size);
-                if ($clamped !== $byte_checkpoint) {
-                    $byte_checkpoint = $clamped;
-                    $archive['entry_source_offset'] = 0;
-                }
+                // Bytes before the checkpoint are gone and entry boundaries are not recorded, so
+                // writing on at the shorter size would corrupt the archive. Restart it instead.
+                $archive = $this->restart_archive($daf_path, $archive, $actual_size, $byte_checkpoint);
+                $file_index = 0;
+                $byte_checkpoint = strlen(self::MAGIC);
             } elseif ($actual_size > $byte_checkpoint) {
                 RMMIGRATE_IO::truncate_file($daf_path, $byte_checkpoint);
             }
@@ -503,19 +508,63 @@ class Rmmigrate_Daf_Archiver
     }
 
     /**
+     * Rewrite the archive from its first queue entry after its file lost bytes behind the
+     * checkpoint (another worker, a restored progress backup, or the host truncated it).
+     *
      * @param array<string,mixed> $archive
+     * @return array<string,mixed>
      */
-    private function ensure_valid_archive(string $daf_path, int $file_index, array $archive): void
+    private function restart_archive(string $daf_path, array $archive, int $actual_size, int $checkpoint): array
+    {
+        $recoveries = (int) ($archive['realign_recoveries'] ?? 0) + 1;
+        if ($recoveries > self::REALIGN_MAX_RECOVERIES) {
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+            throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::DAF_CORRUPT),
+                esc_html__('DAF archive failed its integrity check (size mismatch). The backup may be incomplete — please try again.', 'rosenheinrich-multisite-migrate')
+            );
+        }
+        Rmmigrate_Logger::log(sprintf(
+            'DAF archive is shorter than its checkpoint (%d < %d bytes) - restarting the archive (recovery %d).',
+            $actual_size,
+            $checkpoint,
+            $recoveries
+        ));
+        RMMIGRATE_IO::write_atomic($daf_path, self::MAGIC);
+        $reset = array(
+            'file_index'          => 0,
+            'byte_offset'         => strlen(self::MAGIC),
+            'entry_source_offset' => 0,
+            'entry_total_bytes'   => 0,
+            'skipped_large'       => 0,
+            'skipped_unreadable'  => 0,
+            'realign_recoveries'  => $recoveries,
+        );
+        $this->job->update_progress(array('archive' => $reset));
+
+        return array_merge($archive, $reset);
+    }
+
+    /**
+     * A resumed archive whose header is not ours cannot be trusted up to the checkpoint, and
+     * truncating it to the checkpoint would zero-pad a shorter file. Rebuild it instead.
+     *
+     * @param array<string,mixed> $archive
+     * @return array<string,mixed>
+     */
+    private function ensure_valid_archive(string $daf_path, int $file_index, array $archive): array
     {
         if ($file_index <= 0 || !Rmmigrate_Filesystem::exists($daf_path)) {
-            return;
+            return $archive;
         }
         $head = Rmmigrate_Filesystem::get_contents($daf_path, 0, strlen(self::MAGIC));
         if ($head !== self::MAGIC) {
             $checkpoint = max(strlen(self::MAGIC), (int) ($archive['byte_offset'] ?? strlen(self::MAGIC)));
-            RMMIGRATE_IO::truncate_file($daf_path, $checkpoint);
-            Rmmigrate_Logger::log('DAF archive truncated to last checkpoint after invalid header.');
+            clearstatcache(true, $daf_path);
+            Rmmigrate_Logger::log('DAF archive has an invalid header on resume.');
+            return $this->restart_archive($daf_path, $archive, (int) Rmmigrate_Filesystem::filesize($daf_path), $checkpoint);
         }
+
+        return $archive;
     }
 
     /**

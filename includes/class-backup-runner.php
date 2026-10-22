@@ -80,6 +80,37 @@ class Rmmigrate_Runner
     }
 
     /**
+     * Response for a job that has already finished, or null while it still needs work.
+     *
+     * @return array{done:bool,status:int,percent:int,message:string,error?:string}|null
+     */
+    private static function finished_job_response(Rmmigrate_Job $job): ?array
+    {
+        if (!in_array($job->get_status(), array(
+            Rmmigrate_Job::STATUS_COMPLETE,
+            Rmmigrate_Job::STATUS_CANCELLED,
+            Rmmigrate_Job::STATUS_ERROR,
+            Rmmigrate_Job::STATUS_DELETING,
+        ), true)) {
+            return null;
+        }
+        $out = array(
+            'done'    => true,
+            'status'  => $job->get_status(),
+            'percent' => $job->get_percent(),
+            'message' => $job->get_progress_message(),
+        );
+        if ($job->get_status() === Rmmigrate_Job::STATUS_ERROR) {
+            $out['error'] = Rmmigrate_User_Error_Messages::for_admin_banner(array(
+                'message'  => (string) ($job->data['error_message'] ?? $job->get_status_label()),
+                'code'     => (string) ($job->get_progress()['service_code'] ?? ''),
+                'job_type' => $job->is_restore() ? 'restore' : 'backup',
+            ));
+        }
+        return $out;
+    }
+
+    /**
      * @return array{done:bool,status:int,percent:int,message:string,error?:string,waiting?:bool,lease_fresh?:bool}
      */
     public static function process(int $job_id): array
@@ -89,32 +120,28 @@ class Rmmigrate_Runner
             return self::terminal_missing_job_response($job_id);
         }
 
-        if (in_array($job->get_status(), array(
-            Rmmigrate_Job::STATUS_COMPLETE,
-            Rmmigrate_Job::STATUS_CANCELLED,
-            Rmmigrate_Job::STATUS_ERROR,
-            Rmmigrate_Job::STATUS_DELETING,
-        ), true)) {
-            $out = array(
-                'done'    => true,
-                'status'  => $job->get_status(),
-                'percent' => $job->get_percent(),
-                'message' => $job->get_progress_message(),
-            );
-            if ($job->get_status() === Rmmigrate_Job::STATUS_ERROR) {
-                $out['error'] = Rmmigrate_User_Error_Messages::for_admin_banner(array(
-                    'message'  => (string) ($job->data['error_message'] ?? $job->get_status_label()),
-                    'code'     => (string) ($job->get_progress()['service_code'] ?? ''),
-                    'job_type' => $job->is_restore() ? 'restore' : 'backup',
-                ));
-            }
-            return $out;
+        $finished = self::finished_job_response($job);
+        if ($finished !== null) {
+            return $finished;
         }
 
         if (!self::acquire_job_lock($job_id)) {
             self::log_lock_wait($job_id);
             self::schedule_continuation_backoff($job_id);
             return self::waiting_worker_response($job, $job_id);
+        }
+
+        // The row above was read before the lock; the previous worker may have saved a slice since.
+        // Resuming from that stale copy would write old cursors back over the newer progress.
+        $job = Rmmigrate_Job::get($job_id);
+        if ($job === null) {
+            self::release_job_lock($job_id);
+            return self::terminal_missing_job_response($job_id);
+        }
+        $finished = self::finished_job_response($job);
+        if ($finished !== null) {
+            self::release_job_lock($job_id);
+            return $finished;
         }
 
         if (Rmmigrate_Job_Cleanup::cancel_flag_requested($job_id)
