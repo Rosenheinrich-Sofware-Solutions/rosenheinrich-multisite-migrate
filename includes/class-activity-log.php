@@ -784,7 +784,7 @@ class Rmmigrate_Activity_Log
         $end_index = max(0, $available - $offset_from_end);
         $start_index = max(0, $end_index - $lines);
         $chunk_lines = array_slice($all, $start_index, $end_index - $start_index);
-        $total_lines = self::count_file_lines($path);
+        $total_lines = 0;
 
         $has_older_in_file = $start_index > 0;
         $older_file = '';
@@ -793,12 +793,25 @@ class Rmmigrate_Activity_Log
         } elseif (!$has_older_in_file && $offset_from_end + $lines >= $available && $available > 0) {
             $older_file = self::next_older_log_generation($path);
             if ($older_file === '') {
-                if ($total_lines > 0 && ($offset_from_end + $lines) < $total_lines) {
-                    $has_older_in_file = true;
-                } elseif ($total_lines < 0 && $available >= $need && $start_index === 0) {
-                    $has_older_in_file = true;
+                $file_bytes = (int) Rmmigrate_Filesystem::filesize($path);
+                if ($file_bytes > 10485760) {
+                    // Avoid reading multi-MB job logs into memory during admin-ajax (gateway timeouts).
+                    $has_older_in_file = $available >= $need && $start_index === 0;
+                    $total_lines = -1;
+                } else {
+                    $total_lines = self::count_file_lines($path);
+                    if ($total_lines > 0 && ($offset_from_end + $lines) < $total_lines) {
+                        $has_older_in_file = true;
+                    }
                 }
             }
+        }
+        if ($total_lines === 0 && $has_older_in_file && $available > 0) {
+            $total_lines = $available + $offset_from_end;
+        }
+        if ($total_lines === 0) {
+            $file_bytes = (int) Rmmigrate_Filesystem::filesize($path);
+            $total_lines = $file_bytes > 10485760 ? -1 : self::count_file_lines($path);
         }
 
         return array(

@@ -225,6 +225,14 @@ class Rmmigrate_Ajax_Activity
             wp_send_json_success(array('skipped' => 'no_status'));
         }
 
+        if (self::should_skip_poll_ajax_telemetry($ajax_action, $phase, $http_status)) {
+            wp_send_json_success(array('skipped' => 'poll_telemetry'));
+        }
+
+        if (self::is_transient_gateway_http_status($http_status)) {
+            wp_send_json_success(array('skipped' => 'transient_gateway'));
+        }
+
         $detail = $message;
         if ($http_status > 0) {
             $detail = sprintf(

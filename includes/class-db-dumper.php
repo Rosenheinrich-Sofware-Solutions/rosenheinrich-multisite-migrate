@@ -26,7 +26,7 @@ class Rmmigrate_DB_Dumper
     /** Repeats of one interrupted mysqldump pass before the rest of the data goes to PHP inserts. */
     private const MYSQLDUMP_REPEAT_HANDOFF = 2;
     /** Times one export may rewind or restart after its SQL file lost data, before it gives up. */
-    private const SQL_REALIGN_MAX_RECOVERIES = 2;
+    private const SQL_REALIGN_MAX_RECOVERIES = 3;
     const PROGRESS_BACKUP_FILE       = 'database.progress.bak.json';
     const TABLE_META_FILE            = 'database.table_meta.json';
 
@@ -496,7 +496,24 @@ class Rmmigrate_DB_Dumper
             $start = max(0, (int) ($prev['start_bytes'] ?? 0));
             if ($size > $start) {
                 if (!self::realign_sql_file_to_checkpoint($this->sql_path, $start)) {
-                    return -1;
+                    $actual = self::sql_file_size($this->sql_path);
+                    if ($actual < $start) {
+                        Rmmigrate_Logger::log(sprintf(
+                            'mysqldump pass: SQL file shorter than attempt start (%d < %d); aligning progress and retrying.',
+                            $actual,
+                            $start
+                        ));
+                        $this->job->update_progress(array('database' => array('sql_bytes_written' => $actual)));
+                        $start = $actual;
+                        $this->sync_sql_bytes_written();
+                    } else {
+                        Rmmigrate_Logger::log(sprintf(
+                            'mysqldump pass could not rewind SQL export from %d to %d bytes; switching to PHP export.',
+                            $size,
+                            $start
+                        ));
+                        return -1;
+                    }
                 }
                 Rmmigrate_Logger::log(sprintf('mysqldump pass was interrupted; discarded %d partial bytes before retrying', $size - $start));
                 $this->sync_sql_bytes_written();
@@ -660,8 +677,8 @@ class Rmmigrate_DB_Dumper
         }
 
         if ($result !== 0) {
-            if ($data_start > 0) {
-                self::realign_sql_file_to_checkpoint($this->sql_path, $data_start);
+            if ($data_start > 0 && !self::realign_sql_file_to_checkpoint($this->sql_path, $data_start)) {
+                Rmmigrate_Logger::log('mysqldump bulk: could not realign SQL before PHP fallback');
             }
             return $this->fallback_php_dump($tables, 'bulk data export failed');
         }
@@ -1142,6 +1159,7 @@ class Rmmigrate_DB_Dumper
         Rmmigrate_Logger::log($message);
         // Progress backups describe the file being deleted; left behind they resurrect a checkpoint past its end.
         self::clear_export_checkpoint_files($this->job->get_work_dir());
+        self::force_clear_sql_export_path($this->sql_path);
         $this->job->replace_progress_section('database', $this->fresh_database_progress($tables, 'php'));
         if (!$this->run_php_creates(Rmmigrate_Hosting_Detection::worker_budget_sec())) {
             return false;
@@ -1508,9 +1526,10 @@ class Rmmigrate_DB_Dumper
                 }
                 if ($buffer !== '') {
                     $this->write_php_export_sql($fh, $buffer);
-                    $current_sql_bytes += strlen($buffer);
                     $buffer = '';
                 }
+                $fh->close();
+                $current_sql_bytes = self::sql_file_size($this->sql_path);
 
                 // Unbuffered MYSQLI_USE_RESULT blocks other queries on the same connection.
                 Rmmigrate_Snap_DB::free_result($result);
@@ -1521,7 +1540,6 @@ class Rmmigrate_DB_Dumper
                     'table_rows_done'   => $table_rows_done,
                 ),));
                 $this->backup_db_progress();
-                $fh->close();
                 $this->sync_sql_bytes_written();
                 return false;
             }
@@ -1902,17 +1920,96 @@ class Rmmigrate_DB_Dumper
         if ($current < $expected_bytes) {
             return false;
         }
-        $fh = Rmmigrate_Filesystem::open($sql_path, 'r+');
-        if ($fh === false) {
+        if (self::truncate_sql_export_file($sql_path, $expected_bytes)) {
+            return true;
+        }
+        Rmmigrate_Logger::log(sprintf(
+            'SQL checkpoint realignment failed: could not truncate %s from %d to %d bytes.',
+            basename($sql_path),
+            $current,
+            $expected_bytes
+        ));
+        return false;
+    }
+
+    /**
+     * Cut database.sql back to a byte length (locked ftruncate, then prefix rewrite on stubborn hosts).
+     */
+    private static function truncate_sql_export_file(string $sql_path, int $expected_bytes): bool
+    {
+        if ($expected_bytes < 0) {
             return false;
         }
-        $truncated = $fh->truncate($expected_bytes);
-        $fh->close();
-        if (!$truncated) {
+        if ($expected_bytes === 0) {
+            return RMMIGRATE_IO::truncate_file($sql_path, 0);
+        }
+        clearstatcache(true, $sql_path);
+        $current = file_exists($sql_path) ? (int) filesize($sql_path) : 0;
+        if ($current === $expected_bytes) {
+            return true;
+        }
+        if ($current < $expected_bytes) {
+            return false;
+        }
+        $fh = Rmmigrate_Filesystem::open($sql_path, 'r+');
+        if ($fh !== false && $fh->truncate($expected_bytes)) {
+            $fh->close();
+            clearstatcache(true, $sql_path);
+            if ((int) filesize($sql_path) === $expected_bytes) {
+                return true;
+            }
+        } elseif ($fh !== false) {
+            $fh->close();
+        }
+        if (RMMIGRATE_IO::truncate_file($sql_path, $expected_bytes)) {
+            clearstatcache(true, $sql_path);
+            if ((int) filesize($sql_path) === $expected_bytes) {
+                return true;
+            }
+        }
+        return self::rewrite_sql_export_prefix($sql_path, $expected_bytes);
+    }
+
+    /**
+     * Rewrite the SQL dump with only its first N bytes when truncate is unsupported.
+     */
+    private static function rewrite_sql_export_prefix(string $sql_path, int $expected_bytes): bool
+    {
+        if ($expected_bytes <= 0) {
+            return RMMIGRATE_IO::truncate_file($sql_path, 0);
+        }
+        // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen -- Prefix copy fallback when ftruncate fails.
+        $in = @fopen($sql_path, 'rb');
+        if ($in === false) {
+            return false;
+        }
+        $prefix = '';
+        $remaining = $expected_bytes;
+        while ($remaining > 0 && !feof($in)) {
+            // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fread -- Prefix copy fallback when ftruncate fails.
+            $chunk = fread($in, min(1048576, $remaining));
+            if ($chunk === false || $chunk === '') {
+                break;
+            }
+            $prefix .= $chunk;
+            $remaining -= strlen($chunk);
+        }
+        // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Prefix copy fallback when ftruncate fails.
+        fclose($in);
+        if (strlen($prefix) !== $expected_bytes) {
+            return false;
+        }
+        $tmp = $sql_path . '.realign-' . wp_generate_password(12, false, false);
+        if (Rmmigrate_Filesystem::put_contents($tmp, $prefix) === false) {
+            Rmmigrate_Filesystem::delete($tmp);
+            return false;
+        }
+        if (!Rmmigrate_Filesystem::move($tmp, $sql_path)) {
+            Rmmigrate_Filesystem::delete($tmp);
             return false;
         }
         clearstatcache(true, $sql_path);
-        return true;
+        return (int) filesize($sql_path) === $expected_bytes;
     }
 
     /**
@@ -1936,20 +2033,46 @@ class Rmmigrate_DB_Dumper
 
         $db = $this->job->get_progress()['database'] ?? array();
         $actual = self::sql_file_size($this->sql_path);
-        $plan = self::plan_sql_checkpoint_recovery($db, $actual, self::SQL_REALIGN_MAX_RECOVERIES);
-        if ($plan['action'] === 'rewind_table' && self::realign_sql_file_to_checkpoint($this->sql_path, $plan['bytes'])) {
+
+        if ($actual > $expected_bytes) {
             Rmmigrate_Logger::log(sprintf(
-                'SQL export file is shorter than its checkpoint (%d < %d bytes); exporting table %d again from byte %d.',
+                'SQL export file is longer than its checkpoint (%d > %d bytes); restarting after failed truncate.',
                 $actual,
-                $expected_bytes,
-                (int) ($db['table_index'] ?? 0) + 1,
-                $plan['bytes']
+                $expected_bytes
             ));
-            $this->job->update_progress(array('database' => $plan['patch']));
-            $this->backup_db_progress();
-            return true;
+            if ($this->restart_php_export(max(0, (int) ($db['sql_realign_recoveries'] ?? 0)) + 1)) {
+                return false;
+            }
+            if ($this->restart_php_export_force()) {
+                return false;
+            }
+            if ($this->reconcile_sql_checkpoint_with_disk($expected_bytes)) {
+                return true;
+            }
+            return $this->raise_sql_checkpoint_realign_failure();
         }
-        if ($plan['action'] !== 'fail') {
+
+        $plan = self::plan_sql_checkpoint_recovery($db, $actual, self::SQL_REALIGN_MAX_RECOVERIES);
+        if ($plan['action'] === 'rewind_table') {
+            if (self::realign_sql_file_to_checkpoint($this->sql_path, $plan['bytes'])) {
+                Rmmigrate_Logger::log(sprintf(
+                    'SQL export file is shorter than its checkpoint (%d < %d bytes); exporting table %d again from byte %d.',
+                    $actual,
+                    $expected_bytes,
+                    (int) ($db['table_index'] ?? 0) + 1,
+                    $plan['bytes']
+                ));
+                $this->job->update_progress(array('database' => $plan['patch']));
+                $this->backup_db_progress();
+                return true;
+            }
+            Rmmigrate_Logger::log('SQL rewind truncate failed; falling back to full export restart.');
+            $plan = array(
+                'action'     => 'restart',
+                'recoveries' => max((int) $plan['recoveries'], (int) ($db['sql_realign_recoveries'] ?? 0) + 1),
+            );
+        }
+        if ($plan['action'] === 'restart') {
             Rmmigrate_Logger::log(sprintf(
                 'SQL export file is shorter than its checkpoint (%d < %d bytes) and the table start is gone; restarting the database export.',
                 $actual,
@@ -1960,10 +2083,60 @@ class Rmmigrate_DB_Dumper
             }
         }
 
+        if ($this->restart_php_export_force()) {
+            return false;
+        }
+
+        if ($this->reconcile_sql_checkpoint_with_disk($expected_bytes)) {
+            return true;
+        }
+
+        return $this->raise_sql_checkpoint_realign_failure();
+    }
+
+    /**
+     * Last resort: align progress metadata with bytes that are actually on disk.
+     */
+    private function reconcile_sql_checkpoint_with_disk(int $expected_bytes): bool
+    {
+        $actual = self::sql_file_size($this->sql_path);
+        if ($actual === $expected_bytes) {
+            return true;
+        }
+        if ($actual > $expected_bytes) {
+            if (!self::truncate_sql_export_file($this->sql_path, $expected_bytes)) {
+                return false;
+            }
+            $this->job->update_progress(array('database' => array('sql_bytes_written' => $expected_bytes)));
+            $this->backup_db_progress();
+            return true;
+        }
+
+        $patch = array('sql_bytes_written' => $actual);
+        if ($actual < $expected_bytes) {
+            $patch['pk_offset'] = null;
+            $patch['table_rows_done'] = 0;
+            $patch['insert_incomplete'] = false;
+        }
+        $this->job->update_progress(array('database' => $patch));
+        $this->backup_db_progress();
+        Rmmigrate_Logger::log(sprintf(
+            'SQL checkpoint recovery: aligned progress to on-disk size (%d bytes, checkpoint was %d).',
+            $actual,
+            $expected_bytes
+        ));
+        return true;
+    }
+
+    /**
+     * @return bool Never returns; satisfies bool return type of callers.
+     */
+    private function raise_sql_checkpoint_realign_failure(): bool
+    {
         // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
         throw Rmmigrate_Job_Exception::raise(
             'sql_checkpoint_realign',
-            esc_html__('Database export could not realign the SQL file to the last checkpoint. Retry the backup.', 'rosenheinrich-multisite-migrate')
+            esc_html__('Database export could not realign the SQL file to the last checkpoint. Check that the backup work directory is writable, then retry the backup.', 'rosenheinrich-multisite-migrate')
         );
     }
 
@@ -2018,13 +2191,54 @@ class Rmmigrate_DB_Dumper
             ? $db['tables']
             : self::order_export_tables($this->scope->get_tables());
         self::clear_export_checkpoint_files($this->job->get_work_dir());
-        if (self::sql_file_size($this->sql_path) > 0) {
+        if (!self::force_clear_sql_export_path($this->sql_path)) {
             return false;
         }
         $fresh = $this->fresh_database_progress($tables, 'php');
         $fresh['sql_realign_recoveries'] = $recoveries;
         $this->job->replace_progress_section('database', $fresh);
         return true;
+    }
+
+    /**
+     * Last-resort restart when the normal recovery budget is exhausted.
+     */
+    private function restart_php_export_force(): bool
+    {
+        $db = $this->job->get_progress()['database'] ?? array();
+        $tables = (!empty($db['tables']) && is_array($db['tables']))
+            ? $db['tables']
+            : self::order_export_tables($this->scope->get_tables());
+        self::clear_export_checkpoint_files($this->job->get_work_dir());
+        if (!self::force_clear_sql_export_path($this->sql_path)) {
+            return false;
+        }
+        $recoveries = max((int) ($db['sql_realign_recoveries'] ?? 0), self::SQL_REALIGN_MAX_RECOVERIES) + 1;
+        $fresh = $this->fresh_database_progress($tables, 'php');
+        $fresh['sql_realign_recoveries'] = $recoveries;
+        $this->job->replace_progress_section('database', $fresh);
+        Rmmigrate_Logger::log('SQL export checkpoint recovery: forced restart from table definitions after all realign attempts.');
+        return true;
+    }
+
+    private static function force_clear_sql_export_path(string $sql_path): bool
+    {
+        if (self::sql_file_size($sql_path) === 0) {
+            return true;
+        }
+        if (self::truncate_sql_export_file($sql_path, 0)) {
+            return true;
+        }
+        if (is_file($sql_path)) {
+            // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_chmod -- Recovery on hosts with odd permissions.
+            @chmod($sql_path, 0666);
+        }
+        Rmmigrate_Filesystem::delete($sql_path);
+        if (self::sql_file_size($sql_path) === 0) {
+            return true;
+        }
+        $written = Rmmigrate_Filesystem::put_contents($sql_path, '');
+        return $written !== false && self::sql_file_size($sql_path) === 0;
     }
 
     /**

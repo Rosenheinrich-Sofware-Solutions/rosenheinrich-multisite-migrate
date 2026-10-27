@@ -373,9 +373,6 @@ filename = m[1]; }
                 stopActivityPoll();
                 return;
             }
-            if (adminUI() && adminUI().reportTransportFail) {
-                adminUI().reportTransportFail(actionName('activityListAction', defaultListAction()), xhr, 'activity');
-            }
             scheduleActivityPoll(3000);
         });
     }

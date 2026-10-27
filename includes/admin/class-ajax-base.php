@@ -38,6 +38,51 @@ trait Rmmigrate_Ajax_Base
         return 'system';
     }
 
+    private static function is_transient_gateway_http_status(int $http_status): bool
+    {
+        return in_array($http_status, array(502, 503, 504, 520, 521, 522, 523, 524), true);
+    }
+
+    private static function is_poll_ajax_action(string $ajax_action): bool
+    {
+        if ($ajax_action === '') {
+            return false;
+        }
+        foreach (array(
+            'activity_list',
+            'activity_detail',
+            'log_chunk',
+            'worker',
+            'status',
+            'cancel',
+        ) as $suffix) {
+            if ($ajax_action === 'rmmigrate_' . $suffix) {
+                return true;
+            }
+        }
+
+        return $ajax_action === 'rmmigrate_start';
+    }
+
+    private static function should_skip_transient_gateway_ajax_log(string $ajax_action, string $phase): bool
+    {
+        if (!self::is_poll_ajax_action($ajax_action)) {
+            return false;
+        }
+        if ($ajax_action === 'rmmigrate_start') {
+            return in_array($phase, array('start', 'worker', 'transport', 'status', 'poll'), true);
+        }
+
+        return true;
+    }
+
+    private static function should_skip_poll_ajax_telemetry(string $ajax_action, string $phase, int $http_status): bool
+    {
+        unset($phase, $http_status);
+
+        return self::is_poll_ajax_action($ajax_action);
+    }
+
     /**
      * @param array<string,mixed> $context
      */

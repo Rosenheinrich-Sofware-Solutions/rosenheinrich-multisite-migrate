@@ -620,13 +620,19 @@
         var msg = message || t('backupFailed', 'Backup failed');
         reportOpts = reportOpts || {};
         if (reportOpts.report && rmmigrateAdminUI && typeof rmmigrateAdminUI.reportAjaxFailure === 'function') {
-            rmmigrateAdminUI.reportAjaxFailure({
-                action: reportOpts.action || 'rmmigrate_worker',
-                message: msg,
-                jobId: jobId || parseInt($('#mm-active-job-banner').data('job-id') || 0, 10) || 0,
-                httpStatus: reportOpts.httpStatus || 0,
-                phase: reportOpts.phase || 'worker'
-            });
+            var failHttp = reportOpts.httpStatus || 0;
+            if (
+                !rmmigrateAdminUI.isTransientGatewayStatus
+                || !rmmigrateAdminUI.isTransientGatewayStatus(failHttp)
+            ) {
+                rmmigrateAdminUI.reportAjaxFailure({
+                    action: reportOpts.action || 'rmmigrate_worker',
+                    message: msg,
+                    jobId: jobId || parseInt($('#mm-active-job-banner').data('job-id') || 0, 10) || 0,
+                    httpStatus: failHttp,
+                    phase: reportOpts.phase || 'worker'
+                });
+            }
         }
         rmmigrateAdminUI.toast(msg, 'error');
         $('#mm-active-job-text').text(msg).css('color', '#d63638');

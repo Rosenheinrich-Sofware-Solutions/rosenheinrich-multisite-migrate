@@ -146,6 +146,12 @@
             if (httpStatus < 1 && (phase === 'start' || phase === 'response' || phase === 'transport')) {
                 return;
             }
+            if (rmmigrateAdminUI.isPollingAjaxAction(action)) {
+                return;
+            }
+            if (rmmigrateAdminUI.isTransientGatewayStatus(httpStatus)) {
+                return;
+            }
             $.post(admin.ajaxUrl, {
                 action: admin.reportAjaxErrorAction,
                 nonce: admin.nonce,
@@ -171,8 +177,25 @@
             });
         },
 
+        isTransientGatewayStatus: function (status) {
+            return status === 502 || status === 503 || status === 504 ||
+                status === 520 || status === 521 || status === 522 || status === 523 || status === 524;
+        },
+
+        isPollingAjaxAction: function (action) {
+            return /^rmmigrate_(pro_)?(activity_list|activity_detail|log_chunk|worker|status|cancel)$/.test(action)
+                || action === 'rmmigrate_start'
+                || action === 'rmmigrate_pro_start';
+        },
+
         reportTransportFail: function (action, xhr, phase, jobId) {
             if (xhr && (xhr.status === 0 || xhr.statusText === 'abort')) {
+                return '';
+            }
+            if (rmmigrateAdminUI.isPollingAjaxAction(action)) {
+                return '';
+            }
+            if (xhr && rmmigrateAdminUI.isTransientGatewayStatus(xhr.status)) {
                 return '';
             }
             var msg = rmmigrateAdminUI.ajaxErrorMessage(xhr);
@@ -625,19 +648,27 @@
                     if (typeof options.onComplete === 'function') {
                         options.onComplete(d);
                     }
-                }).fail(function () {
+                }).fail(function (xhr) {
                     if (stopped) {
                         return;
                     }
                     pollFailures++;
                     if (pollFailures >= pollFailureLimit) {
                         var failPayload = { error: rmmigrateAdminUI.i18n('jobFailed', 'Failed') };
-                        if (rmmigrateAdminUI.reportAjaxFailure) {
+                        var pollAction = options.reportAction || 'rmmigrate_status';
+                        var pollHttp = xhr && xhr.status ? xhr.status : 0;
+                        if (
+                            rmmigrateAdminUI.reportAjaxFailure
+                            && (
+                                !rmmigrateAdminUI.isPollingAjaxAction(pollAction)
+                                || (pollHttp > 0 && !rmmigrateAdminUI.isTransientGatewayStatus(pollHttp))
+                            )
+                        ) {
                             rmmigrateAdminUI.reportAjaxFailure({
-                                action: options.reportAction || 'rmmigrate_status',
+                                action: pollAction,
                                 message: failPayload.error,
                                 jobId: jobId || 0,
-                                httpStatus: 0,
+                                httpStatus: pollHttp,
                                 phase: options.reportPhase || 'poll'
                             });
                         }

@@ -1,3 +1,6 @@
+= 1.2.24 – 2026-10-27 =
+* Fix: SQL export checkpoint recovery on resume and fewer false activity-log errors from gateway timeouts and background polling.
+
 = 1.2.23 – 2026-10-26 =
 * Security fixes.
 
