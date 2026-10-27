@@ -47,10 +47,12 @@ class Rmmigrate_File_Restorer
             $search_replace = new Rmmigrate_Search_Replace($this->job->get_migration_map());
         }
 
+        $file_hashes = $this->authenticated_file_hashes();
+
         $start = microtime(true);
         while ($index < $total && (microtime(true) - $start) < $budget_sec) {
             $item = $queue[$index];
-            $result = $this->copy_item($item, $search_replace, $missing_count);
+            $result = $this->copy_item($item, $search_replace, $missing_count, $files_root, $file_hashes);
             $missing_count += (int) ($result['missing'] ?? 0);
             $skipped_count += (int) ($result['skipped'] ?? 0);
             $unchanged_count += (int) ($result['unchanged'] ?? 0);
@@ -357,10 +359,16 @@ class Rmmigrate_File_Restorer
 
     /**
      * @param array{src:string,dest:string,replace:bool} $item
+     * @param array<string,string> $file_hashes
      * @return array{missing:int,skipped:int,unchanged:int}
      */
-    private function copy_item(array $item, ?Rmmigrate_Search_Replace $search_replace, int $missing_so_far): array
-    {
+    private function copy_item(
+        array $item,
+        ?Rmmigrate_Search_Replace $search_replace,
+        int $missing_so_far,
+        string $files_root = '',
+        array $file_hashes = array()
+    ): array {
         $none = array('missing' => 0, 'skipped' => 0, 'unchanged' => 0);
         $unchanged = array('missing' => 0, 'skipped' => 0, 'unchanged' => 1);
         $src = $item['src'];
@@ -382,6 +390,8 @@ class Rmmigrate_File_Restorer
             }
             return array('missing' => 1, 'skipped' => 0, 'unchanged' => 0);
         }
+
+        $this->assert_extracted_matches_manifest($src, $files_root, $file_hashes);
 
         $dest = $item['dest'];
         $dest_dir = dirname($dest);
@@ -476,6 +486,99 @@ class Rmmigrate_File_Restorer
 
         $existing = Rmmigrate_Filesystem::get_contents($dest);
         return $existing !== false && $existing === $contents;
+    }
+
+    /**
+     * Signed/sealed manifest file_hashes map (archive path → digest).
+     *
+     * @return array<string,string>
+     */
+    private function authenticated_file_hashes(): array
+    {
+        $progress = $this->job->get_progress();
+        $manifest = is_array($progress['manifest'] ?? null) ? $progress['manifest'] : array();
+        if ($manifest === array()) {
+            $path = trailingslashit($this->job->get_work_dir()) . 'extracted/manifest.json';
+            if (Rmmigrate_Filesystem::exists($path)) {
+                $json = Rmmigrate_Filesystem::get_contents($path);
+                if ($json !== false) {
+                    $decoded = json_decode($json, true);
+                    if (is_array($decoded)) {
+                        $manifest = $decoded;
+                    }
+                }
+            }
+        }
+        $hashes = $manifest['file_hashes'] ?? null;
+        if (!is_array($hashes) || $hashes === array()) {
+            return array();
+        }
+        $out = array();
+        foreach ($hashes as $path => $digest) {
+            if (!is_string($path) || !is_string($digest) || $digest === '') {
+                continue;
+            }
+            $out[$path] = strtolower($digest);
+        }
+
+        return $out;
+    }
+
+    /**
+     * When the authenticated manifest carries file_hashes, reject before live-tree write.
+     *
+     * @param array<string,string> $file_hashes
+     */
+    private function assert_extracted_matches_manifest(
+        string $src,
+        string $files_root,
+        array $file_hashes
+    ): void {
+        if ($file_hashes === array() || $files_root === '') {
+            return;
+        }
+
+        $files_root_norm = trailingslashit(wp_normalize_path($files_root));
+        $src_norm = wp_normalize_path($src);
+        if (strpos($src_norm, $files_root_norm) !== 0) {
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+            throw Rmmigrate_Job_Exception::raise(
+                sanitize_key(Rmmigrate_Error_Codes::FILE_RESTORE_FAILED),
+                esc_html__('Extracted file is outside the backup files tree. Restore aborted.', 'rosenheinrich-multisite-migrate')
+            );
+        }
+
+        $rel = ltrim(substr($src_norm, strlen($files_root_norm)), '/');
+        $expected = '';
+        if (isset($file_hashes['files/' . $rel])) {
+            $expected = $file_hashes['files/' . $rel];
+        } elseif (isset($file_hashes[$rel])) {
+            $expected = $file_hashes[$rel];
+        }
+        if ($expected === '') {
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+            throw Rmmigrate_Job_Exception::raise(
+                sanitize_key(Rmmigrate_Error_Codes::FILE_RESTORE_FAILED),
+                esc_html__('Extracted file is missing from the signed backup manifest. Restore aborted.', 'rosenheinrich-multisite-migrate')
+            );
+        }
+
+        $algo = strlen($expected) === 64 ? 'sha256' : 'md5';
+        if (!preg_match('/^[a-f0-9]{32}$|^[a-f0-9]{64}$/', $expected)) {
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+            throw Rmmigrate_Job_Exception::raise(
+                sanitize_key(Rmmigrate_Error_Codes::FILE_RESTORE_FAILED),
+                esc_html__('Backup manifest file hash is invalid. Restore aborted.', 'rosenheinrich-multisite-migrate')
+            );
+        }
+        $actual = strtolower((string) hash_file($algo, $src));
+        if ($actual === '' || !hash_equals($expected, $actual)) {
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+            throw Rmmigrate_Job_Exception::raise(
+                sanitize_key(Rmmigrate_Error_Codes::FILE_RESTORE_FAILED),
+                esc_html__('Extracted file does not match the signed backup manifest. Restore aborted.', 'rosenheinrich-multisite-migrate')
+            );
+        }
     }
 
     private function should_skip_wp_config_restore(): bool

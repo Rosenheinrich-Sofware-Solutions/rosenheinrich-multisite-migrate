@@ -25,6 +25,7 @@ class Rmmigrate_Restore_Topology_Db_Action
         if ($db_action === 'skip' && !$is_slot_restore) {
             return $context;
         }
+        self::assert_network_authority_for_destructive_db($db_action, $context);
         if ($db_action === 'empty' && $is_slot_restore) {
             // Emptying the database would destroy every other blog and the network globals.
             throw Rmmigrate_Job_Exception::raise(
@@ -89,6 +90,73 @@ class Rmmigrate_Restore_Topology_Db_Action
             rmmigrate_shared_log_best_effort_failure($e);
             return false;
         }
+    }
+
+    /**
+     * full_installation_replace / empty-DB on a live multisite need network authority.
+     *
+     * @param array<string,mixed> $context
+     */
+    private static function assert_network_authority_for_destructive_db(string $db_action, array $context): void
+    {
+        if (!self::is_network_destructive_db_action($db_action, $context)) {
+            return;
+        }
+        if (self::caller_has_network_db_authority()) {
+            return;
+        }
+
+        throw Rmmigrate_Job_Exception::raise(
+            sanitize_key(
+                class_exists('Rmmigrate_Error_Codes', false)
+                    ? Rmmigrate_Error_Codes::PERMISSION_DENIED
+                    : 'permission_denied'
+            ),
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+            __('Emptying or replacing the entire multisite database requires a network administrator.', 'rosenheinrich-multisite-migrate')
+        );
+    }
+
+    /**
+     * @param array<string,mixed> $context
+     */
+    private static function is_network_destructive_db_action(string $db_action, array $context): bool
+    {
+        if (!empty($context['full_installation_replace'])) {
+            return true;
+        }
+        if ($db_action !== 'empty') {
+            return false;
+        }
+        $destination = is_array($context['destination'] ?? null) ? $context['destination'] : array();
+        if (!empty($destination['is_multisite'])) {
+            return true;
+        }
+        if (function_exists('is_multisite') && is_multisite()) {
+            return true;
+        }
+
+        // Standalone installer / single-site: empty DB is not a multisite network wipe.
+        return false;
+    }
+
+    private static function caller_has_network_db_authority(): bool
+    {
+        if (!function_exists('is_multisite') || !is_multisite()) {
+            return true;
+        }
+        if (function_exists('current_user_can') && current_user_can('manage_network')) {
+            return true;
+        }
+        if (function_exists('is_super_admin') && is_super_admin()) {
+            return true;
+        }
+        // Background worker / cron: no interactive user — creation path already authorized the job.
+        if (!function_exists('is_user_logged_in') || !is_user_logged_in()) {
+            return true;
+        }
+
+        return false;
     }
 
     /**

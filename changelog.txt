@@ -1,3 +1,6 @@
+= 1.2.23 – 2026-10-26 =
+* Security fixes.
+
 = 1.2.22 – 2026-10-22 =
 * Fix: Improved reliability of long-running backups and restores.
 

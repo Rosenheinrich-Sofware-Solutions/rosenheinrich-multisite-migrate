@@ -150,7 +150,7 @@ class Rmmigrate_Admin_Save
 
     public static function diagnostic_zip(): void
     {
-        if (!self::can_save()) {
+        if (!self::can_save_network_only()) {
             wp_die(esc_html__('Permission denied.', 'rosenheinrich-multisite-migrate'));
         }
         check_admin_referer('rmmigrate_diagnostic_zip');

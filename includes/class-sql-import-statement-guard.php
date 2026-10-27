@@ -81,14 +81,19 @@ if (!class_exists('Rmmigrate_Sql_Import_Statement_Guard', false)) {
                 return self::OK;
             }
             $is_trigger = self::is_create_trigger($tokens);
-            foreach ($tokens as $t) {
+            foreach ($tokens as $i => $t) {
                 if (!$is_trigger && self::is_punct($t, ';')) {
                     return 'multiple_statements';
                 }
                 if ($t['t'] === 'w' && in_array($t['u'], array('DIRECTORY', 'TABLESPACE', 'CONNECTION', 'SOCKET'), true)) {
                     return 'storage_clause_not_allowed';
                 }
-                if ($t['t'] === 'w' && in_array($t['u'], self::ALWAYS_BANNED, true)) {
+                // Word form: ban anywhere. Quoted-id / qualified call: ban name immediately before '('.
+                if (in_array($t['u'], self::ALWAYS_BANNED, true)
+                    && (
+                        $t['t'] === 'w'
+                        || ($t['t'] === 'id' && self::is_punct($tokens[$i + 1] ?? null, '('))
+                    )) {
                     return 'banned_function';
                 }
             }

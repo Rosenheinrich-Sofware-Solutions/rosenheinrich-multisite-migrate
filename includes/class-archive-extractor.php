@@ -13,6 +13,8 @@ if (!class_exists('Rmmigrate_Zip_Extract_Core')) {
 
 class Rmmigrate_Archive_Extractor
 {
+    private const MAX_BLOCK_UNCOMP = 8388608;
+
     /** @var Rmmigrate_Job */
     private $job;
 
@@ -343,7 +345,9 @@ class Rmmigrate_Archive_Extractor
                 $block_comp = (int) $bu['comp'];
                 $block_uncomp = (int) $bu['uncomp'];
 
-                if ($block_comp < 0 || $block_comp > $archive_size || $block_uncomp <= 0) {
+                if ($block_comp < 0 || $block_comp > $archive_size || $block_uncomp <= 0
+                    || $block_uncomp > self::MAX_BLOCK_UNCOMP
+                    || ($bytes_done + $block_uncomp) > $uncomp_len) {
                     if ($out_fh !== null) {
                         $out_fh->close();
                     }
@@ -372,7 +376,7 @@ class Rmmigrate_Archive_Extractor
                         // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
                         throw Rmmigrate_Job_Exception::raise(sanitize_key(Rmmigrate_Error_Codes::EXTRACT_FAILED), esc_html__('This DAF archive uses compression but the PHP zlib extension (gzinflate) is not available on this server. Enable zlib and try again.', 'rosenheinrich-multisite-migrate'));
                     }
-                    $out = $block_flag === 1 ? gzinflate($blob) : $blob;
+                    $out = $block_flag === 1 ? gzinflate($blob, $block_uncomp) : $blob;
                     if ($out === false) {
                         $out_fh->close();
                         $fh->close();
