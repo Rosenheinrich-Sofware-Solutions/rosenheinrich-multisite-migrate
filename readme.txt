@@ -241,7 +241,7 @@ Backup and restore run as background-style chunked jobs. They are designed not t
 
 = How do I report a security issue? =
 
-Report security issues to phillip@rosenheinrich.com; we aim to respond within 72 hours. Please do not post security problems in the public support forum.
+Report security issues to phillip@rosenheinrich.com; we aim to respond within 72 hours. Please do not post security problems in the public support forum or in public GitHub issues.
 
 == Changelog ==
 
