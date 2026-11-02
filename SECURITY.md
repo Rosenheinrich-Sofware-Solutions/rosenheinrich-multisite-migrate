@@ -22,4 +22,4 @@ Only the latest released version of each edition receives security fixes. Please
 
 ## EU Cyber Resilience Act
 
-Actively exploited vulnerabilities and severe security incidents are reported to the competent authorities via the ENISA Single Reporting Platform, and affected users are informed, as required by Art. 14 of Regulation (EU) 2024/2847.
+Where Art. 14 of Regulation (EU) 2024/2847 applies, actively exploited vulnerabilities in the product and severe incidents having an impact on its security are notified simultaneously to the CSIRT designated as coordinator and to ENISA via the ENISA Single Reporting Platform (Art. 16), and affected users are informed as required.
