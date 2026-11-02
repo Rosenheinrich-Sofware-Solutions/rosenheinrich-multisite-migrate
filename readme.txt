@@ -239,6 +239,10 @@ No. Backup, restore, and local migration are driven from the WordPress admin UI.
 
 Backup and restore run as background-style chunked jobs. They are designed not to hold a single request open for the entire archive build. See [shared hosting guidance](https://multisitemigrate.rosenheinrich.com/features/shared-hosting/?utm_source=wprepo&utm_medium=link&utm_content=shared_hosting&utm_campaign=multisite_migrate_free).
 
+= How do I report a security issue? =
+
+Report security issues to phillip@rosenheinrich.com; we aim to respond within 72 hours. Please do not post security problems in the public support forum.
+
 == Changelog ==
 
 = 1.2.24 – 2026-10-27 =
