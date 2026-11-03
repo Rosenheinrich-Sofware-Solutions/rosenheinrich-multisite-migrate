@@ -8,10 +8,10 @@ if (!defined('ABSPATH')) {
     <p class="description"><?php esc_html_e('How many completed backups to keep. Set to 0 to keep all backups (no automatic deletion).', 'rosenheinrich-multisite-migrate'); ?></p>
     <table class="form-table">
         <tr>
-            <th><label for="retention_network"><?php esc_html_e('Network backups to keep', 'rosenheinrich-multisite-migrate'); ?></label></th>
+            <th><label for="retention_network"><?php echo is_multisite() ? esc_html__('Network backups to keep', 'rosenheinrich-multisite-migrate') : esc_html__('Backups to keep', 'rosenheinrich-multisite-migrate'); ?></label></th>
             <td>
                 <input type="number" min="0" name="retention_network" id="retention_network" value="<?php echo esc_attr((string) ($rmmigrate_settings['retention_network'] ?? 0)); ?>">
-                <p class="description"><?php esc_html_e('0 = keep all network backups.', 'rosenheinrich-multisite-migrate'); ?></p>
+                <p class="description"><?php echo is_multisite() ? esc_html__('0 = keep all network backups.', 'rosenheinrich-multisite-migrate') : esc_html__('0 = keep all backups.', 'rosenheinrich-multisite-migrate'); ?></p>
             </td>
         </tr>
         <?php if (is_multisite()) : ?>

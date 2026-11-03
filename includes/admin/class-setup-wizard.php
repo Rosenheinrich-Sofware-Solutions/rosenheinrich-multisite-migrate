@@ -137,7 +137,8 @@ class Rmmigrate_Setup_Wizard
 
     public static function render_banner(bool $rmmigrate_is_network, string $rmmigrate_page_slug = ''): void
     {
-        if ($rmmigrate_page_slug === 'multisite-migrate-setup') {
+        // The Backups page already offers the one-click backup; no second call to action there.
+        if ($rmmigrate_page_slug === 'multisite-migrate-setup' || $rmmigrate_page_slug === 'multisite-migrate-archives' || $rmmigrate_page_slug === 'multisite-migrate-migrate') {
             return;
         }
         if (!self::needs_setup_banner()) {
@@ -205,7 +206,7 @@ class Rmmigrate_Setup_Wizard
         self::clear_pending_post_activation_redirect();
     }
 
-    public static function complete(): void
+    public static function complete(string $intent = ''): void
     {
         $rmmigrate_state = self::get_state();
         if (!empty($rmmigrate_state['complete'])) {
@@ -219,12 +220,20 @@ class Rmmigrate_Setup_Wizard
         self::save_state($rmmigrate_state);
         self::clear_pending_post_activation_redirect();
         if ($emit_completed) {
-            Rmmigrate_Telemetry::record_event('wizard_completed', array(
+            $props = array(
                 'newsletter_opted_in' => !empty($rmmigrate_state['newsletter_opted_in']),
-            ));
+            );
+            if ($intent !== '') {
+                $props['intent'] = sanitize_key($intent);
+            }
+            Rmmigrate_Telemetry::record_event('wizard_completed', $props);
         }
     }
 
+    /**
+     * Only the one-time redirect right after activation. Plugin screens are never
+     * forced to the setup page afterwards (WordPress.org guideline 11).
+     */
     public static function should_redirect(): bool
     {
         if (self::is_finished()) {
@@ -236,18 +245,8 @@ class Rmmigrate_Setup_Wizard
         if (!self::can_run()) {
             return false;
         }
-        if (self::is_pending_post_activation_redirect()) {
-            return true;
-        }
-        $rmmigrate_page = Rmmigrate_Request_Input::get_key('page');
-        if ($rmmigrate_page === 'multisite-migrate-setup') {
-            return false;
-        }
-        if ($rmmigrate_page === '' || !isset(Rmmigrate_Admin_Router::all_page_slugs()[$rmmigrate_page])) {
-            return false;
-        }
 
-        return true;
+        return self::is_pending_post_activation_redirect();
     }
 
     public static function can_run(): bool
@@ -348,7 +347,14 @@ class Rmmigrate_Setup_Wizard
     public static function ajax_skip(): void
     {
         self::verify_setup_ajax();
+        $already_finished = self::is_finished();
         self::skip();
+        if (!$already_finished) {
+            Rmmigrate_Telemetry::record_event('wizard_step', array(
+                'step'   => 'setup',
+                'action' => 'skipped',
+            ));
+        }
         wp_send_json_success(array(
             'redirect' => Rmmigrate_Admin_Router::admin_url(
                 'multisite-migrate-archives',
@@ -358,25 +364,53 @@ class Rmmigrate_Setup_Wizard
         ));
     }
 
+    /**
+     * First-screen choices and where each one leads.
+     *
+     * @return array<string,array{page:string,args:array<string,string>}>
+     */
+    public static function intents(): array
+    {
+        return array(
+            'backup' => array('page' => 'multisite-migrate-archives', 'args' => array('quick' => '1')),
+            'move'   => array('page' => 'multisite-migrate-archives', 'args' => array('quick' => '1', 'intent' => 'move')),
+            'import' => array('page' => 'multisite-migrate-import', 'args' => array()),
+        );
+    }
+
+    public static function intent_redirect_url(string $intent): string
+    {
+        $intents = self::intents();
+        $target  = $intents[$intent] ?? array('page' => 'multisite-migrate-archives', 'args' => array());
+
+        return Rmmigrate_Admin_Router::admin_url(
+            $target['page'],
+            $target['args'],
+            is_multisite() && is_network_admin()
+        );
+    }
+
     public static function ajax_complete(): void
     {
         self::verify_setup_ajax();
+        $intent = Rmmigrate_Request_Input::post_key('intent');
+        if (!isset(self::intents()[$intent])) {
+            $intent = '';
+        }
         if (self::is_complete()) {
             wp_send_json_success(array(
-                'redirect' => Rmmigrate_Admin_Router::admin_url(
-                    'multisite-migrate-archives',
-                    array(),
-                    is_multisite() && is_network_admin()
-                ),
+                'redirect' => self::intent_redirect_url($intent),
             ));
         }
-        self::complete();
+        if ($intent !== '') {
+            Rmmigrate_Telemetry::record_event('wizard_step', array(
+                'step'   => 'intent',
+                'action' => $intent,
+            ));
+        }
+        self::complete($intent);
         wp_send_json_success(array(
-            'redirect' => Rmmigrate_Admin_Router::admin_url(
-                'multisite-migrate-archives',
-                array(),
-                is_multisite() && is_network_admin()
-            ),
+            'redirect' => self::intent_redirect_url($intent),
         ));
     }
 
@@ -710,6 +744,87 @@ class Rmmigrate_Setup_Wizard
     }
 
     /**
+     * Cards for the collapsed "What the free plugin includes" list on the first
+     * screen: network-only cards are hidden on single sites, Pro-only cards are
+     * left out.
+     *
+     * @return array<int,array{slug:string,label:string,icon:string,blurb:string}>
+     */
+    public static function visible_feature_cards(): array
+    {
+        $hide = array('recovery' => true);
+        if (!is_multisite()) {
+            $hide['network'] = true;
+            $hide['scope']   = true;
+        }
+
+        return array_values(array_filter(
+            self::feature_cards(),
+            static function (array $card) use ($hide): bool {
+                return !isset($hide[(string) ($card['slug'] ?? '')]);
+            }
+        ));
+    }
+
+    /**
+     * Short hosting check for the first screen: only the limits that most often
+     * stop a first backup, in plain words. Reuses the Health checks.
+     *
+     * @return array{summary:string,has_blocker:bool,checks:array<int,array{status:string,label:string,detail:string}>}
+     */
+    public static function precheck(): array
+    {
+        $empty = array('summary' => '', 'has_blocker' => false, 'checks' => array());
+        if (!class_exists('Rmmigrate_Health')) {
+            return $empty;
+        }
+        try {
+            $health = Rmmigrate_Health::get_status();
+        } catch (\Throwable $e) {
+            return $empty;
+        }
+        $all = is_array($health['checks'] ?? null) ? $health['checks'] : array();
+        $keys = array('backup_storage', 'disk_space', 'php_timeout', 'memory_limit', 'zip_extension', 'loopback');
+        $checks = array();
+        $warn = 0;
+        $blocker = 0;
+        foreach ($keys as $key) {
+            if (empty($all[$key]) || !is_array($all[$key])) {
+                continue;
+            }
+            $status = (string) ($all[$key]['status'] ?? Rmmigrate_Health::STATUS_OK);
+            if ($status === Rmmigrate_Health::STATUS_BLOCKER) {
+                $blocker++;
+            } elseif ($status === Rmmigrate_Health::STATUS_WARN) {
+                $warn++;
+            }
+            $checks[] = array(
+                'status' => $status,
+                'label'  => (string) ($all[$key]['label'] ?? ''),
+                'detail' => (string) ($all[$key]['detail'] ?? ''),
+            );
+        }
+        if ($checks === array()) {
+            return $empty;
+        }
+        if ($blocker > 0) {
+            $summary = __('Server check: something needs fixing before a backup can run', 'rosenheinrich-multisite-migrate');
+        } elseif ($warn > 0) {
+            $summary = __('Server check: backups should work, with a few hints', 'rosenheinrich-multisite-migrate');
+        } else {
+            $summary = __('Server check: everything looks ready for a backup', 'rosenheinrich-multisite-migrate');
+        }
+
+        return array(
+            'summary'     => $summary,
+            'has_blocker' => $blocker > 0,
+            'checks'      => $checks,
+        );
+    }
+
+    /**
+     * Kept for compatibility; the first screen no longer shows a Pro panel.
+     *
      * @return array<int,string>
      */
     public static function pro_highlights(): array

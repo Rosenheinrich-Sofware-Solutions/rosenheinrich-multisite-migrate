@@ -161,6 +161,11 @@ class Rmmigrate_Ajax_Restore
 
         try {
             $result = Rmmigrate_Restore_Service::start_restore($params);
+            // The restore can replace the users table before the progress page loads; hand the
+            // browser the job token now so it can keep the job moving after the sign-out.
+            if (is_array($result) && empty($result['awaiting_safety']) && !empty($result['job_id'])) {
+                $result['worker_token'] = Rmmigrate_Runner::worker_token((int) $result['job_id'], 7200);
+            }
             wp_send_json_success($result);
         } catch (Rmmigrate_Service_Exception $e) {
             self::send_service_exception($e, 'restore', (int) $params['source_job_id'], array('phase' => 'start'));

@@ -57,7 +57,27 @@ final class Rmmigrate_Feedback
         'missing_feature'   => true,
         'found_alternative' => true,
         'broke_site'        => true,
+        'no_start'          => true,
+        'backup_failed'     => true,
+        'too_expensive'     => true,
+        'done_moving'       => true,
+        'expected_other'    => true,
         'other'             => true,
+    );
+
+    /**
+     * Reasons added after the portal whitelist was frozen. If an older portal
+     * rejects them (HTTP 400), the answer is resent as "other" with the reason
+     * id prefixed to the message so nothing is lost.
+     *
+     * @var array<string,bool>
+     */
+    private static $portal_fallback_reasons = array(
+        'no_start'       => true,
+        'backup_failed'  => true,
+        'too_expensive'  => true,
+        'done_moving'    => true,
+        'expected_other' => true,
     );
 
     public static function register(): void
@@ -133,7 +153,10 @@ final class Rmmigrate_Feedback
             return false;
         }
 
-        return true;
+        // Only at a calm moment (14+ days, 2+ successes, no recent failure) —
+        // never right after the first success and never blocking a restore.
+        return class_exists('Rmmigrate_Review_Nudge', false)
+            && Rmmigrate_Review_Nudge::calm_moment(is_multisite() && is_network_admin());
     }
 
     /**
@@ -370,7 +393,22 @@ final class Rmmigrate_Feedback
             'body'    => wp_json_encode($payload),
         ));
 
-        $ok = !is_wp_error($response) && (int) wp_remote_retrieve_response_code($response) < 400;
+        $code = is_wp_error($response) ? 0 : (int) wp_remote_retrieve_response_code($response);
+        if ($code === 400 && isset(self::$portal_fallback_reasons[$reason])) {
+            $payload['error_code'] = 'other';
+            $payload['message']    = self::truncate_text(
+                '[' . $reason . ']' . ($message !== '' ? ' ' . $message : ''),
+                self::MESSAGE_MAX
+            );
+            $response = wp_remote_post($submit_url, array(
+                'timeout' => 3,
+                'headers' => array('Content-Type' => 'application/json'),
+                'body'    => wp_json_encode($payload),
+            ));
+            $code = is_wp_error($response) ? 0 : (int) wp_remote_retrieve_response_code($response);
+        }
+
+        $ok = $code > 0 && $code < 400;
         wp_send_json_success(array('ok' => $ok));
     }
 

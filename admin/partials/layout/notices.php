@@ -68,6 +68,18 @@ if (!empty($rmmigrate_last_error['message'])) {
             ),
             array(
                 'type'  => 'link',
+                'label' => __('Troubleshooting guides', 'rosenheinrich-multisite-migrate'),
+                'url'   => Rmmigrate_Links::docs_url('last_error_banner'),
+                'attrs' => array('target' => '_blank', 'rel' => 'noopener noreferrer'),
+            ),
+            array(
+                'type'  => 'link',
+                'label' => __('Ask in the support forum', 'rosenheinrich-multisite-migrate'),
+                'url'   => Rmmigrate_Links::support_forum_url(),
+                'attrs' => array('target' => '_blank', 'rel' => 'noopener noreferrer'),
+            ),
+            array(
+                'type'  => 'link',
                 'label' => __('Report a problem', 'rosenheinrich-multisite-migrate'),
                 'url'   => '#',
                 'class' => 'mm-feedback-open-error',

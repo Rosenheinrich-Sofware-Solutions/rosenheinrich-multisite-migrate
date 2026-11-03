@@ -31,12 +31,7 @@ class Rmmigrate_Upgrade_Page
             return;
         }
 
-        $css = '#adminmenu .mm-upgrade-menu{color:#14b8a6 !important;font-weight:600;}'
-            . '#adminmenu li:hover .mm-upgrade-menu,'
-            . '#adminmenu a:focus .mm-upgrade-menu,'
-            . '#adminmenu a:hover .mm-upgrade-menu{color:#5eead4 !important;}';
-        wp_add_inline_style('common', $css);
-
+        // No highlight colour: the upgrade entry stays a regular submenu item.
         wp_register_script('rmmigrate-upgrade-menu', false, array(), RMMIGRATE_VERSION, true);
         wp_enqueue_script('rmmigrate-upgrade-menu');
         wp_add_inline_script(

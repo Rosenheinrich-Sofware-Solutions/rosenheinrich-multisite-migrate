@@ -12,7 +12,7 @@ if (!defined('ABSPATH')) {
  * @var array<int,array{id:int,label:string}> $rmmigrate_schedule_sites
  */
 $rmmigrate_scope_labels = array(
-    'network' => __('Full network', 'rosenheinrich-multisite-migrate'),
+    'network' => is_multisite() ? __('Full network', 'rosenheinrich-multisite-migrate') : __('Whole site', 'rosenheinrich-multisite-migrate'),
     'subsite' => __('Single subsite', 'rosenheinrich-multisite-migrate'),
 );
 if (!is_multisite()) {

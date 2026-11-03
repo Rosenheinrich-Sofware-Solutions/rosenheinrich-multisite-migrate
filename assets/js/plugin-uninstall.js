@@ -107,9 +107,44 @@
                     name: radioName,
                     value: item.id
                 });
+            if (item.help) {
+                $input.attr('data-help', String(item.help));
+            }
             $label.append($input, $('<span></span>').text(item.label || item.id));
             $li.append($label);
             $list.append($li);
+        });
+
+        // Inline help for "did not know where to start" / "did not work" (no network calls).
+        var links = (cfg && cfg.helpLinks) ? cfg.helpLinks : {};
+        var $help = $('<div class="mm-deactivate-survey-help" aria-live="polite" hidden></div>');
+        var $helpText = $('<p class="mm-deactivate-survey-help-text"></p>');
+        var $helpLinks = $('<p class="mm-deactivate-survey-help-links"></p>');
+        if (links.guides) {
+            $helpLinks.append(
+                $('<a target="_blank" rel="noopener noreferrer"></a>').attr('href', links.guides).text(t('helpGuides', 'Open the guides'))
+            );
+        }
+        if (links.forum) {
+            if (links.guides) {
+                $helpLinks.append(document.createTextNode(' · '));
+            }
+            $helpLinks.append(
+                $('<a target="_blank" rel="noopener noreferrer"></a>').attr('href', links.forum).text(t('helpForum', 'Ask in the support forum'))
+            );
+        }
+        $help.append($helpText, $helpLinks);
+        $list.on('change', 'input[name="' + radioName + '"]', function () {
+            var kind = ($(this).attr('data-help') || '').toString();
+            if (kind === 'start') {
+                $helpText.text(t('helpStart', ''));
+                $help.prop('hidden', false);
+            } else if (kind === 'failed') {
+                $helpText.text(t('helpFailed', ''));
+                $help.prop('hidden', false);
+            } else {
+                $help.prop('hidden', true);
+            }
         });
 
         var $details = $('<div class="mm-deactivate-survey-details"></div>');
@@ -129,10 +164,13 @@
         var defaultEmail = (cfg && cfg.defaultContactEmail) ? cfg.defaultContactEmail : '';
         var $email = $('<input type="email" id="mm-deactivate-contact-email" class="mm-deactivate-survey-email" maxlength="100" autocomplete="email">')
             .val(defaultEmail);
+        if (cfg && cfg.contactEmailPlaceholder) {
+            $email.attr('placeholder', cfg.contactEmailPlaceholder);
+        }
         var $contact = $('<div class="mm-deactivate-survey-contact"></div>');
         $contact.append($emailLabel, $email, $emailHint);
         $details.append($msgWrap, $contact);
-        $el.append($title, $list, $details);
+        $el.append($title, $list, $help, $details);
 
         return {
             $el: $el,

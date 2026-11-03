@@ -2630,6 +2630,27 @@ body.mm-feedback-open {
     color: var(--mm-text-muted, #5c6b7a);
 }
 
+.mm-deactivate-survey-help {
+    margin: -6px 0 16px;
+    padding: 10px 12px;
+    border-left: 3px solid var(--mm-teal, #0d9488);
+    background: var(--mm-surface-muted, #f0fdfa);
+    border-radius: 4px;
+    font-size: 13px;
+}
+
+.mm-deactivate-survey-help[hidden] {
+    display: none;
+}
+
+.mm-deactivate-survey-help p {
+    margin: 0;
+}
+
+.mm-deactivate-survey-help p + p {
+    margin-top: 6px;
+}
+
 .mm-uninstall-presets {
     margin: 0 0 12px;
     font-size: 13px;

@@ -5,7 +5,7 @@ if (!defined('ABSPATH')) {
 ?>
 <div class="mm-form-section">
 <h2><?php esc_html_e('Security layers', 'rosenheinrich-multisite-migrate'); ?></h2>
-<p class="description"><?php esc_html_e('Encrypt archives at rest with a passphrase (.venc files). Archive format and WordPress core inclusion are chosen in the backup wizard and remembered from your last run.', 'rosenheinrich-multisite-migrate'); ?></p>
+<p class="description"><?php esc_html_e('Optional: protect backup files with a passphrase. You will need it to restore.', 'rosenheinrich-multisite-migrate'); ?></p>
 <table class="form-table">
     <tr>
         <th scope="row" id="encrypt_archives-label"><?php esc_html_e('Encrypt archives at rest', 'rosenheinrich-multisite-migrate'); ?></th>
@@ -32,7 +32,7 @@ if (!defined('ABSPATH')) {
     </tr>
 </table>
 </div>
-<div class="mm-form-section">
+<div class="mm-form-section mm-expert-only"<?php echo Rmmigrate_Expert_Mode::enabled() ? '' : ' hidden'; ?>>
 <h2><?php esc_html_e('Exclusions', 'rosenheinrich-multisite-migrate'); ?></h2>
 <table class="form-table">
     <tr>

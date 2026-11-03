@@ -16,7 +16,7 @@ final class Rmmigrate_Review_Nudge
     const ACTIVATED_OPTION = 'rmmigrate_first_activated_at';
     const COOLDOWN_DAYS = 14;
     const MIN_ACTIVE_DAYS = 14;
-    const MIN_BACKUPS = 1;
+    const MIN_BACKUPS = 2;
     const WP_ORG_REVIEW_URL = 'https://wordpress.org/support/plugin/rosenheinrich-multisite-migrate/reviews/#new-post';
 
     /** @var array<string,true> */
@@ -40,7 +40,8 @@ final class Rmmigrate_Review_Nudge
 
         $is_plugin_page = self::is_plugin_admin_page($page_slug);
 
-        if (!$is_plugin_page && !self::has_been_active_long_enough()) {
+        // Never right after the first success: 14+ days active and 2+ backups.
+        if (!self::has_been_active_long_enough()) {
             return false;
         }
 
@@ -72,10 +73,49 @@ final class Rmmigrate_Review_Nudge
         return true;
     }
 
+    /**
+     * A calm moment to ask for a review: active 14+ days, 2+ completed backups,
+     * no recent failure, nothing running. Never during or right after a job.
+     */
+    public static function calm_moment(bool $is_network = false): bool
+    {
+        if (!self::user_can_see() || !self::has_been_active_long_enough()) {
+            return false;
+        }
+        $state = self::get_user_state();
+        if ($state !== '' && isset(self::$terminal_states[$state])) {
+            return false;
+        }
+
+        return !self::is_in_cooldown()
+            && self::completed_backup_count() >= self::MIN_BACKUPS
+            && !self::has_recent_failure($is_network)
+            && !self::has_active_job();
+    }
+
+    /**
+     * Inline, non-blocking review card on the Backups page only (no modal).
+     */
     public static function render(string $page_slug, bool $is_network): void
     {
-        // Banner retired — wp.org review CTA lives in the post-success feedback modal only.
-        unset($page_slug, $is_network);
+        if ($page_slug !== 'multisite-migrate-archives' || Rmmigrate_Request_Input::get_int('job_id') > 0) {
+            return;
+        }
+        if (!self::should_show($page_slug, $is_network)) {
+            return;
+        }
+        ?>
+        <div class="mm-notice-card mm-notice-card--info mm-review-card" role="region" aria-label="<?php esc_attr_e('Review request', 'rosenheinrich-multisite-migrate'); ?>">
+            <div class="mm-notice-card__body">
+                <p class="mm-notice-card__title"><strong><?php esc_html_e('Is Multisite Migrate working well for you?', 'rosenheinrich-multisite-migrate'); ?></strong></p>
+                <p class="mm-notice-card__text"><?php esc_html_e('If it saved you time, a short review on WordPress.org helps other admins find it.', 'rosenheinrich-multisite-migrate'); ?></p>
+            </div>
+            <div class="mm-notice-card__actions">
+                <a class="button button-primary mm-btn-teal mm-review-card-yes" href="<?php echo esc_url(self::review_url()); ?>" target="_blank" rel="noopener"><?php esc_html_e('Leave a review', 'rosenheinrich-multisite-migrate'); ?></a>
+                <button type="button" class="button mm-review-card-later"><?php esc_html_e('Not now', 'rosenheinrich-multisite-migrate'); ?></button>
+            </div>
+        </div>
+        <?php
     }
 
     public static function review_url(): string

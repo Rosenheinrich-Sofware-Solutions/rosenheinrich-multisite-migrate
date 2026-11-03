@@ -6,6 +6,8 @@ if (!defined('ABSPATH')) {
 
 class Rmmigrate_Deactivator
 {
+    public const LIFECYCLE_OPTION = 'rmmigrate_lifecycle';
+
     /**
      * @param string $plugin_basename Plugin basename being deactivated (plugin_basename(__FILE__)).
      */
@@ -19,6 +21,12 @@ class Rmmigrate_Deactivator
         wp_clear_scheduled_hook('rmmigrate_storage_self_check');
         wp_clear_scheduled_hook('rmmigrate_deferred_retention_prune');
         wp_clear_scheduled_hook('rmmigrate_tick');
+        wp_clear_scheduled_hook('rmmigrate_oauth_purge_expired');
+        // Telemetry jobs belong to this edition only (Pro uses its own prefixes).
+        wp_clear_scheduled_hook('rmmigrate_telemetry_flush');
+        wp_clear_scheduled_hook('rmmigrate_daily_telemetry_snapshot');
+        wp_clear_scheduled_hook('rmmigrate_telemetry_snapshot_oneshot');
+        wp_clear_scheduled_hook('rmmigrate_telemetry_consent_remote');
         delete_transient('rmmigrate_lock');
         delete_transient('rmmigrate_preflight');
 
@@ -27,7 +35,22 @@ class Rmmigrate_Deactivator
         delete_site_option('rmmigrate_maintenance');
         delete_option('rmmigrate_maintenance');
         self::remove_owned_maintenance_file();
+        self::record_lifecycle();
         self::maybe_send_deactivate_beacon();
+    }
+
+    /**
+     * Local, never transmitted on its own: when and how often the plugin was deactivated.
+     */
+    private static function record_lifecycle(): void
+    {
+        $lifecycle = get_site_option(self::LIFECYCLE_OPTION, array());
+        if (!is_array($lifecycle)) {
+            $lifecycle = array();
+        }
+        $lifecycle['deactivated_at'] = time();
+        $lifecycle['deactivations']  = (int) ($lifecycle['deactivations'] ?? 0) + 1;
+        update_site_option(self::LIFECYCLE_OPTION, $lifecycle);
     }
 
     private static function maybe_send_deactivate_beacon(): void

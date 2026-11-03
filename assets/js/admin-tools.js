@@ -315,4 +315,26 @@ function formatInstallCleanupSize(bytes) {
             return;
         }
     });
+
+    // Expert mode: show/hide server internals (saved per installation), then reload.
+    $(document).on('change', '#mm-expert-mode-toggle', function () {
+        var $box = $(this);
+        var on = $box.is(':checked');
+        var $status = $box.closest('.mm-expert-toggle').find('.mm-expert-toggle__status');
+        $box.prop('disabled', true);
+        $.post(rmmigrateAdmin.ajaxUrl, {
+            action: 'rmmigrate_toggle_expert_mode',
+            nonce: rmmigrateAdmin.nonce,
+            enabled: on ? '1' : '0'
+        }).done(function (res) {
+            if (res && res.success) {
+                $status.text(on ? i18n('expertOn', 'Expert settings are shown.') : i18n('expertOff', 'Expert settings are hidden.')).prop('hidden', false);
+                window.location.reload();
+                return;
+            }
+            $box.prop('checked', !on).prop('disabled', false);
+        }).fail(function () {
+            $box.prop('checked', !on).prop('disabled', false);
+        });
+    });
 })(jQuery);

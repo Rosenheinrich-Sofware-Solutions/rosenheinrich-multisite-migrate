@@ -25,22 +25,22 @@ if (
     return;
 }
 
-$rmmigrate_can_verify_restore = Rmmigrate_Recovery_Points::is_restorable($rmmigrate_verify_job);
 $rmmigrate_verify_actions = array();
-if ($rmmigrate_can_verify_restore) {
+if (!empty($rmmigrate_verify_job->data['local_path'])) {
     $rmmigrate_verify_actions[] = array(
-        'type'    => 'button',
-        'label'   => __('Test restore', 'rosenheinrich-multisite-migrate'),
+        'type'    => 'link',
+        'label'   => __('Download backup', 'rosenheinrich-multisite-migrate'),
         'primary' => true,
-        'class'   => 'mm-restore-backup',
-        'attrs'   => array(
-            'data-job-id' => (string) $rmmigrate_verify_job_id,
-        ),
+        'url'     => add_query_arg(array(
+            'action' => 'rmmigrate_download',
+            'job_id' => $rmmigrate_verify_job_id,
+            'nonce'  => wp_create_nonce('rmmigrate_admin'),
+        ), admin_url('admin-ajax.php')),
     );
 }
 $rmmigrate_verify_actions[] = array(
     'type'     => 'link',
-    'label'    => __('Add off-site cloud (Plus)', 'rosenheinrich-multisite-migrate'),
+    'label'    => __('Back up to the cloud automatically (Plus)', 'rosenheinrich-multisite-migrate'),
     'url'      => Rmmigrate_Links::pricing_url('plugin_intent_offsite'),
     'external' => true,
 );
@@ -54,18 +54,8 @@ $rmmigrate_banner = array(
     'variant' => 'success',
     'class'   => 'mm-verify-restore-banner',
     'icon'    => 'yes-alt',
-    'title'   => __('Backup finished — verify it can restore', 'rosenheinrich-multisite-migrate'),
-    'text'    => __('A backup only helps if restore works. Test restore with a safety snapshot, then move copies off this server (same host = same blast radius).', 'rosenheinrich-multisite-migrate'),
+    'title'   => __('Your backup is ready', 'rosenheinrich-multisite-migrate'),
+    'text'    => __('It is saved on this server. Download a copy and keep it somewhere else too (your computer or cloud storage) — if this server fails, a copy elsewhere is what saves you. To undo changes later, click Restore next to the backup.', 'rosenheinrich-multisite-migrate'),
     'actions' => $rmmigrate_verify_actions,
 );
 include RMMIGRATE_PATH . 'admin/partials/components/admin-banner.php';
-
-Rmmigrate_Pro_Hints::render(
-    'post_backup_offsite',
-    array(
-        'title'     => __('Same server = same risk', 'rosenheinrich-multisite-migrate'),
-        'text'      => __('Local archives share the host blast radius. Plus adds BYO cloud (Drive, Dropbox, S3), and cloud schedules so silent partial backups do not go unnoticed.', 'rosenheinrich-multisite-migrate'),
-        'cta_label' => __('See Plus off-site backup', 'rosenheinrich-multisite-migrate'),
-        'placement' => 'plugin_intent_offsite',
-    )
-);

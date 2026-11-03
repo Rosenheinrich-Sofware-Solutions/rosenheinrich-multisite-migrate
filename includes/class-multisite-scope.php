@@ -179,7 +179,7 @@ class Rmmigrate_Multisite_Scope
         }
 
         $scope_labels = array(
-            self::SCOPE_NETWORK          => __('Full network', 'rosenheinrich-multisite-migrate'),
+            self::SCOPE_NETWORK          => is_multisite() ? __('Full network', 'rosenheinrich-multisite-migrate') : __('Whole site', 'rosenheinrich-multisite-migrate'),
             self::SCOPE_NETWORK_INCLUDED => __('Only selected subsites', 'rosenheinrich-multisite-migrate'),
             self::SCOPE_NETWORK_FILTERED => __('Network (exclude subsites)', 'rosenheinrich-multisite-migrate'),
         );

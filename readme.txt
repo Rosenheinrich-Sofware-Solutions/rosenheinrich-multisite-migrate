@@ -1,4 +1,4 @@
-=== Rosenheinrich Multisite Migrate – Single Site & Network Backup, Restore & AI ===
+=== Rosenheinrich Multisite Migrate – Network & Single Site Backup, Restore & Migration ===
 Contributors: rosenheinrich, phillipro
 Tags: multisite, site-migration, wordpress-migration, migrate-wordpress, clone-site
 Requires at least: 6.2
@@ -8,13 +8,15 @@ Stable tag: 1.2.24
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
-Back up, restore and migrate single sites or multisite networks. Free, portable archives, search & replace, plus AI/MCP tools.
+Back up, restore and move WordPress multisite networks — and single sites — in one click. Free full-network backups, no license key.
 
 == Description ==
 
-= Backup, Restore & Migration for Single Sites and Multisite =
+= Backup, Restore & Migration built for Multisite — works on single sites too =
 
-Back up, restore, and migrate normal single-site WordPress installs and full multisite networks — free, no license key. Portable archives with search & replace, plus AI agents (Claude, Cursor, ChatGPT, and similar) via MCP. [Full network backups](https://multisitemigrate.rosenheinrich.com/features/multisite-networks/?utm_source=wprepo&utm_medium=link&utm_content=multisite_networks&utm_campaign=multisite_migrate_free) from Network Admin stay included in Free; Pro is for cloud / multiple / incremental schedules, cloud storage, empty-server installer, staging, [peer transfer (Push & Pull)](https://multisitemigrate.rosenheinrich.com/pricing/?utm_source=wprepo&utm_medium=link&utm_content=peer_transfer&utm_campaign=multisite_migrate_free), WP-CLI, [network split / extract to standalone](https://multisitemigrate.rosenheinrich.com/docs-network-split/?utm_source=wprepo&utm_medium=link&utm_content=docs_network_split&utm_campaign=multisite_migrate_free), and extended AI abilities.
+Made for WordPress multisite networks first: back up the whole network (every subsite, the shared tables and all files) in one click, restore it, or move it to a new server — free, no license key. Normal single-site installs work the same way.
+
+**How it works:** 1) Click *Back up now* — it starts right away with safe defaults. 2) Click *Download* next to the backup to keep a copy. 3) To move, install the plugin on the new site, open *Move site*, choose the file and click *Restore*; web addresses are updated automatically. Server internals (database engine, chunk sizes, AI agents via MCP) stay out of the way until you turn on *Show expert settings*. [Full network backups](https://multisitemigrate.rosenheinrich.com/features/multisite-networks/?utm_source=wprepo&utm_medium=link&utm_content=multisite_networks&utm_campaign=multisite_migrate_free) from Network Admin stay included in Free; Pro is for cloud / multiple / incremental schedules, cloud storage, empty-server installer, staging, [peer transfer (Push & Pull)](https://multisitemigrate.rosenheinrich.com/pricing/?utm_source=wprepo&utm_medium=link&utm_content=peer_transfer&utm_campaign=multisite_migrate_free), WP-CLI, [network split / extract to standalone](https://multisitemigrate.rosenheinrich.com/docs-network-split/?utm_source=wprepo&utm_medium=link&utm_content=docs_network_split&utm_campaign=multisite_migrate_free), and extended AI abilities.
 
 = Video walkthrough =
 
@@ -144,9 +146,9 @@ The free plugin does not phone home by default. It may contact external services
 
 = Rosenheinrich portal (multisitemigrate.rosenheinrich.com) =
 
-* **Usage telemetry (opt-in):** setup wizard or Settings → Privacy. Sends a pseudonymous install ID, site hash (not your URL), plugin/WordPress/PHP versions, wizard progress, and sanitized backup/import/restore outcomes — never backup files or database content. If you opted in, a one-time anonymous uninstall signal may be recorded when the plugin is deleted.
-* **Product emails (opt-in):** setup wizard only. Sends your admin email, name, site URL, site title, and version info to subscribe you to product updates.
-* **Feedback (explicit submit):** in-plugin feedback or deactivate survey. Sends your message, rating/reason, versions, and site hash; optional contact email on deactivate only.
+* **Usage telemetry (opt-in, unticked by default):** setup screen or Settings → Privacy. Sends a pseudonymous install ID, site hash (not your URL), plugin/WordPress/PHP versions, setup choices, and sanitized backup/import/restore outcomes (including whether it was the first backup and a coarse time since activation) — never backup files or database content. While the plugin is active, an environment snapshot is sent about once a day. If you opted in, anonymous deactivation and uninstall signals are recorded when the plugin is deactivated or deleted.
+* **Product emails (opt-in, unticked by default):** setup screen only. Sends your admin email, name, site URL, site title, and version info to subscribe you to product updates.
+* **Feedback (explicit submit):** in-plugin feedback or deactivate survey. Sends your message, rating/reason, versions, and site hash; a contact email only if you type one in on deactivate.
 
 Privacy Policy: https://multisitemigrate.rosenheinrich.com/privacy-policy/
 Terms (Plus/Pro only; free plugin is GPLv2): https://multisitemigrate.rosenheinrich.com/terms-of-service/
@@ -245,27 +247,30 @@ Report security issues to phillip@rosenheinrich.com; we aim to respond within 72
 
 == Changelog ==
 
+= 1.2.25 – 2026-11-02 =
+* New: A simpler start. "Back up now" runs in one click, and Download and Restore sit right next to each backup.
+* Improvement: Restoring or moving a site asks fewer questions, and technical settings moved to an optional Expert mode.
+* Improvement: Clearer wording for single sites and networks. Product emails and usage data stay off unless you opt in.
+* Fix: Various bug fixes and stability improvements.
+
 = 1.2.24 – 2026-10-27 =
 * Fix: SQL export checkpoint recovery on resume and fewer false activity-log errors from gateway timeouts and background polling.
 
 = 1.2.23 – 2026-10-26 =
 * Security fixes.
 
-= 1.2.22 – 2026-10-22 =
-* Fix: Improved reliability of long-running backups and restores.
-
 Older entries are in changelog.txt, which ships with the plugin, and the full history is published at [https://multisitemigrate.rosenheinrich.com/changelog/](https://multisitemigrate.rosenheinrich.com/changelog/).
 
 == Upgrade Notice ==
+
+= 1.2.25 =
+Simpler backup, restore and move screens, plus bug fixes. Recommended update.
 
 = 1.2.24 =
 Bug fixes for backup SQL resume and activity log noise. Recommended update.
 
 = 1.2.23 =
 Security fixes. Recommended update.
-
-= 1.2.22 =
-Bug fixes and stability improvements. Recommended update.
 
 == Screenshots ==
 

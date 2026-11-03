@@ -14,6 +14,9 @@ class Rmmigrate_Ajax_Backup
         add_action('wp_ajax_rmmigrate_worker', array(__CLASS__, 'worker'));
         add_action('wp_ajax_nopriv_rmmigrate_worker', array(__CLASS__, 'worker'));
         add_action('wp_ajax_rmmigrate_status', array(__CLASS__, 'status'));
+        // A restore replaces the users table, which signs the admin out mid-job.
+        // The progress screen keeps polling with the per-job HMAC token it got while signed in.
+        add_action('wp_ajax_nopriv_rmmigrate_status', array(__CLASS__, 'status'));
         add_action('wp_ajax_rmmigrate_cancel', array(__CLASS__, 'cancel'));
         add_action('wp_ajax_rmmigrate_delete', array(__CLASS__, 'delete_local'));
         add_action('wp_ajax_rmmigrate_delete_bulk', array(__CLASS__, 'delete_bulk'));
@@ -164,14 +167,49 @@ class Rmmigrate_Ajax_Backup
 
     public static function status(): void
     {
+        $job_id = Rmmigrate_Request_Input::request_int('job_id');
+        if (!is_user_logged_in()) {
+            self::restore_status_by_token($job_id, Rmmigrate_Request_Input::request_text('worker_token'));
+        }
         self::verify_request();
         Rmmigrate_Job::recover_stale_active();
-        $job_id = Rmmigrate_Request_Input::request_int('job_id');
         try {
-            wp_send_json_success(Rmmigrate_Backup_Service::get_status($job_id ?: null));
+            $payload = Rmmigrate_Backup_Service::get_status($job_id ?: null);
+            if ($job_id > 0 && !empty($payload['active']) && ($payload['job_type'] ?? '') === 'restore') {
+                // Lets the open progress screen finish the restore after the import signs the user out.
+                $payload['worker_token'] = Rmmigrate_Runner::worker_token($job_id, 7200);
+            }
+            wp_send_json_success($payload);
         } catch (Rmmigrate_Service_Exception $e) {
             self::respond_service_exception($e, 'backup', $job_id);
         }
+    }
+
+    /**
+     * Status for a restore whose database import signed the admin out. Only a
+     * valid per-job HMAC token (issued to the signed-in admin) unlocks it, and
+     * only coarse progress fields are returned.
+     */
+    private static function restore_status_by_token(int $job_id, string $token): void
+    {
+        $job = $job_id > 0 ? Rmmigrate_Job::get($job_id) : null;
+        if ($job === null || !$job->is_restore() || $token === '' || !Rmmigrate_Runner::verify_worker_token($job_id, $token)) {
+            wp_send_json_error(array(
+                'message' => __('Your session expired. Refresh the page and try again.', 'rosenheinrich-multisite-migrate'),
+            ), 403);
+        }
+        $status = $job->get_status();
+        wp_send_json_success(array(
+            'active'        => $status >= 0 && $status < 100,
+            'job_id'        => $job_id,
+            'job_type'      => 'restore',
+            'status'        => $status,
+            'percent'       => $job->get_percent(),
+            'message'       => Rmmigrate_Restore_Runner::admin_progress_label($job),
+            'error'         => (string) ($job->data['error_message'] ?? ''),
+            'progress_step' => Rmmigrate_Restore_Runner::get_status_step($job),
+            'logged_out'    => true,
+        ));
     }
 
     public static function cancel(): void

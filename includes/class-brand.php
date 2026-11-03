@@ -21,7 +21,7 @@ class Rmmigrate_Brand
      */
     public static function menu_title(): string
     {
-        return __('MM', 'rosenheinrich-multisite-migrate');
+        return __('Multisite Migrate', 'rosenheinrich-multisite-migrate');
     }
 
     /**

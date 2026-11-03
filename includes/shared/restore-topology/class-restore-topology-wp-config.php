@@ -424,7 +424,10 @@ class Rmmigrate_Restore_Topology_Wp_Config
             if (is_array($parsed)) {
                 $host = (string) ($parsed['host'] ?? '');
                 if ($host !== '') {
-                    $domain = $host;
+                    // Keep a non-default port (e.g. 127.0.0.1:8080): wp_site/wp_blogs store it too,
+                    // and a port-less DOMAIN_CURRENT_SITE sends network admin to the wrong address.
+                    $port = isset($parsed['port']) ? (int) $parsed['port'] : 0;
+                    $domain = ($port > 0 && $port !== 80 && $port !== 443) ? $host . ':' . $port : $host;
                 }
                 $parsed_path = (string) ($parsed['path'] ?? '');
                 if ($parsed_path !== '') {

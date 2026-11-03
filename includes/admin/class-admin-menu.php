@@ -23,11 +23,11 @@ class Rmmigrate_Admin_Menu
     {
         return array(
             'multisite-migrate-archives' => __('Backups', 'rosenheinrich-multisite-migrate'),
-            'multisite-migrate-migrate'  => __('Import & Restore', 'rosenheinrich-multisite-migrate'),
+            'multisite-migrate-migrate'  => __('Move site', 'rosenheinrich-multisite-migrate'),
             'multisite-migrate-schedule' => __('Schedules', 'rosenheinrich-multisite-migrate'),
             'multisite-migrate-advanced' => __('Settings', 'rosenheinrich-multisite-migrate'),
             'multisite-migrate-activity' => __('Activity Log', 'rosenheinrich-multisite-migrate'),
-            'multisite-migrate-health'   => __('Health', 'rosenheinrich-multisite-migrate'),
+            'multisite-migrate-health'   => __('Server check', 'rosenheinrich-multisite-migrate'),
             'multisite-migrate-mcp'      => __('AI Agents (MCP)', 'rosenheinrich-multisite-migrate'),
             'multisite-migrate-subsite'  => __('Backups', 'rosenheinrich-multisite-migrate'),
             'multisite-migrate-setup'    => __('Setup Wizard', 'rosenheinrich-multisite-migrate'),
@@ -35,25 +35,62 @@ class Rmmigrate_Admin_Menu
     }
 
     /**
-     * @return array<int,array{slug:string,label:string,callback:callable,visible?:bool}>
+     * Sidebar entries. Only everyday pages are in the menu (`in_menu`); Activity
+     * Log and Server check stay routable and are linked from Settings, AI Agents
+     * appears in expert mode only.
+     *
+     * @return array<int,array{slug:string,label:string,callback:callable,in_menu:bool,visible?:bool}>
      */
     public static function submenu_items(callable $callback): array
     {
         $titles = self::page_titles();
+        $expert = class_exists('Rmmigrate_Expert_Mode', false) && Rmmigrate_Expert_Mode::enabled();
 
         return array(
-            array('slug' => 'multisite-migrate-archives', 'label' => $titles['multisite-migrate-archives'], 'callback' => $callback),
-            array('slug' => 'multisite-migrate-migrate', 'label' => $titles['multisite-migrate-migrate'], 'callback' => $callback),
-            array('slug' => 'multisite-migrate-schedule', 'label' => $titles['multisite-migrate-schedule'], 'callback' => $callback),
-            array('slug' => 'multisite-migrate-advanced', 'label' => $titles['multisite-migrate-advanced'], 'callback' => $callback),
-            array('slug' => 'multisite-migrate-activity', 'label' => $titles['multisite-migrate-activity'], 'callback' => $callback),
-            array('slug' => 'multisite-migrate-health', 'label' => $titles['multisite-migrate-health'], 'callback' => $callback),
+            array('slug' => 'multisite-migrate-archives', 'label' => $titles['multisite-migrate-archives'], 'callback' => $callback, 'in_menu' => true),
+            array('slug' => 'multisite-migrate-migrate', 'label' => $titles['multisite-migrate-migrate'], 'callback' => $callback, 'in_menu' => true),
+            array('slug' => 'multisite-migrate-schedule', 'label' => $titles['multisite-migrate-schedule'], 'callback' => $callback, 'in_menu' => true),
+            array('slug' => 'multisite-migrate-advanced', 'label' => $titles['multisite-migrate-advanced'], 'callback' => $callback, 'in_menu' => true),
+            array('slug' => 'multisite-migrate-activity', 'label' => $titles['multisite-migrate-activity'], 'callback' => $callback, 'in_menu' => false),
+            array('slug' => 'multisite-migrate-health', 'label' => $titles['multisite-migrate-health'], 'callback' => $callback, 'in_menu' => false),
             array(
                 'slug'     => 'multisite-migrate-mcp',
                 'label'    => __('AI Agents', 'rosenheinrich-multisite-migrate'),
                 'callback' => $callback,
+                'in_menu'  => $expert,
             ),
         );
+    }
+
+    /**
+     * Pages reached from Settings (not in the sidebar) keep "Settings" highlighted.
+     */
+    private static function settings_child_page(): bool
+    {
+        $page = self::page_from_request();
+        if (in_array($page, array('multisite-migrate-activity', 'multisite-migrate-health'), true)) {
+            return true;
+        }
+
+        return $page === 'multisite-migrate-mcp' && !(class_exists('Rmmigrate_Expert_Mode', false) && Rmmigrate_Expert_Mode::enabled());
+    }
+
+    /**
+     * @param string $parent_file
+     * @return string
+     */
+    public static function highlight_parent($parent_file)
+    {
+        return self::settings_child_page() ? self::parent_slug() : $parent_file;
+    }
+
+    /**
+     * @param string|null $submenu_file
+     * @return string|null
+     */
+    public static function highlight_submenu($submenu_file)
+    {
+        return self::settings_child_page() ? 'multisite-migrate-advanced' : $submenu_file;
     }
 
     /**
@@ -103,7 +140,7 @@ class Rmmigrate_Admin_Menu
 
         foreach ($visible_items as $item) {
             add_submenu_page(
-                $first['slug'],
+                (!isset($item['in_menu']) || !empty($item['in_menu'])) ? $first['slug'] : '',
                 $item['label'],
                 $item['label'],
                 'manage_options',
@@ -132,8 +169,9 @@ class Rmmigrate_Admin_Menu
         );
         remove_submenu_page($parent, $parent);
         foreach (self::submenu_items($callback) as $item) {
+            // Hidden-but-routable pages use an empty parent (no sidebar entry).
             add_submenu_page(
-                $parent,
+                !empty($item['in_menu']) ? $parent : '',
                 $item['label'],
                 $item['label'],
                 $cap,
@@ -141,6 +179,8 @@ class Rmmigrate_Admin_Menu
                 $callback
             );
         }
+        add_filter('parent_file', array(__CLASS__, 'highlight_parent'));
+        add_filter('submenu_file', array(__CLASS__, 'highlight_submenu'));
         if (Rmmigrate_Setup_Wizard::menu_visible()) {
             add_submenu_page(
                 $parent,

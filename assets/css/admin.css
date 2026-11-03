@@ -1295,3 +1295,142 @@ a.mm-job-item:focus {
         text-align: center;
     }
 }
+
+/* Simplified first-run UI: visible row actions, expert toggle, calm review card. */
+.mm-row-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 6px;
+}
+.mm-row-buttons .button .dashicons {
+    font-size: 16px;
+    width: 16px;
+    height: 16px;
+    line-height: 1.6;
+    vertical-align: text-bottom;
+}
+.mm-row-buttons .mm-row-more .mm-dropdown-toggle {
+    min-height: 30px;
+}
+.mm-empty-state .mm-empty-hint {
+    margin: 10px 0 0;
+    width: 100%;
+    text-align: center;
+}
+.mm-import-steps {
+    margin: 6px 0 16px 20px;
+    list-style: decimal;
+}
+.mm-import-steps li {
+    margin: 0 0 4px;
+}
+.mm-expert-toggle__label {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+}
+.mm-expert-only[hidden] {
+    display: none !important;
+}
+.mm-review-card {
+    margin: 0 0 16px;
+}
+.mm-restore-quick-lead {
+    font-weight: 600;
+}
+#mm-toggle-create.is-busy,
+#mm-toggle-create-empty.is-busy {
+    opacity: .7;
+    cursor: progress;
+}
+.multisite-migrate-archives-table th:last-child,
+.multisite-migrate-archives-table td.mm-row-actions {
+    width: auto;
+    min-width: 230px;
+}
+
+/* Short backup lists: no selection column until bulk delete is offered. */
+.multisite-migrate-archives-table.mm-list-compact .check-column {
+    display: none;
+}
+
+/* Row actions: Download, Restore and More get a column sized for them, on one line when there is room. */
+.mm-premium-table.mm-data-table.multisite-migrate-archives-table th.column-actions {
+    width: 19rem;
+}
+@media (min-width: 769px) {
+    .multisite-migrate-archives-table td.mm-row-actions .mm-row-buttons {
+        flex-wrap: nowrap;
+    }
+}
+@media (max-width: 1279px) and (min-width: 769px) {
+    /* Narrower screens: same one line, tighter buttons, "More" becomes a ⋯ button. */
+    .mm-premium-table.mm-data-table.multisite-migrate-archives-table th.column-actions {
+        width: 13rem;
+    }
+    .multisite-migrate-archives-table td.mm-row-actions .mm-row-buttons {
+        gap: 4px;
+    }
+    .multisite-migrate-archives-table td.mm-row-actions .mm-row-buttons > .button {
+        padding: 0 8px;
+    }
+    .multisite-migrate-archives-table td.mm-row-actions .mm-row-more .mm-dropdown-toggle {
+        font-size: 0;
+        padding: 0 8px;
+    }
+    .multisite-migrate-archives-table td.mm-row-actions .mm-row-more .mm-dropdown-toggle::before {
+        content: "\22EF";
+        font-size: 18px;
+        line-height: 1;
+    }
+    .multisite-migrate-archives-table td.mm-row-actions .mm-row-more .mm-dropdown-toggle::after {
+        display: none;
+    }
+    .mm-premium-table.mm-data-table.multisite-migrate-archives-table td.column-local {
+        white-space: normal;
+    }
+    .multisite-migrate-archives-table .mm-local-badge {
+        white-space: normal;
+        text-align: left;
+        border-radius: var(--mm-radius-sm);
+    }
+    .multisite-migrate-archives-table .mm-status-pill {
+        padding-left: 6px;
+        padding-right: 6px;
+    }
+    .mm-premium-table.mm-data-table.multisite-migrate-archives-table th.column-date {
+        width: 15%;
+    }
+    .mm-premium-table.mm-data-table.multisite-migrate-archives-table th.column-type {
+        width: 10%;
+    }
+    .mm-premium-table.mm-data-table.multisite-migrate-archives-table th.column-status {
+        width: 14%;
+    }
+    .mm-premium-table.mm-data-table.multisite-migrate-archives-table th.column-remote {
+        width: 8%;
+    }
+}
+@media (max-width: 782px) and (min-width: 769px) {
+    /* WordPress enlarges buttons at this width. */
+    .mm-premium-table.mm-data-table.multisite-migrate-archives-table th.column-actions {
+        width: 15rem;
+    }
+    .mm-premium-table.mm-data-table.multisite-migrate-archives-table th,
+    .mm-premium-table.mm-data-table.multisite-migrate-archives-table td {
+        padding-left: 8px;
+        padding-right: 8px;
+    }
+}
+@media (max-width: 782px) {
+    /* Short lists have no bulk actions, so keep the selection column hidden on small screens too. */
+    .multisite-migrate-archives-table.mm-data-table.mm-list-compact tr > .check-column {
+        display: none;
+    }
+    .mm-premium-table.mm-data-table.multisite-migrate-archives-table td.column-local {
+        white-space: normal;
+    }
+}

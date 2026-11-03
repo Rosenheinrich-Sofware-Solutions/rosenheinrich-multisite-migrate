@@ -17,13 +17,13 @@ if (!defined('ABSPATH')) {
                     <li class="is-active" aria-current="step">
                         <span class="mm-create-step-btn">
                             <span class="mm-step-num" aria-hidden="true">1</span>
-                            <span class="mm-step-label"><?php esc_html_e('Intent', 'rosenheinrich-multisite-migrate'); ?></span>
+                            <span class="mm-step-label"><?php esc_html_e('Where', 'rosenheinrich-multisite-migrate'); ?></span>
                         </span>
                     </li>
                     <li>
                         <span class="mm-create-step-btn">
                             <span class="mm-step-num" aria-hidden="true">2</span>
-                            <span class="mm-step-label"><?php esc_html_e('Migration', 'rosenheinrich-multisite-migrate'); ?></span>
+                            <span class="mm-step-label"><?php esc_html_e('Addresses', 'rosenheinrich-multisite-migrate'); ?></span>
                         </span>
                     </li>
                     <li>
@@ -45,15 +45,15 @@ if (!defined('ABSPATH')) {
                         <p class="mm-restore-step-lead"><?php esc_html_e('This will overwrite this site with the selected backup.', 'rosenheinrich-multisite-migrate'); ?></p>
                         <input type="hidden" name="mm_restore_type" value="same_server">
                     <?php else : ?>
-                    <p class="mm-restore-step-lead"><?php esc_html_e('Select how you want to restore this backup. Choose "Same server" for standard rollbacks or "Migration" to update site URLs.', 'rosenheinrich-multisite-migrate'); ?></p>
+                    <p class="mm-restore-step-lead"><?php echo esc_html((is_multisite() && is_network_admin()) ? __('Is this backup from this network, or from another network you are moving here?', 'rosenheinrich-multisite-migrate') : __('Is this backup from this site, or from another site you are moving here?', 'rosenheinrich-multisite-migrate')); ?></p>
                     <div class="multisite-migrate-wizard-cards" role="radiogroup" aria-label="<?php esc_attr_e('Restore intent', 'rosenheinrich-multisite-migrate'); ?>">
                         <button type="button" class="multisite-migrate-wizard-card is-selected" data-restore-type="same_server" role="radio" aria-checked="true">
-                            <h4><?php esc_html_e('Same server', 'rosenheinrich-multisite-migrate'); ?></h4>
-                            <p><?php esc_html_e('Restore in place with no URL changes.', 'rosenheinrich-multisite-migrate'); ?></p>
+                            <h4><?php echo esc_html((is_multisite() && is_network_admin()) ? __('Undo changes on this network', 'rosenheinrich-multisite-migrate') : __('Undo changes on this site', 'rosenheinrich-multisite-migrate')); ?></h4>
+                            <p><?php esc_html_e('Put this site back to the backup. Web addresses stay the same.', 'rosenheinrich-multisite-migrate'); ?></p>
                         </button>
                         <button type="button" class="multisite-migrate-wizard-card" data-restore-type="migration" role="radio" aria-checked="false">
-                            <h4><?php esc_html_e('Migration', 'rosenheinrich-multisite-migrate'); ?></h4>
-                            <p><?php esc_html_e('Move to a new domain or URL.', 'rosenheinrich-multisite-migrate'); ?></p>
+                            <h4><?php echo esc_html((is_multisite() && is_network_admin()) ? __('Move a network here', 'rosenheinrich-multisite-migrate') : __('Move a site here', 'rosenheinrich-multisite-migrate')); ?></h4>
+                            <p><?php esc_html_e('The backup comes from another address. Links are changed to this site.', 'rosenheinrich-multisite-migrate'); ?></p>
                         </button>
                     </div>
                     <input type="radio" name="mm_restore_type" value="same_server" checked class="mm-hidden">
@@ -169,14 +169,16 @@ if (!defined('ABSPATH')) {
                 </div>
 
                 <div class="mm-restore-step" data-restore-step="4">
-                    <p class="mm-restore-step-lead"><?php esc_html_e('Review your configuration summary below. Confirm your restore options to begin the process.', 'rosenheinrich-multisite-migrate'); ?></p>
+                    <p class="mm-restore-step-lead mm-restore-quick-lead mm-hidden" id="mm-restore-quick-lead" aria-live="polite"></p>
+                    <p class="mm-restore-step-lead"><?php esc_html_e('Check the summary, tick the box, then start.', 'rosenheinrich-multisite-migrate'); ?></p>
                     <dl class="multisite-migrate-wizard-review" id="mm-restore-review-summary"></dl>
                     <p class="mm-restore-confirm-row">
                         <label class="mm-restore-confirm-label" for="mm-restore-confirm">
                             <input type="checkbox" id="mm-restore-confirm" value="1">
-                            <?php esc_html_e('I understand this will overwrite existing data.', 'rosenheinrich-multisite-migrate'); ?>
+                            <?php echo esc_html((is_multisite() && is_network_admin()) ? __('I understand the current content of this network will be replaced.', 'rosenheinrich-multisite-migrate') : __('I understand the current content of this site will be replaced.', 'rosenheinrich-multisite-migrate')); ?>
                         </label>
                     </p>
+                    <p><button type="button" class="button-link mm-hidden" id="mm-restore-change-options"><?php esc_html_e('Change restore options', 'rosenheinrich-multisite-migrate'); ?></button></p>
                 </div>
 
                 <div class="multisite-migrate-wizard-footer">

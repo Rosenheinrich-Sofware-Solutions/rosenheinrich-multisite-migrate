@@ -929,7 +929,7 @@ class Rmmigrate_Job
     public function get_display_scope(): string
     {
         $labels = array(
-            Rmmigrate_Multisite_Scope::SCOPE_NETWORK          => __('Entire network', 'rosenheinrich-multisite-migrate'),
+            Rmmigrate_Multisite_Scope::SCOPE_NETWORK          => is_multisite() ? __('Entire network', 'rosenheinrich-multisite-migrate') : __('Whole site', 'rosenheinrich-multisite-migrate'),
             Rmmigrate_Multisite_Scope::SCOPE_NETWORK_FILTERED => __('Network (filtered)', 'rosenheinrich-multisite-migrate'),
             Rmmigrate_Multisite_Scope::SCOPE_NETWORK_INCLUDED => __('Selected subsites only', 'rosenheinrich-multisite-migrate'),
             Rmmigrate_Multisite_Scope::SCOPE_SUBSITE          => __('Subsite only', 'rosenheinrich-multisite-migrate'),

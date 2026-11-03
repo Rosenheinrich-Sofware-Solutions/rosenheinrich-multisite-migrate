@@ -11,11 +11,15 @@ $rmmigrate_tabs = array(
     'recovery'      => __('Recovery', 'rosenheinrich-multisite-migrate'),
     'searchreplace' => __('Search & Replace', 'rosenheinrich-multisite-migrate'),
 );
+// Recovery and Search & Replace are expert tools; a direct link still works.
+$rmmigrate_migrate_expert = class_exists('Rmmigrate_Expert_Mode', false) && Rmmigrate_Expert_Mode::enabled();
 if (!isset($rmmigrate_tabs[$rmmigrate_migrate_tab])) {
     $rmmigrate_migrate_tab = 'import';
 }
 $rmmigrate_active_tab = $rmmigrate_migrate_tab;
-include RMMIGRATE_PATH . 'admin/partials/layout/tabs.php';
+if ($rmmigrate_migrate_expert || $rmmigrate_migrate_tab !== 'import') {
+    include RMMIGRATE_PATH . 'admin/partials/layout/tabs.php';
+}
 
 if ($rmmigrate_migrate_tab === 'import') {
     include RMMIGRATE_PATH . 'admin/partials/import.php';

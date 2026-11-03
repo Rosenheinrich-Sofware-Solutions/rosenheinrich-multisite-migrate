@@ -1,3 +1,9 @@
+= 1.2.25 – 2026-11-02 =
+* New: A simpler start. "Back up now" runs in one click, and Download and Restore sit right next to each backup.
+* Improvement: Restoring or moving a site asks fewer questions, and technical settings moved to an optional Expert mode.
+* Improvement: Clearer wording for single sites and networks. Product emails and usage data stay off unless you opt in.
+* Fix: Various bug fixes and stability improvements.
+
 = 1.2.24 – 2026-10-27 =
 * Fix: SQL export checkpoint recovery on resume and fewer false activity-log errors from gateway timeouts and background polling.
 

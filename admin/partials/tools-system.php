@@ -9,16 +9,18 @@ $rmmigrate_diag_url = wp_nonce_url(
 );
 $rmmigrate_activity_url = Rmmigrate_Admin_Router::admin_url('multisite-migrate-activity', array(), $rmmigrate_is_network);
 $rmmigrate_health_url = Rmmigrate_Admin_Router::admin_url('multisite-migrate-health', array(), $rmmigrate_is_network);
+$rmmigrate_setup_url = Rmmigrate_Admin_Router::admin_url('multisite-migrate-setup', array(), $rmmigrate_is_network);
+$rmmigrate_mcp_url = Rmmigrate_Admin_Router::admin_url('multisite-migrate-mcp', array(), $rmmigrate_is_network);
+$rmmigrate_expert = Rmmigrate_Expert_Mode::enabled();
 $rmmigrate_log_max_mb = (int) round((Rmmigrate_Engine_Config::log_max_bytes()) / 1048576);
 ?>
 
 <div class="mm-form-section mm-tools-panel">
     <div class="mm-tools-panel__head">
         <div class="mm-tools-panel__head-text">
-            <h2><?php esc_html_e('Tools & logs', 'rosenheinrich-multisite-migrate'); ?></h2>
-            <p class="description"><?php esc_html_e('Housekeeping for backups and temporary files. Server health checks live on the Health page.', 'rosenheinrich-multisite-migrate'); ?></p>
+            <h2><?php esc_html_e('Diagnostics', 'rosenheinrich-multisite-migrate'); ?></h2>
+            <p class="description"><?php esc_html_e('Check your server, read what happened, and clean up. Useful when something does not work.', 'rosenheinrich-multisite-migrate'); ?></p>
         </div>
-        <a class="mm-panel-header-link" href="<?php echo esc_url($rmmigrate_health_url); ?>"><?php esc_html_e('Open Health', 'rosenheinrich-multisite-migrate'); ?> &rarr;</a>
     </div>
 
     <div class="mm-tools-grid" role="list">
@@ -71,11 +73,35 @@ $rmmigrate_log_max_mb = (int) round((Rmmigrate_Engine_Config::log_max_bytes()) /
                 </span>
                 <span class="mm-tool-link-card__chevron dashicons dashicons-arrow-right-alt2" aria-hidden="true"></span>
             </a>
+            <a class="mm-tool-link-card" href="<?php echo esc_url($rmmigrate_health_url); ?>">
+                <span class="mm-tool-link-card__icon" aria-hidden="true"><span class="dashicons dashicons-heart"></span></span>
+                <span class="mm-tool-link-card__body">
+                    <strong class="mm-tool-link-card__title"><?php esc_html_e('Server check', 'rosenheinrich-multisite-migrate'); ?></strong>
+                    <span class="mm-tool-link-card__desc"><?php esc_html_e('Can this server run backups? PHP, disk space, timeouts.', 'rosenheinrich-multisite-migrate'); ?></span>
+                </span>
+                <span class="mm-tool-link-card__chevron dashicons dashicons-arrow-right-alt2" aria-hidden="true"></span>
+            </a>
+            <a class="mm-tool-link-card" href="<?php echo esc_url($rmmigrate_setup_url); ?>">
+                <span class="mm-tool-link-card__icon" aria-hidden="true"><span class="dashicons dashicons-welcome-learn-more"></span></span>
+                <span class="mm-tool-link-card__body">
+                    <strong class="mm-tool-link-card__title"><?php esc_html_e('Setup wizard', 'rosenheinrich-multisite-migrate'); ?></strong>
+                    <span class="mm-tool-link-card__desc"><?php esc_html_e('Run the first-time setup again.', 'rosenheinrich-multisite-migrate'); ?></span>
+                </span>
+                <span class="mm-tool-link-card__chevron dashicons dashicons-arrow-right-alt2" aria-hidden="true"></span>
+            </a>
+            <a class="mm-tool-link-card" href="<?php echo esc_url($rmmigrate_mcp_url); ?>"<?php echo $rmmigrate_expert ? '' : ' hidden'; ?>>
+                <span class="mm-tool-link-card__icon" aria-hidden="true"><span class="dashicons dashicons-rest-api"></span></span>
+                <span class="mm-tool-link-card__body">
+                    <strong class="mm-tool-link-card__title"><?php esc_html_e('AI agents (MCP)', 'rosenheinrich-multisite-migrate'); ?></strong>
+                    <span class="mm-tool-link-card__desc"><?php esc_html_e('Let AI assistants start backups for you. Expert feature.', 'rosenheinrich-multisite-migrate'); ?></span>
+                </span>
+                <span class="mm-tool-link-card__chevron dashicons dashicons-arrow-right-alt2" aria-hidden="true"></span>
+            </a>
         </div>
     </div>
 </div>
 
-<div class="mm-form-section">
+<div class="mm-form-section mm-expert-only"<?php echo $rmmigrate_expert ? '' : ' hidden'; ?>>
     <h2><?php esc_html_e('Safe admin mode', 'rosenheinrich-multisite-migrate'); ?></h2>
     <form method="post" action="<?php echo esc_url($rmmigrate_is_network ? network_admin_url('edit.php?action=rmmigrate_settings') : admin_url('admin-post.php')); ?>">
         <?php wp_nonce_field('rmmigrate_settings'); ?>
@@ -95,7 +121,7 @@ $rmmigrate_log_max_mb = (int) round((Rmmigrate_Engine_Config::log_max_bytes()) /
     </form>
 </div>
 
-<div class="mm-form-section mm-log-storage-panel">
+<div class="mm-form-section mm-log-storage-panel mm-expert-only"<?php echo $rmmigrate_expert ? '' : ' hidden'; ?>>
     <h2><?php esc_html_e('Log storage', 'rosenheinrich-multisite-migrate'); ?></h2>
     <p class="description"><?php esc_html_e('Size limits rotate large log files automatically. Activity entries are trimmed on the current activity.jsonl file before rotation.', 'rosenheinrich-multisite-migrate'); ?></p>
     <form method="post" action="<?php echo esc_url($rmmigrate_is_network ? network_admin_url('edit.php?action=rmmigrate_settings') : admin_url('admin-post.php')); ?>">
@@ -139,3 +165,4 @@ $rmmigrate_log_max_mb = (int) round((Rmmigrate_Engine_Config::log_max_bytes()) /
         </div>
     </form>
 </div>
+<?php include RMMIGRATE_PATH . 'admin/partials/components/expert-mode-toggle.php'; ?>

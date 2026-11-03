@@ -28,7 +28,7 @@ $rmmigrate_failed_display = $rmmigrate_failed_count > 5
     ? '5+'
     : (string) $rmmigrate_failed_count;
 
-$rmmigrate_scope_label = __('Full network', 'rosenheinrich-multisite-migrate');
+$rmmigrate_scope_label = is_multisite() ? __('Full network', 'rosenheinrich-multisite-migrate') : __('Whole site', 'rosenheinrich-multisite-migrate');
 if (is_multisite()) {
     $rmmigrate_scope = $rmmigrate_settings['default_scope'] ?? 'network';
     $rmmigrate_site_count = count(Rmmigrate_Multisite_Scope::get_all_site_ids());

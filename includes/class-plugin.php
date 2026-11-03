@@ -118,6 +118,7 @@ final class Rmmigrate_Plugin
         require_once $includes . 'class-backup-retention.php';
         require_once $includes . 'class-activity-log.php';
         require_once $includes . 'admin/class-admin-router.php';
+        require_once $includes . 'admin/class-expert-mode.php';
         require_once $includes . 'admin/class-admin-menu.php';
         require_once $includes . 'admin/class-admin-assets.php';
         require_once $includes . 'admin/class-wizard-controller.php';
@@ -207,6 +208,7 @@ final class Rmmigrate_Plugin
         Rmmigrate_Scheduler::register();
         Rmmigrate_Admin_Save::register();
         Rmmigrate_Setup_Wizard::register();
+        Rmmigrate_Expert_Mode::register();
         Rmmigrate_Review_Nudge::register();
         Rmmigrate_Feedback::register();
         Rmmigrate_Telemetry::register();

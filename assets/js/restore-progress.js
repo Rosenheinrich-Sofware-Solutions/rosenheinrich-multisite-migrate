@@ -51,6 +51,7 @@
             }
             url.searchParams.delete('create');
             url.searchParams.delete('mm_verify');
+            url.searchParams.delete('imported');
             if (jobId) {
                 url.searchParams.set('job_id', String(jobId));
                 url.searchParams.set('mm_restore_ok', '1');
@@ -124,7 +125,26 @@
         }
     }
 
-    function redirectToJobProgress(id) {
+    var pendingResumeToken = '';
+
+    function redirectToJobProgress(id, workerToken) {
+        // A restore can sign the admin out before a new page would load. With a job token,
+        // follow the job on this page instead of navigating to the progress view.
+        if (workerToken && id) {
+            pendingResumeToken = String(workerToken);
+            try {
+                var here = new URL(window.location.href);
+                here.searchParams.set('job_id', String(id));
+                window.history.replaceState(null, '', here.pathname + here.search + here.hash);
+            } catch (e) {
+                /* keep the current address */
+            }
+            setRestoreStartBusy(false);
+            hideDialog();
+            showProgressPanel('restore');
+            pollRestore(id);
+            return;
+        }
         try {
             var url = new URL(window.location.href);
             url.searchParams.set('job_id', String(id));
@@ -145,6 +165,11 @@
     }
 
     function ensureActiveJobBanner(jobId, title) {
+        // The upload card's "Restore this backup" button is misleading while a restore runs.
+        var $importCard = $('#mm-import-restore-now').closest('.mm-import-wizard');
+        if ($importCard.length && !$importCard.find('#mm-import-restore-progress:visible').length) {
+            $importCard.addClass('mm-hidden');
+        }
         var $banner = $('#mm-active-job-banner');
         title = title || t('restoreInProgress', 'Restore in progress');
         if ($banner.length) {
@@ -330,7 +355,7 @@
                         pollSafetyThenRestore(res.data.safety_job_id, next);
                         return;
                     }
-                    redirectToJobProgress(res.data.job_id);
+                    redirectToJobProgress(res.data.job_id, res.data.worker_token);
                 }).fail(function (xhr) {
                     setRestoreStartBusy(false);
                     toastRestoreRequestFailed(xhr, { action: 'rmmigrate_start_restore', phase: 'transport' });
@@ -368,7 +393,7 @@
                 return;
             }
             hideDialog();
-            redirectToJobProgress(res.data.job_id);
+            redirectToJobProgress(res.data.job_id, res.data.worker_token);
         }).fail(function (xhr) {
             setRestoreStartBusy(false);
             toastRestoreRequestFailed(xhr, { action: 'rmmigrate_start_restore', phase: 'transport' });
@@ -410,6 +435,17 @@
             });
         });
         return entries;
+    }
+
+    // True only when the archive must be mapped onto this install by the user
+    // (subsite onto network, network onto subsite, extract one site). Pure hints do not count.
+    function topologyNeedsChoice() {
+        if ($('#mm-topology-options').hasClass('mm-hidden')) {
+            return false;
+        }
+        return $('#mm-topology-subsite-on-network, #mm-topology-network-to-subsite, #mm-topology-extract-standalone').filter(function () {
+            return !$(this).hasClass('mm-hidden');
+        }).length > 0;
     }
 
     function syncTopologyOptions(manifest) {
@@ -529,8 +565,30 @@
             }
             populateBlogMigrationTable(m.blogs || []);
             syncTopologyOptions(m);
+            // Preselect from the archive and jump to the confirm step, unless the
+            // user must choose how a network/subsite archive maps onto this install.
+            if (window.rmmigrateAdminRestoreWizard && typeof rmmigrateAdminRestoreWizard.quick === 'function'
+                && !topologyNeedsChoice() && !res.data.manifest_incomplete) {
+                var sameSite = normalizeSiteUrl(m.site_url) === normalizeSiteUrl(currentSiteUrl());
+                var created = '';
+                if (m.created_at) {
+                    try {
+                        created = new Date(m.created_at).toLocaleString();
+                    } catch (e) {
+                        created = String(m.created_at);
+                    }
+                }
+                rmmigrateAdminRestoreWizard.quick((sameSite || !m.site_url) ? 'same_server' : 'migration', {
+                    from: m.site_url || '',
+                    date: created
+                });
+            }
         });
     });
+
+    function normalizeSiteUrl(url) {
+        return String(url || '').replace(/^https?:\/\//i, '').replace(/\/+$/, '').toLowerCase();
+    }
 
     function applyMigrationDefaultsFromManifest() {
         var base = currentSiteUrl();
@@ -599,13 +657,20 @@
         showRestoreCancelActions(jobId);
         restorePollHandle = rmmigrateAdminUI.pollJob({
             jobId: jobId,
+            resumeToken: pendingResumeToken,
             $fill: progressFill(),
             $text: progressText(),
-            onComplete: function () {
+            onComplete: function (d) {
                 stopRestorePoll();
                 hideRestoreCancelActions();
                 $('#mm-active-job-banner, #mm-restore-progress').hide();
                 var successJobId = jobId;
+                if (d && d.logged_out) {
+                    // Signed out by the restored users table: show why, then go to the login screen.
+                    rmmigrateAdminUI.toast(t('restoreDoneLogin', 'Restore finished. Log in with the username and password of the restored site.'), 'success');
+                    setTimeout(function () { reloadAfterRestoreSuccess(successJobId); }, 4000);
+                    return;
+                }
                 var go = function () {
  reloadAfterRestoreSuccess(successJobId); };
                 if (window.rmmigrateFeedback && typeof window.rmmigrateFeedback.maybePrompt === 'function') {
@@ -701,4 +766,24 @@
     };
 
     resumeActiveJob();
+
+    // After an upload finishes, open the restore dialog right away (once per archive).
+    (function autoOpenImportedRestore() {
+        var $btn = $('#mm-import-restore-now');
+        if (!$btn.length || (rmmigrateAdmin.activeJob && rmmigrateAdmin.activeJob.id)) {
+            return;
+        }
+        var key = 'rmmigrateAutoRestore:' + String($btn.attr('data-job-id') || '');
+        try {
+            if (window.sessionStorage.getItem(key)) {
+                return;
+            }
+            window.sessionStorage.setItem(key, '1');
+        } catch (e) {
+            // storage unavailable: still open once on this page view
+        }
+        window.setTimeout(function () {
+            $btn.trigger('click');
+        }, 300);
+    })();
 })(jQuery);

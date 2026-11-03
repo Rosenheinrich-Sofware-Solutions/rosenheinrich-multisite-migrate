@@ -142,6 +142,49 @@ class Rmmigrate_Activator
         if (!wp_next_scheduled(Rmmigrate_Scheduler::HOOK)) {
             wp_schedule_single_event(time() + Rmmigrate_Scheduler::tick_interval(), Rmmigrate_Scheduler::HOOK);
         }
+
+        $reactivated = self::record_lifecycle();
+        if ($reactivated) {
+            self::schedule_telemetry_resume();
+        }
+    }
+
+    /**
+     * Local lifecycle record (activation count and timestamps).
+     *
+     * @return bool True when this is a reactivation after an earlier deactivation.
+     */
+    private static function record_lifecycle(): bool
+    {
+        $lifecycle = get_site_option('rmmigrate_lifecycle', array());
+        if (!is_array($lifecycle)) {
+            $lifecycle = array();
+        }
+        $reactivated = !empty($lifecycle['deactivated_at']);
+        if (empty($lifecycle['first_activated_at'])) {
+            $lifecycle['first_activated_at'] = time();
+        }
+        $lifecycle['activated_at'] = time();
+        $lifecycle['activations']  = (int) ($lifecycle['activations'] ?? 0) + 1;
+        update_site_option('rmmigrate_lifecycle', $lifecycle);
+
+        return $reactivated;
+    }
+
+    /**
+     * Deactivation clears telemetry cron. When the user had opted in, resume it
+     * (re-register + daily check-in) a few seconds after reactivation. Without
+     * consent nothing is scheduled.
+     */
+    private static function schedule_telemetry_resume(): void
+    {
+        $state = get_site_option('rmmigrate_telemetry', array());
+        if (!is_array($state) || ($state['consent'] ?? '') !== 'granted') {
+            return;
+        }
+        if (!wp_next_scheduled('rmmigrate_telemetry_consent_remote')) {
+            wp_schedule_single_event(time() + 5, 'rmmigrate_telemetry_consent_remote');
+        }
     }
 
     /**

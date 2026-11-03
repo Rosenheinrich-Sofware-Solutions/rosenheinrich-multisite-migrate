@@ -171,22 +171,29 @@
             files: reviewText('restoreModeFiles', 'Files only')
         };
         var snapshot = $('#mm-safety-snapshot').is(':checked');
-        var pairs = [
+        var pairs = [];
+        if (quickInfo.from) {
+            pairs.push({ label: reviewText('reviewLabelFrom', 'Backup of'), value: quickInfo.from });
+        }
+        if (quickInfo.date) {
+            pairs.push({ label: reviewText('reviewLabelDate', 'Created'), value: quickInfo.date });
+        }
+        pairs = pairs.concat([
             {
-                label: reviewText('reviewLabelType', 'Type'),
+                label: reviewText('reviewLabelType', 'What'),
                 value: type === 'migration'
-                    ? reviewText('restoreTypeMigration', 'Migration')
-                    : reviewText('restoreTypeSameServer', 'Same server')
+                    ? reviewText('restoreTypeMigration', 'Move a site here')
+                    : reviewText('restoreTypeSameServer', 'Undo changes on this site')
             },
             {
-                label: reviewText('reviewLabelMode', 'Mode'),
+                label: reviewText('reviewLabelMode', 'Restores'),
                 value: modeLabels[mode] || mode
             },
             {
                 label: reviewText('reviewLabelSafetySnapshot', 'Safety snapshot'),
-                value: snapshot ? reviewText('yes', 'Yes') : reviewText('no', 'No')
+                value: snapshot ? reviewText('safetySnapshotYes', 'Yes — the current site is saved first, so you can go back') : reviewText('no', 'No')
             }
-        ];
+        ]);
         if (type === 'migration') {
             pairs.push({
                 label: reviewText('reviewLabelNewSiteUrl', 'New site URL'),
@@ -201,8 +208,47 @@
         });
     }
 
+    var quickInfo = {};
+
+    function selectType(type) {
+        if (subsiteRestoreMode) {
+            type = 'same_server';
+        }
+        $('.multisite-migrate-wizard-card[data-restore-type]').removeClass('is-selected');
+        $('.multisite-migrate-wizard-card[data-restore-type="' + type + '"]').addClass('is-selected');
+        syncRestoreTypeRadios();
+    }
+
     window.rmmigrateAdminRestoreWizard = {
+        /**
+         * Skip straight to the confirm step with everything preselected from the
+         * archive: same site → restore in place; other URL → migration to this site.
+         */
+        quick: function (type, info) {
+            quickInfo = info || {};
+            selectType(type === 'migration' ? 'migration' : 'same_server');
+            if (getRestoreType() === 'migration') {
+                applyMigrationDefaults();
+                if (!validateMigrationStep()) {
+                    showStep(2);
+                    return;
+                }
+            }
+            buildReviewSummary();
+            var lead = getRestoreType() === 'migration'
+                ? (window.rmmigrateAdminUI ? rmmigrateAdminUI.i18n('quickLeadMigration', 'This moves the backed-up site onto this site. Everything here is replaced, and web addresses are changed to this site automatically.') : '')
+                : (window.rmmigrateAdminUI ? rmmigrateAdminUI.i18n('quickLeadSame', 'This puts the site back to how it was when the backup was made. Changes made since then are replaced.') : '');
+            if (getRestoreType() === 'migration' && window.rmmigrateAdminUI) {
+                lead += ' ' + rmmigrateAdminUI.i18n('quickLeadMigrationLogin', 'Afterwards, sign in with the user name and password of the site you moved.');
+            }
+            $('#mm-restore-quick-lead').text(lead).removeClass('mm-hidden');
+            $('#mm-restore-change-options').removeClass('mm-hidden');
+            showStep(4);
+        },
         reset: function (presetMigration) {
+            quickInfo = {};
+            $('#mm-restore-quick-lead').addClass('mm-hidden').text('');
+            $('#mm-restore-change-options').addClass('mm-hidden');
             currentStep = 1;
             skipMigrationStep = subsiteRestoreMode || !presetMigration;
             $('.multisite-migrate-wizard-card[data-restore-type="same_server"]').toggleClass('is-selected', subsiteRestoreMode || !presetMigration);
@@ -241,6 +287,13 @@
 
     $('#mm-restore-back').on('click', function () {
         showStep(prevStep(currentStep));
+    });
+
+    $(document).on('click', '#mm-restore-change-options', function (e) {
+        e.preventDefault();
+        $('#mm-restore-quick-lead').addClass('mm-hidden');
+        $(this).addClass('mm-hidden');
+        showStep(1);
     });
 
     applySubsiteRestoreMode();

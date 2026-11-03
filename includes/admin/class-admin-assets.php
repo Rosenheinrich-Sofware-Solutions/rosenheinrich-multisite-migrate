@@ -395,7 +395,7 @@ class Rmmigrate_Admin_Assets
                 'enterNewHomeUrl'     => __('Enter a valid new home URL or check “Same as site URL”.', 'rosenheinrich-multisite-migrate'),
                 'yes'                 => __('Yes', 'rosenheinrich-multisite-migrate'),
                 'no'                  => __('No', 'rosenheinrich-multisite-migrate'),
-                'scopeNetwork'        => __('Full network', 'rosenheinrich-multisite-migrate'),
+                'scopeNetwork'        => is_multisite() ? __('Full network', 'rosenheinrich-multisite-migrate') : __('Whole site', 'rosenheinrich-multisite-migrate'),
                 'scopeIncluded'       => __('Only selected subsites', 'rosenheinrich-multisite-migrate'),
                 'scopeFiltered'       => __('Network (exclude subsites)', 'rosenheinrich-multisite-migrate'),
                 'scopeSubsite'        => __('Subsite only', 'rosenheinrich-multisite-migrate'),
@@ -448,6 +448,8 @@ class Rmmigrate_Admin_Assets
                 'restoreCompletePct'  => __('100% — Complete', 'rosenheinrich-multisite-migrate'),
                 'viewActivityDetails' => __('view Activity Log for details', 'rosenheinrich-multisite-migrate'),
                 'jobFailed'           => __('Job failed', 'rosenheinrich-multisite-migrate'),
+                'restoreSignedOut'    => __('Still working. The restore replaced the user accounts, so you were signed out. When it finishes, log in with the username and password of the restored site.', 'rosenheinrich-multisite-migrate'),
+                'restoreDoneLogin'    => __('Restore finished. Log in with the username and password of the restored site.', 'rosenheinrich-multisite-migrate'),
                 'safetySnapshotFailed' => __('Safety snapshot failed', 'rosenheinrich-multisite-migrate'),
                 'connectionTestFailed' => __('Connection test failed', 'rosenheinrich-multisite-migrate'),
                 'clearActivityLog'    => __('Clear activity log and all log files on disk?', 'rosenheinrich-multisite-migrate'),
@@ -460,12 +462,26 @@ class Rmmigrate_Admin_Assets
                 'loading'             => __('Loading…', 'rosenheinrich-multisite-migrate'),
                 'enabled'             => __('Enabled', 'rosenheinrich-multisite-migrate'),
                 'notSet'              => __('Not set', 'rosenheinrich-multisite-migrate'),
-                'reviewLabelType'     => __('Type', 'rosenheinrich-multisite-migrate'),
-                'reviewLabelMode'     => __('Mode', 'rosenheinrich-multisite-migrate'),
+                'reviewLabelType'     => __('What', 'rosenheinrich-multisite-migrate'),
+                'reviewLabelMode'     => __('Restores', 'rosenheinrich-multisite-migrate'),
                 'reviewLabelSafetySnapshot' => __('Safety snapshot', 'rosenheinrich-multisite-migrate'),
+                'reviewLabelFrom'     => __('Backup of', 'rosenheinrich-multisite-migrate'),
+                'reviewLabelDate'     => __('Created', 'rosenheinrich-multisite-migrate'),
+                'safetySnapshotYes'   => (is_multisite() && is_network_admin()) ? __('Yes — the current network is saved first, so you can go back', 'rosenheinrich-multisite-migrate') : __('Yes — the current site is saved first, so you can go back', 'rosenheinrich-multisite-migrate'),
+                'quickLeadSame'       => (is_multisite() && is_network_admin())
+                    ? __('This puts the whole network back to how it was when the backup was made. Changes made since then are replaced.', 'rosenheinrich-multisite-migrate')
+                    : __('This puts the site back to how it was when the backup was made. Changes made since then are replaced.', 'rosenheinrich-multisite-migrate'),
+                'quickLeadMigration'  => (is_multisite() && is_network_admin())
+                    ? __('This moves the backed-up network onto this network. Everything here is replaced, and web addresses of all subsites are changed to this network automatically.', 'rosenheinrich-multisite-migrate')
+                    : __('This moves the backed-up site onto this site. Everything here is replaced, and web addresses are changed to this site automatically.', 'rosenheinrich-multisite-migrate'),
+                'quickLeadMigrationLogin' => (is_multisite() && is_network_admin())
+                    ? __('Afterwards, sign in with the user name and password of the network you moved.', 'rosenheinrich-multisite-migrate')
+                    : __('Afterwards, sign in with the user name and password of the site you moved.', 'rosenheinrich-multisite-migrate'),
+                'expertOn'            => __('Expert settings are shown.', 'rosenheinrich-multisite-migrate'),
+                'expertOff'           => __('Expert settings are hidden.', 'rosenheinrich-multisite-migrate'),
                 'reviewLabelNewSiteUrl' => __('New site URL', 'rosenheinrich-multisite-migrate'),
-                'restoreTypeMigration' => __('Migration', 'rosenheinrich-multisite-migrate'),
-                'restoreTypeSameServer' => __('Same server', 'rosenheinrich-multisite-migrate'),
+                'restoreTypeMigration' => (is_multisite() && is_network_admin()) ? __('Move a network here', 'rosenheinrich-multisite-migrate') : __('Move a site here', 'rosenheinrich-multisite-migrate'),
+                'restoreTypeSameServer' => (is_multisite() && is_network_admin()) ? __('Undo changes on this network', 'rosenheinrich-multisite-migrate') : __('Undo changes on this site', 'rosenheinrich-multisite-migrate'),
                 'restoreModeBoth'     => __('Database and files', 'rosenheinrich-multisite-migrate'),
                 'restoreModeDb'       => __('Database only', 'rosenheinrich-multisite-migrate'),
                 'restoreModeFiles'    => __('Files only', 'rosenheinrich-multisite-migrate'),

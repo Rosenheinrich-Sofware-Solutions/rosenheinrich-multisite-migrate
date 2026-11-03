@@ -513,6 +513,25 @@
 
             var pollFailures = 0;
             var pollFailureLimit = 15;
+            // Restores replace the users table and sign the admin out; keep going with the job token.
+            var resumeToken = options.resumeToken ? String(options.resumeToken) : '';
+            var useResumeToken = false;
+            var signedOutNoticeShown = false;
+
+            function authArgs(base) {
+                if (useResumeToken && resumeToken) {
+                    base.worker_token = resumeToken;
+                }
+                return base;
+            }
+
+            function noteAuthTrouble() {
+                if (resumeToken && !useResumeToken) {
+                    useResumeToken = true;
+                    return true;
+                }
+                return false;
+            }
 
             function poll() {
                 if (stopped) {
@@ -521,15 +540,19 @@
                 if (pollTimer) {
                     clearTimeout(pollTimer);
                 }
-                $.get(rmmigrateAdmin.ajaxUrl, {
+                $.get(rmmigrateAdmin.ajaxUrl, authArgs({
                     action: 'rmmigrate_status',
                     job_id: jobId,
                     nonce: rmmigrateAdmin.nonce
-                }).done(function (res) {
+                })).done(function (res) {
                     if (stopped) {
                         return;
                     }
                     if (!res.success || !res.data) {
+                        if (noteAuthTrouble()) {
+                            pollTimer = setTimeout(poll, 500);
+                            return;
+                        }
                         pollFailures++;
                         if (pollFailures >= pollFailureLimit) {
                             var failPayload = { error: rmmigrateAdminUI.i18n('jobFailed', 'Failed') };
@@ -544,6 +567,13 @@
                     }
                     pollFailures = 0;
                     var d = res.data;
+                    if (d.worker_token) {
+                        resumeToken = String(d.worker_token);
+                    }
+                    if (d.logged_out && !signedOutNoticeShown) {
+                        signedOutNoticeShown = true;
+                        rmmigrateAdminUI.toast(rmmigrateAdminUI.i18n('restoreSignedOut', 'Still working. The restore replaced the user accounts, so you were signed out. When it finishes, log in with the username and password of the restored site.'), 'info');
+                    }
                     var pct = d.percent || 0;
                     update(pct, resolveProgressMessage(d));
                     rmmigrateAdminUI.syncWorkerStaleBanner(d);
@@ -553,11 +583,11 @@
                         var delay = options.workerDelay || 1500;
                         if (kickoff === 'browser') {
                             pollTimer = setTimeout(function () {
-                                $.post(rmmigrateAdmin.ajaxUrl, {
+                                $.post(rmmigrateAdmin.ajaxUrl, authArgs({
                                     action: 'rmmigrate_worker',
                                     job_id: jobId,
                                     nonce: rmmigrateAdmin.nonce
-                                }).always(function () {
+                                })).always(function () {
                                     poll();
                                 });
                             }, delay);
@@ -569,11 +599,11 @@
                             var last = rmmigrateAdminUI._lastFailsafeWorker || 0;
                             if (now - last >= 20000) {
                                 rmmigrateAdminUI._lastFailsafeWorker = now;
-                                $.post(rmmigrateAdmin.ajaxUrl, {
+                                $.post(rmmigrateAdmin.ajaxUrl, authArgs({
                                     action: 'rmmigrate_worker',
                                     job_id: jobId,
                                     nonce: rmmigrateAdmin.nonce
-                                }).always(function () {
+                                })).always(function () {
                                     poll();
                                 });
                                 return;
@@ -650,6 +680,10 @@
                     }
                 }).fail(function (xhr) {
                     if (stopped) {
+                        return;
+                    }
+                    if (noteAuthTrouble()) {
+                        pollTimer = setTimeout(poll, 500);
                         return;
                     }
                     pollFailures++;

@@ -36,7 +36,7 @@
         });
     }
 
-    function completeAndGo(archivesUrl) {
+    function completeAndGo(archivesUrl, intent) {
         var target = adminHref(archivesUrl);
         if (wizardCompleteInFlight) {
             window.location.assign(target);
@@ -53,7 +53,8 @@
         }
         $.post(rmmigrateAdmin.ajaxUrl, {
             action: 'rmmigrate_setup_wizard_complete',
-            nonce: rmmigrateAdmin.nonce
+            nonce: rmmigrateAdmin.nonce,
+            intent: intent || ''
         }).done(function (res) {
             var url = (res && res.data && res.data.redirect) ? adminHref(res.data.redirect) : target;
             go(url);
@@ -154,7 +155,7 @@
             return $.Deferred().resolve().promise();
         }
         finishOptInInFlight = true;
-        var $btn = $card.find('.mm-setup-create-backup');
+        var $btn = $('.mm-setup-create-backup, .mm-setup-skip');
         $card.addClass('is-submitting');
         $btn.prop('disabled', true).attr('aria-busy', 'true');
         var emailWanted = $('.mm-setup-optin-email').is(':checked');
@@ -180,9 +181,9 @@
         });
     }
 
-    $(document).on('click', '.mm-setup-create-backup', function (e) {
-        e.preventDefault();
-        var target = archivesUrlFromButton(this);
+    // Both boxes start unticked (explicit opt-in). An unticked box only stores
+    // the choice locally; nothing is sent to the portal for it.
+    function optInThen(next) {
         var $card = $('.mm-setup-optin');
         var optIn = ($card.hasClass('is-done') || finishOptInInFlight)
             ? $.Deferred().resolve().promise()
@@ -193,10 +194,37 @@
                 return;
             }
             left = true;
-            completeAndGo(target);
+            next();
         }
         optIn.always(leave);
         window.setTimeout(leave, 16000);
+    }
+
+    function skipAndGo(archivesUrl) {
+        var target = adminHref(archivesUrl);
+        $.post(rmmigrateAdmin.ajaxUrl, {
+            action: 'rmmigrate_setup_wizard_skip',
+            nonce: rmmigrateAdmin.nonce
+        }).always(function () {
+            window.location.assign(target);
+        });
+    }
+
+    $(document).on('click', '.mm-setup-create-backup', function (e) {
+        e.preventDefault();
+        var target = archivesUrlFromButton(this);
+        var intent = ($(this).attr('data-intent') || 'backup').toString();
+        optInThen(function () {
+            completeAndGo(target, intent);
+        });
+    });
+
+    $(document).on('click', '.mm-setup-skip', function (e) {
+        e.preventDefault();
+        var target = archivesUrlFromButton(this);
+        optInThen(function () {
+            skipAndGo(target);
+        });
     });
 
 }(jQuery));

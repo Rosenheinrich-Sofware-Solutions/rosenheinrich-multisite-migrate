@@ -20,6 +20,9 @@ $rmmigrate_empty_actions_allowed = array(
         'class' => true,
         'id'    => true,
     ),
+    'p'      => array(
+        'class' => true,
+    ),
 );
 ?>
 <div class="mm-empty-state<?php echo $rmmigrate_empty_class !== '' ? ' ' . esc_attr($rmmigrate_empty_class) : ''; ?>">

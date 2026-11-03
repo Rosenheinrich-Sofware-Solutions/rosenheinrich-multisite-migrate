@@ -13,6 +13,7 @@ $rmmigrate_show_archives_hero = $rmmigrate_archives_embedded || !empty($rmmigrat
 $rmmigrate_activity_url = Rmmigrate_Admin_Router::admin_url('multisite-migrate-activity', array(), $rmmigrate_is_network);
 $rmmigrate_can_backup_create = Rmmigrate_Access::can_create_backup();
 $rmmigrate_can_delete_backups = Rmmigrate_Access::can_delete_backup();
+$rmmigrate_list_expert = class_exists('Rmmigrate_Expert_Mode', false) && Rmmigrate_Expert_Mode::enabled();
 
 $rmmigrate_filters = array(
     'all'       => __('All', 'rosenheinrich-multisite-migrate'),
@@ -61,6 +62,26 @@ $rmmigrate_pagination_base = $rmmigrate_pagination_base ?? add_query_arg(
 
 <?php include RMMIGRATE_PATH . 'admin/partials/components/active-job-banner.php'; ?>
 
+<?php
+if (Rmmigrate_Request_Input::get_key('intent') === 'move') {
+    $rmmigrate_banner = array(
+        'variant' => 'info',
+        'class'   => 'mm-move-intent-notice',
+        'title'   => __('Moving to another server in three steps', 'rosenheinrich-multisite-migrate'),
+        'text'    => __('1. Create a full backup here. 2. Download it when it is done. 3. Install Multisite Migrate on the new site, open Move site and choose the file.', 'rosenheinrich-multisite-migrate'),
+        'actions' => array(
+            array(
+                'type'  => 'link',
+                'label' => __('Read the migration guide', 'rosenheinrich-multisite-migrate'),
+                'url'   => Rmmigrate_Links::docs_url('move_intent'),
+                'attrs' => array('target' => '_blank', 'rel' => 'noopener noreferrer'),
+            ),
+        ),
+    );
+    include RMMIGRATE_PATH . 'admin/partials/components/admin-banner.php';
+}
+?>
+
 <?php include RMMIGRATE_PATH . 'admin/partials/backup-create-panel.php'; ?>
 
 <div id="mm-create-host">
@@ -74,13 +95,27 @@ $rmmigrate_pagination_base = $rmmigrate_pagination_base ?? add_query_arg(
             : __('Protect this site', 'rosenheinrich-multisite-migrate')
     );
     ?></h2>
-    <p class="description mm-intent-assist__hint"><?php esc_html_e('Backups that finish, restores that work, and off-site copies when you need them.', 'rosenheinrich-multisite-migrate'); ?></p>
-    <?php include RMMIGRATE_PATH . 'admin/partials/components/intent-assist-bar.php'; ?>
+    <p class="description mm-intent-assist__hint"><?php
+    echo esc_html(
+        (!empty($rmmigrate_is_network) && empty($rmmigrate_subsite_mode))
+            ? __('One click saves every subsite, the shared tables and all files. Backups stay on this server and you can download them anytime.', 'rosenheinrich-multisite-migrate')
+            : __('One click saves the database and all files. Backups stay on this server and you can download them anytime.', 'rosenheinrich-multisite-migrate')
+    );
+    ?></p>
+    <?php
+    $rmmigrate_intent_hide_primary = empty($rmmigrate_jobs) && $rmmigrate_filter === 'all' && !$rmmigrate_date_filter_active;
+    include RMMIGRATE_PATH . 'admin/partials/components/intent-assist-bar.php';
+    ?>
 </div>
 <?php else : ?>
     <?php include RMMIGRATE_PATH . 'admin/partials/components/intent-assist-bar.php'; ?>
 <?php endif; ?>
 
+<?php
+// Short lists stay simple: filters, checkboxes and bulk delete appear from 4 backups on.
+$rmmigrate_list_compact = count((array) $rmmigrate_jobs) < 4 && $rmmigrate_filter === 'all' && !$rmmigrate_date_filter_active;
+?>
+<?php if (!$rmmigrate_list_compact && (!empty($rmmigrate_jobs) || $rmmigrate_filter !== 'all' || $rmmigrate_date_filter_active)) : ?>
 <div class="mm-toolbar">
 
     <form method="get" action="" class="mm-activity-filters mm-backups-filters">
@@ -118,6 +153,7 @@ $rmmigrate_pagination_base = $rmmigrate_pagination_base ?? add_query_arg(
     </div>
 
 </div>
+<?php endif; ?>
 
 <?php if (empty($rmmigrate_jobs)) : ?>
 <div class="mm-form-section mm-backups-empty-section">
@@ -144,12 +180,19 @@ $rmmigrate_pagination_base = $rmmigrate_pagination_base ?? add_query_arg(
             $rmmigrate_empty_message = __('Completed backups and restores will appear here.', 'rosenheinrich-multisite-migrate');
         } else {
         $rmmigrate_empty_icon = 'dashicons-shield-alt';
-        $rmmigrate_empty_title = __('Your protective layer starts here', 'rosenheinrich-multisite-migrate');
-        $rmmigrate_empty_message = __('No backups yet. Create your first backup to protect this site.', 'rosenheinrich-multisite-migrate');
-        if ($rmmigrate_filter === 'all' && Rmmigrate_Setup_Wizard::can_run() && !Rmmigrate_Setup_Wizard::is_finished()) {
-            $rmmigrate_empty_actions = '<a class="button button-primary mm-btn-teal" href="' . esc_url($rmmigrate_setup_url) . '">' . esc_html__('Start setup wizard', 'rosenheinrich-multisite-migrate') . '</a>';
-        } elseif ($rmmigrate_filter === 'all' && $rmmigrate_can_backup_create && !$rmmigrate_show_archives_hero) {
-            $rmmigrate_empty_actions = '<button type="button" class="button button-primary mm-btn-teal" id="mm-toggle-create-empty">' . esc_html__('Backup now', 'rosenheinrich-multisite-migrate') . '</button>';
+        $rmmigrate_empty_title = __('No backups yet', 'rosenheinrich-multisite-migrate');
+        $rmmigrate_empty_message = (!empty($rmmigrate_is_network) && empty($rmmigrate_subsite_mode))
+            ? __('Your first backup covers every subsite, the shared tables, and all files. It is saved on this server and you can download it anytime.', 'rosenheinrich-multisite-migrate')
+            : __('Your first backup covers the database and all files. It is saved on this server and you can download it anytime.', 'rosenheinrich-multisite-migrate');
+        if ($rmmigrate_filter === 'all' && $rmmigrate_can_backup_create) {
+            $rmmigrate_empty_actions = '<button type="button" class="button button-primary button-hero mm-btn-teal" id="mm-toggle-create-empty">'
+                . esc_html(
+                    (!empty($rmmigrate_is_network) && empty($rmmigrate_subsite_mode))
+                        ? __('Back up the network now', 'rosenheinrich-multisite-migrate')
+                        : __('Back up this site now', 'rosenheinrich-multisite-migrate')
+                )
+                . '</button>'
+                . '<p class="description mm-empty-hint">' . esc_html__('Starts right away with safe defaults. Takes a few minutes; you can keep working.', 'rosenheinrich-multisite-migrate') . '</p>';
         }
     }
     include RMMIGRATE_PATH . 'admin/partials/components/empty-state.php';
@@ -160,7 +203,7 @@ $rmmigrate_pagination_base = $rmmigrate_pagination_base ?? add_query_arg(
 <?php else : ?>
 
 <div class="mm-table-scroll-wrap mm-table-cards-mobile">
-<table class="multisite-migrate-archives-table mm-premium-table mm-data-table">
+<table class="multisite-migrate-archives-table mm-premium-table mm-data-table<?php echo $rmmigrate_list_compact ? ' mm-list-compact' : ''; ?>">
 
     <thead>
 
@@ -182,7 +225,9 @@ $rmmigrate_pagination_base = $rmmigrate_pagination_base ?? add_query_arg(
 
             <th class="column-type"><?php esc_html_e('Type', 'rosenheinrich-multisite-migrate'); ?></th>
 
+            <?php if ($rmmigrate_list_expert) : ?>
             <th class="column-format"><?php esc_html_e('Format', 'rosenheinrich-multisite-migrate'); ?></th>
+            <?php endif; ?>
 
             <th class="column-scope"><?php esc_html_e('Scope', 'rosenheinrich-multisite-migrate'); ?></th>
 
@@ -190,7 +235,7 @@ $rmmigrate_pagination_base = $rmmigrate_pagination_base ?? add_query_arg(
 
             <th class="column-size"><?php esc_html_e('Size', 'rosenheinrich-multisite-migrate'); ?></th>
 
-            <th class="column-local"><?php esc_html_e('Local', 'rosenheinrich-multisite-migrate'); ?></th>
+            <th class="column-local"><?php esc_html_e('Stored', 'rosenheinrich-multisite-migrate'); ?></th>
 
             <th class="column-actions"><?php esc_html_e('Actions', 'rosenheinrich-multisite-migrate'); ?></th>
 
@@ -253,6 +298,7 @@ $rmmigrate_pagination_base = $rmmigrate_pagination_base ?? add_query_arg(
 
                     <td data-label="<?php echo esc_attr(__('Type', 'rosenheinrich-multisite-migrate')); ?>"><?php echo esc_html($rmmigrate_job->get_display_job_type()); ?></td>
 
+                    <?php if ($rmmigrate_list_expert) : ?>
                     <td data-label="<?php echo esc_attr(__('Format', 'rosenheinrich-multisite-migrate')); ?>"><?php
                         $rmmigrate_job_format = strtoupper($rmmigrate_job->get_progress()['archive']['format'] ?? '');
                         if ($rmmigrate_job_format === '') {
@@ -268,6 +314,7 @@ $rmmigrate_pagination_base = $rmmigrate_pagination_base ?? add_query_arg(
                         }
                         echo esc_html($rmmigrate_job_format);
                     ?></td>
+                    <?php endif; ?>
 
                     <td data-label="<?php echo esc_attr(__('Scope', 'rosenheinrich-multisite-migrate')); ?>"><?php echo esc_html($rmmigrate_job->get_display_scope()); ?></td>
 
@@ -300,7 +347,7 @@ $rmmigrate_pagination_base = $rmmigrate_pagination_base ?? add_query_arg(
 
                     <td data-label="<?php echo esc_attr(__('Size', 'rosenheinrich-multisite-migrate')); ?>"><?php echo esc_html(Rmmigrate_Local_Storage::format_bytes((int) ($rmmigrate_job->data['file_size'] ?? 0))); ?></td>
 
-                    <td class="column-local" data-label="<?php echo esc_attr(__('Local', 'rosenheinrich-multisite-migrate')); ?>"><?php
+                    <td class="column-local" data-label="<?php echo esc_attr(__('Stored', 'rosenheinrich-multisite-migrate')); ?>"><?php
                     $rmmigrate_has_local = !empty($rmmigrate_job->data['local_path']);
                     $rmmigrate_dest = strtolower((string) ($rmmigrate_job->data['destination'] ?? 'local'));
                     $rmmigrate_local_dest = ($rmmigrate_dest === '' || $rmmigrate_dest === 'local');
@@ -317,35 +364,30 @@ $rmmigrate_pagination_base = $rmmigrate_pagination_base ?? add_query_arg(
                     ?></td>
 
                     <td class="mm-row-actions column-actions" data-label="<?php echo esc_attr(__('Actions', 'rosenheinrich-multisite-migrate')); ?>">
-                        <div class="mm-dropdown">
-                            <button type="button" class="mm-dropdown-toggle" aria-expanded="false"><?php esc_html_e('Actions', 'rosenheinrich-multisite-migrate'); ?></button>
-                            <div class="mm-dropdown-menu">
-                            <?php if ($rmmigrate_is_complete && $rmmigrate_job->get_job_type() === Rmmigrate_Job::JOB_TYPE_BACKUP && Rmmigrate_Recovery_Points::is_restorable($rmmigrate_job)) : ?>
-                                <?php if (!empty($rmmigrate_job->data['local_path'])) : ?>
-                                <span class="mm-action-item">
-                                    <a href="<?php echo esc_url(add_query_arg(array(
+                        <div class="mm-row-buttons">
+                        <?php if ($rmmigrate_is_complete && $rmmigrate_job->get_job_type() === Rmmigrate_Job::JOB_TYPE_BACKUP && Rmmigrate_Recovery_Points::is_restorable($rmmigrate_job)) : ?>
+                            <?php if (!empty($rmmigrate_job->data['local_path'])) : ?>
+                                <a class="button mm-download-backup" href="<?php echo esc_url(add_query_arg(array(
 	'action' => 'rmmigrate_download',
 	'job_id' => $rmmigrate_job->get_id(),
 	'nonce'  => wp_create_nonce('rmmigrate_admin'),
-), admin_url('admin-ajax.php'))); ?>"><?php esc_html_e('Download Archive', 'rosenheinrich-multisite-migrate'); ?></a>
-                                </span>
-                                <?php endif; ?>
-                                <span class="mm-action-item">
-                                    <button type="button" class="button-link mm-restore-backup" data-job-id="<?php echo esc_attr($rmmigrate_job->get_id()); ?>"><?php esc_html_e('Restore', 'rosenheinrich-multisite-migrate'); ?></button>
-                                    <button type="button" class="mm-help-tip" aria-expanded="false" data-tip="<?php echo esc_attr(__('Choose restore mode, migration URLs, and options before starting.', 'rosenheinrich-multisite-migrate')); ?>" aria-label="<?php esc_attr_e('Restore help', 'rosenheinrich-multisite-migrate'); ?>">?</button>
-                                </span>
+), admin_url('admin-ajax.php'))); ?>"><span class="dashicons dashicons-download" aria-hidden="true"></span> <?php esc_html_e('Download', 'rosenheinrich-multisite-migrate'); ?></a>
                             <?php endif; ?>
-                            <?php if ($rmmigrate_is_active) : ?>
-                                <span class="mm-action-item">
-                                    <a href="#mm-active-job-banner" class="mm-view-job-progress" data-job-id="<?php echo esc_attr((string) $rmmigrate_job->get_id()); ?>" data-job-type="<?php echo esc_attr($rmmigrate_job->get_job_type()); ?>"><?php esc_html_e('View progress', 'rosenheinrich-multisite-migrate'); ?></a>
-                                </span>
-                            <?php endif; ?>
-                            <?php if (!$rmmigrate_is_active && $rmmigrate_can_delete_backups) : ?>
-                                <span class="mm-action-item mm-action-danger">
-                                    <button type="button" class="button-link mm-delete-backup" data-job-id="<?php echo esc_attr($rmmigrate_job->get_id()); ?>"><?php esc_html_e('Delete', 'rosenheinrich-multisite-migrate'); ?></button>
-                                </span>
-                            <?php endif; ?>
+                            <button type="button" class="button mm-restore-backup" data-job-id="<?php echo esc_attr($rmmigrate_job->get_id()); ?>"><span class="dashicons dashicons-backup" aria-hidden="true"></span> <?php esc_html_e('Restore', 'rosenheinrich-multisite-migrate'); ?></button>
+                        <?php endif; ?>
+                        <?php if ($rmmigrate_is_active) : ?>
+                            <a href="#mm-active-job-banner" class="button mm-view-job-progress" data-job-id="<?php echo esc_attr((string) $rmmigrate_job->get_id()); ?>" data-job-type="<?php echo esc_attr($rmmigrate_job->get_job_type()); ?>"><?php esc_html_e('View progress', 'rosenheinrich-multisite-migrate'); ?></a>
+                        <?php endif; ?>
+                        <?php if (!$rmmigrate_is_active && $rmmigrate_can_delete_backups) : ?>
+                            <div class="mm-dropdown mm-row-more">
+                                <button type="button" class="button mm-dropdown-toggle" aria-expanded="false" aria-label="<?php esc_attr_e('More actions', 'rosenheinrich-multisite-migrate'); ?>" title="<?php esc_attr_e('More actions', 'rosenheinrich-multisite-migrate'); ?>"><?php esc_html_e('More', 'rosenheinrich-multisite-migrate'); ?></button>
+                                <div class="mm-dropdown-menu">
+                                    <span class="mm-action-item mm-action-danger">
+                                        <button type="button" class="button-link mm-delete-backup" data-job-id="<?php echo esc_attr($rmmigrate_job->get_id()); ?>"><?php esc_html_e('Delete', 'rosenheinrich-multisite-migrate'); ?></button>
+                                    </span>
+                                </div>
                             </div>
+                        <?php endif; ?>
                         </div>
                     </td>
 

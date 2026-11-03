@@ -218,13 +218,37 @@
             window.setTimeout(runDone, Math.max(0, hold));
             return;
         }
-        if (!cfg.shouldPrompt) {
-            window.setTimeout(runDone, Math.max(0, hold));
+        // Never interrupt after a backup or restore: no automatic dialog. Feedback stays
+        // available from the footer link; the review ask is a calm inline card on the
+        // Backups page (14+ days active, 2+ successful backups, no recent failure).
+        window.setTimeout(runDone, Math.max(0, hold));
+    }
+
+    function postReviewCard($btn, action, feedback) {
+        if ($btn.data('mmBusy') || !window.rmmigrateAdmin) {
             return;
         }
-        openDialog(opts);
-        // Stay open until the user dismisses or submits — no auto-close/reload.
+        $btn.data('mmBusy', 1);
+        $.post(rmmigrateAdmin.ajaxUrl, {
+            action: action,
+            nonce: rmmigrateAdmin.nonce,
+            feedback: feedback || ''
+        }).always(function () {
+            $btn.removeData('mmBusy');
+            $btn.closest('.mm-review-card').fadeOut(200, function () {
+                $(this).remove();
+            });
+        });
     }
+
+    $(document).on('click', '.mm-review-card-yes', function () {
+        postReviewCard($(this), cfg.reviewNudgeFeedbackAction || 'rmmigrate_review_nudge_feedback', 'reviewed');
+    });
+
+    $(document).on('click', '.mm-review-card-later', function (e) {
+        e.preventDefault();
+        postReviewCard($(this), 'rmmigrate_review_nudge_dismiss', '');
+    });
 
     var feedbackSubmitInFlight = false;
 

@@ -192,13 +192,21 @@ final class Rmmigrate_Storage_Self_Check
             return;
         }
 
-        echo '<div class="notice notice-error"><p>';
+        $expert = class_exists('Rmmigrate_Expert_Mode', false) && Rmmigrate_Expert_Mode::enabled();
+        echo '<div class="notice notice-warning mm-storage-exposed-notice"><p><strong>';
+        echo esc_html__('Your backup files could be downloaded from the web.', 'rosenheinrich-multisite-migrate');
+        echo '</strong> ';
         echo esc_html(sprintf(
             /* translators: %s: URL of the backup storage folder */
-            __('Backup storage is publicly reachable: a test file in %s could be downloaded. Your web server ignores the protection files (.htaccess, web.config). Block this folder in the server configuration, for example on nginx:', 'rosenheinrich-multisite-migrate'),
+            __('Backups still work. To keep them private, ask your hosting provider to block web access to this folder: %s', 'rosenheinrich-multisite-migrate'),
             $state['url']
         ));
-        echo '</p><pre><code>' . esc_html(self::nginx_snippet($state['url'])) . '</code></pre></div>';
+        echo '</p>';
+        if ($expert) {
+            echo '<p>' . esc_html__('Your web server ignores .htaccess and web.config. Example rule for nginx:', 'rosenheinrich-multisite-migrate') . '</p>';
+            echo '<pre><code>' . esc_html(self::nginx_snippet($state['url'])) . '</code></pre>';
+        }
+        echo '</div>';
     }
 
     private static function storage_root(): string

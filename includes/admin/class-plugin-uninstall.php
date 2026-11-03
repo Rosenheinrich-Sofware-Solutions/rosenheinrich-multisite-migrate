@@ -60,16 +60,26 @@ class Rmmigrate_Plugin_Uninstall
                 'pluginBasenames' => self::visible_plugin_basenames(),
                 'networkScope'    => is_multisite() && is_network_admin(),
                 'canDelete'       => current_user_can('delete_plugins'),
-                'defaultContactEmail' => self::resolve_current_user_email(),
+                // Never pre-fill: an email address is only sent if the user types it.
+                'defaultContactEmail' => '',
+                'contactEmailPlaceholder' => self::resolve_current_user_email(),
+                'helpLinks'           => array(
+                    'guides' => Rmmigrate_Links::docs_url('deactivate_survey'),
+                    'forum'  => Rmmigrate_Links::support_forum_url(),
+                ),
                 'reasons'             => self::deactivate_survey_reasons(),
                 'i18n'                => array(
                     'deactivateTitle'         => __('Deactivate Multisite Migrate', 'rosenheinrich-multisite-migrate'),
-                    'deactivateIntro'         => __('You are about to deactivate Multisite Migrate. Would you like to delete its data or keep it in place?', 'rosenheinrich-multisite-migrate'),
+                    'deactivateIntro'         => __('Your backups and settings stay in place. You can turn the plugin back on at any time.', 'rosenheinrich-multisite-migrate'),
                     'surveyTitle'             => __('Why are you deactivating? (optional)', 'rosenheinrich-multisite-migrate'),
                     'surveyDetails'           => __('Anything else? (optional)', 'rosenheinrich-multisite-migrate'),
                     'surveyDetailsPlaceholder' => __('A short note helps us improve.', 'rosenheinrich-multisite-migrate'),
                     'surveyContactLabel'      => __('Email for follow-up (optional)', 'rosenheinrich-multisite-migrate'),
                     'surveyContactHint'       => __('We may contact you if we need more details about a problem. If you recently had backup, import, or restore errors, a short summary of those errors may be sent with your feedback to help us diagnose issues.', 'rosenheinrich-multisite-migrate'),
+                    'helpStart'               => __('Most people start with one click: open Multisite Migrate and choose “Back up this site now”. To move a site, back it up here and import the archive on the new site.', 'rosenheinrich-multisite-migrate'),
+                    'helpFailed'              => __('Sorry about that. Most failures come from hosting limits and can be fixed in a few minutes. The guides cover the common cases, and we answer in the support forum.', 'rosenheinrich-multisite-migrate'),
+                    'helpGuides'              => __('Open the guides', 'rosenheinrich-multisite-migrate'),
+                    'helpForum'               => __('Ask in the support forum', 'rosenheinrich-multisite-migrate'),
                     'deleteTitle'             => __('Delete Multisite Migrate', 'rosenheinrich-multisite-migrate'),
                     'deleteIntro'             => __('Choose which local data to delete before removing the plugin.', 'rosenheinrich-multisite-migrate'),
                     'keepAllData'             => __('Keep all Multisite Migrate data', 'rosenheinrich-multisite-migrate'),
@@ -133,8 +143,18 @@ class Rmmigrate_Plugin_Uninstall
                 'label' => __('Just deactivating temporarily', 'rosenheinrich-multisite-migrate'),
             ),
             array(
-                'id'    => 'not_multisite',
-                'label' => __('This site is not a multisite network', 'rosenheinrich-multisite-migrate'),
+                'id'    => 'done_moving',
+                'label' => __('I finished moving or restoring my site and do not need it now', 'rosenheinrich-multisite-migrate'),
+            ),
+            array(
+                'id'    => 'no_start',
+                'label' => __('I did not know where to start', 'rosenheinrich-multisite-migrate'),
+                'help'  => 'start',
+            ),
+            array(
+                'id'    => 'backup_failed',
+                'label' => __('A backup, import, or restore did not work', 'rosenheinrich-multisite-migrate'),
+                'help'  => 'failed',
             ),
             array(
                 'id'    => 'too_complex',
@@ -145,12 +165,21 @@ class Rmmigrate_Plugin_Uninstall
                 'label' => __('Missing a feature I need', 'rosenheinrich-multisite-migrate'),
             ),
             array(
+                'id'    => 'too_expensive',
+                'label' => __('The features I need are only in Pro', 'rosenheinrich-multisite-migrate'),
+            ),
+            array(
+                'id'    => 'expected_other',
+                'label' => __('It is not what I expected', 'rosenheinrich-multisite-migrate'),
+            ),
+            array(
                 'id'    => 'found_alternative',
                 'label' => __('Found another solution', 'rosenheinrich-multisite-migrate'),
             ),
             array(
                 'id'    => 'broke_site',
                 'label' => __('Caused problems on my site', 'rosenheinrich-multisite-migrate'),
+                'help'  => 'failed',
             ),
             array(
                 'id'    => 'other',
@@ -202,7 +231,9 @@ class Rmmigrate_Plugin_Uninstall
         $plugin  = self::resolve_plugin_basename();
         $network = self::should_deactivate_network_wide($plugin);
 
-        deactivate_plugins($plugin, true, $network);
+        // Not silent: WordPress must fire the plugin's deactivation hook so cron
+        // events are cleared and the deactivation is recorded.
+        deactivate_plugins($plugin, false, $network);
 
         self::schedule_deferred_cleanup($plan);
 
@@ -257,7 +288,8 @@ class Rmmigrate_Plugin_Uninstall
         }
 
         if (is_plugin_active($plugin) || ($network && is_plugin_active_for_network($plugin))) {
-            deactivate_plugins($plugin, true, $network);
+            // Not silent: run the deactivation hook (cron cleanup) before deleting.
+            deactivate_plugins($plugin, false, $network);
         }
 
         $deleted = delete_plugins(array($plugin));

@@ -266,6 +266,26 @@
         openCreateWizard();
     }
 
+    /**
+     * "Back up now": start immediately with the saved defaults. Blocking problems
+     * come back from rmmigrate_start as an error toast; "Backup options…" opens the wizard.
+     */
+    function quickStartBackup() {
+        if (running) {
+            return;
+        }
+        if (isCreateBlockedByActiveJob()) {
+            rmmigrateAdminUI.alert(createBlockedMessage());
+            return;
+        }
+        if (!$('#multisite-migrate-start').length || !$('#mm-quick-start-btn').length) {
+            openCreateWizard();
+            return;
+        }
+        $('#mm-toggle-create, #mm-toggle-create-empty').prop('disabled', true).addClass('is-busy');
+        $('#mm-quick-start-btn').trigger('click');
+    }
+
     function closeCreateWizard() {
         if (typeof releaseCreateWizardA11y === 'function') {
             releaseCreateWizardA11y();
@@ -592,8 +612,10 @@
         waitingForLock = false;
         clearStatusTimer();
         stuckPolls = 0;
-        $('#multisite-migrate-start, #mm-quick-start-btn').prop('disabled', false);
+        $('#multisite-migrate-start, #mm-quick-start-btn, #mm-toggle-create, #mm-toggle-create-empty').prop('disabled', false).removeClass('is-busy');
         $('#mm-active-job-banner').addClass('mm-finished-job').css('position', 'relative');
+        // A finished job cannot be cancelled any more.
+        $('#multisite-migrate-cancel').addClass('mm-hidden').prop('disabled', true).attr('aria-hidden', 'true');
         if (ok) {
             if (isVerifySuccessPage()) {
                 return;
@@ -986,7 +1008,11 @@
         focusMainBackupProgress(id || jobId);
     });
 
-    $('#mm-toggle-create, #mm-toggle-create-empty').on('click', tryOpenCreateWizard);
+    $('#mm-toggle-create, #mm-toggle-create-empty').on('click', quickStartBackup);
+    $(document).on('click', '.mm-customize-backup', function (e) {
+        e.preventDefault();
+        tryOpenCreateWizard();
+    });
     $('#mm-create-wizard-close, #mm-create-cancel').on('click', function () {
         closeCreateWizard();
     });
@@ -1060,7 +1086,7 @@
             if (!response.success) {
                 running = false;
                 $btn.prop('disabled', false);
-                $('#mm-quick-start-btn').prop('disabled', false);
+                $('#mm-quick-start-btn, #mm-toggle-create, #mm-toggle-create-empty').prop('disabled', false).removeClass('is-busy');
                 var startFailMsg = response.data && response.data.message ? response.data.message : t('failedToStartBackup', 'Failed to start backup');
                 rmmigrateAdminUI.toast(startFailMsg, 'error');
                 return;
@@ -1072,7 +1098,7 @@
         }).fail(function (xhr) {
             running = false;
             $btn.prop('disabled', false);
-            $('#mm-quick-start-btn').prop('disabled', false);
+            $('#mm-quick-start-btn, #mm-toggle-create, #mm-toggle-create-empty').prop('disabled', false).removeClass('is-busy');
             var msg = (xhr && xhr.responseJSON && xhr.responseJSON.data && xhr.responseJSON.data.message)
                 ? xhr.responseJSON.data.message
                 : '';
@@ -1250,6 +1276,16 @@
         var params = new URLSearchParams(window.location.search);
         if (params.get('create') === '1' && $('#mm-create-wizard').length) {
             tryOpenCreateWizard();
+        }
+        if (params.get('quick') === '1') {
+            params.delete('quick');
+            if (window.history && window.history.replaceState) {
+                var qs = params.toString();
+                window.history.replaceState(null, '', window.location.pathname + (qs ? '?' + qs : '') + window.location.hash);
+            }
+            if (!running && !params.get('job_id')) {
+                quickStartBackup();
+            }
         }
         if (params.get('job_id') && $('#mm-active-job-banner').length) {
             setTimeout(function () {

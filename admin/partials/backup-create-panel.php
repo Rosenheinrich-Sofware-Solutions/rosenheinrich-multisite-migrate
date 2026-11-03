@@ -116,6 +116,7 @@ $rmmigrate_uploads_placeholder = Rmmigrate_Engine_Config::uploads_basedir();
                 <label for="mm-custom-paths"><?php esc_html_e('Custom paths (one per line)', 'rosenheinrich-multisite-migrate'); ?></label><br>
                 <textarea id="mm-custom-paths" rows="3" class="large-text" placeholder="<?php echo esc_attr($rmmigrate_uploads_placeholder); ?>"><?php echo esc_textarea($rmmigrate_default_custom_paths); ?></textarea>
             </p>
+            <div class="mm-expert-only"<?php echo (class_exists('Rmmigrate_Expert_Mode', false) && Rmmigrate_Expert_Mode::enabled()) ? '' : ' hidden'; ?>>
             <p>
                 <label for="mm-archive-mode"><?php esc_html_e('Archive format', 'rosenheinrich-multisite-migrate'); ?></label>
                 <button type="button" class="mm-help-tip" aria-expanded="false" data-tip="<?php echo esc_attr(__('Choose how this backup is packaged. DAF is a resumable format that survives server timeouts. ZIP is the standard format.', 'rosenheinrich-multisite-migrate')); ?>" aria-label="<?php esc_attr_e('Archive format help', 'rosenheinrich-multisite-migrate'); ?>">?</button><br>
@@ -142,6 +143,7 @@ $rmmigrate_uploads_placeholder = Rmmigrate_Engine_Config::uploads_basedir();
                     <textarea id="mm-exclude-tables" rows="3" class="large-text" placeholder="<?php echo esc_attr('*wfblockediplog'); ?>"></textarea>
                 </p>
             </details>
+            </div>
         </div>
 
         <div class="mm-create-step" data-create-step="2">

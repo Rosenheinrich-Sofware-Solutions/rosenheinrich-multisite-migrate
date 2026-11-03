@@ -75,6 +75,17 @@ class Rmmigrate_Links
         );
     }
 
+    /**
+     * WordPress.org support forum for the Free plugin (no tracking parameters).
+     */
+    public static function support_forum_url(): string
+    {
+        return (string) apply_filters(
+            'rmmigrate_support_forum_url',
+            'https://wordpress.org/support/plugin/rosenheinrich-multisite-migrate/'
+        );
+    }
+
     public static function review_url(): string
     {
         return Rmmigrate_Review_Nudge::review_url();

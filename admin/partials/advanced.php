@@ -6,10 +6,10 @@ if (!defined('ABSPATH')) {
 $rmmigrate_advanced_tab = $rmmigrate_advanced_tab ?? Rmmigrate_Request_Input::get_key('tab', 'engine');
 $rmmigrate_base_url = Rmmigrate_Admin_Router::admin_url('multisite-migrate-advanced', array(), $rmmigrate_is_network);
 $rmmigrate_tabs = array(
-    'engine'        => __('Backup Settings', 'rosenheinrich-multisite-migrate'),
+    'engine'        => __('Backups', 'rosenheinrich-multisite-migrate'),
     'notifications' => __('Notifications', 'rosenheinrich-multisite-migrate'),
     'privacy'       => __('Privacy', 'rosenheinrich-multisite-migrate'),
-    'system'        => __('Tools & logs', 'rosenheinrich-multisite-migrate'),
+    'system'        => __('Diagnostics', 'rosenheinrich-multisite-migrate'),
 );
 $rmmigrate_active_tab = $rmmigrate_advanced_tab;
 include RMMIGRATE_PATH . 'admin/partials/layout/tabs.php';
@@ -28,14 +28,17 @@ if ($rmmigrate_advanced_tab === 'engine') {
         <?php endif; ?>
         <?php include RMMIGRATE_PATH . 'admin/partials/settings/tab-backups.php'; ?>
         <?php include RMMIGRATE_PATH . 'admin/partials/settings/tab-retention.php'; ?>
-        <?php include RMMIGRATE_PATH . 'admin/partials/settings/tab-database.php'; ?>
-        <?php include RMMIGRATE_PATH . 'admin/partials/settings/tab-engine.php'; ?>
-        <?php include RMMIGRATE_PATH . 'admin/partials/settings/tab-storage-advanced.php'; ?>
+        <div class="mm-expert-only"<?php echo Rmmigrate_Expert_Mode::enabled() ? '' : ' hidden'; ?>>
+            <?php include RMMIGRATE_PATH . 'admin/partials/settings/tab-database.php'; ?>
+            <?php include RMMIGRATE_PATH . 'admin/partials/settings/tab-engine.php'; ?>
+            <?php include RMMIGRATE_PATH . 'admin/partials/settings/tab-storage-advanced.php'; ?>
+        </div>
         <div class="mm-form-actions">
             <?php submit_button(null, 'primary mm-btn-teal', 'submit'); ?>
         </div>
     </form>
     <?php
+    include RMMIGRATE_PATH . 'admin/partials/components/expert-mode-toggle.php';
 } elseif ($rmmigrate_advanced_tab === 'notifications') {
     $rmmigrate_test_action = $rmmigrate_is_network
         ? network_admin_url('edit.php?action=rmmigrate_test_email')

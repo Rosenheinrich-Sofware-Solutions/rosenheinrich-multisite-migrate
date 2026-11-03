@@ -256,6 +256,7 @@ final class Rmmigrate_Telemetry
             'site_hash'      => self::site_hash(),
             'product_build'  => self::product_build(),
             'plugin_version' => self::plugin_version(),
+            'outcome'        => self::outcome_summary(),
         );
 
         wp_remote_post(
@@ -556,7 +557,9 @@ final class Rmmigrate_Telemetry
         $hash     = hash('sha256', wp_json_encode($snapshot) ?: '');
         $state    = self::get_state();
         $last     = (int) ($state['snapshot_at'] ?? 0);
-        $stale    = $last <= 0 || (time() - $last) > (7 * DAY_IN_SECONDS);
+        // Daily check-in (consent only): re-send even when nothing changed so
+        // active installs can be told apart from abandoned ones.
+        $stale    = $last <= 0 || (time() - $last) >= (20 * HOUR_IN_SECONDS);
 
         if ($hash === (string) ($state['snapshot_hash'] ?? '') && !$stale) {
             return;
@@ -631,11 +634,11 @@ final class Rmmigrate_Telemetry
             ),
             array(
                 'title' => __('Environment snapshot', 'rosenheinrich-multisite-migrate'),
-                'detail' => __('WordPress, PHP, and hosting basics so we can prioritize compatibility work.', 'rosenheinrich-multisite-migrate'),
+                'detail' => __('WordPress, PHP, and hosting basics so we can prioritize compatibility work, sent about once a day while the plugin is active.', 'rosenheinrich-multisite-migrate'),
             ),
             array(
                 'title' => __('Lifecycle signals', 'rosenheinrich-multisite-migrate'),
-                'detail' => __('If you opted in, anonymous deactivation and uninstall signals when the plugin is deactivated or deleted (non-blocking).', 'rosenheinrich-multisite-migrate'),
+                'detail' => __('If you opted in, anonymous deactivation and uninstall signals when the plugin is deactivated or deleted (non-blocking), with a coarse summary: how many backups, restores and imports succeeded or failed, the last error code, and rough time buckets.', 'rosenheinrich-multisite-migrate'),
             ),
         );
     }
@@ -824,7 +827,145 @@ final class Rmmigrate_Telemetry
             $type = 'backup_job';
         }
 
-        self::record_event($type, self::job_terminal_props($job, $status, $error));
+        $props = self::job_terminal_props($job, $status, $error);
+        if ($type === 'backup_job') {
+            $props = array_merge($props, self::first_backup_props());
+        }
+
+        self::remember_outcome($type, (string) ($props['outcome'] ?? 'unknown'), (string) ($props['error_code'] ?? ''));
+        self::record_event($type, $props);
+    }
+
+    /**
+     * Keep a tiny local outcome summary (counts, last outcome, last error code) so
+     * the consented deactivate beacon can tell "left after success" from "left
+     * after failure". Stored locally either way; only sent with consent.
+     */
+    private static function remember_outcome(string $type, string $outcome, string $error_code): void
+    {
+        if ($outcome !== 'success' && $outcome !== 'warning' && $outcome !== 'failed') {
+            return;
+        }
+        $lifecycle = get_site_option('rmmigrate_lifecycle', array());
+        if (!is_array($lifecycle)) {
+            $lifecycle = array();
+        }
+        $kind = $outcome === 'failed' ? 'fail' : 'ok';
+        $counts = isset($lifecycle['outcomes']) && is_array($lifecycle['outcomes']) ? $lifecycle['outcomes'] : array();
+        $key = sanitize_key($type . '_' . $kind);
+        $counts[$key] = (int) ($counts[$key] ?? 0) + 1;
+        $lifecycle['outcomes'] = $counts;
+        $lifecycle['last_outcome'] = array(
+            'type'       => sanitize_key($type),
+            'result'     => $kind,
+            'at'         => time(),
+            'error_code' => $kind === 'fail' ? substr(sanitize_key($error_code), 0, 40) : '',
+        );
+        update_site_option('rmmigrate_lifecycle', $lifecycle);
+    }
+
+    /**
+     * Coarse, anonymous outcome summary for the lifecycle beacon.
+     *
+     * @return array<string,mixed>
+     */
+    public static function outcome_summary(): array
+    {
+        $lifecycle = get_site_option('rmmigrate_lifecycle', array());
+        if (!is_array($lifecycle)) {
+            $lifecycle = array();
+        }
+        $counts = array();
+        foreach ((array) ($lifecycle['outcomes'] ?? array()) as $key => $count) {
+            $counts[sanitize_key((string) $key)] = min(1000, max(0, (int) $count));
+        }
+        $ok = 0;
+        $fail = 0;
+        foreach ($counts as $key => $count) {
+            if (substr($key, -3) === '_ok') {
+                $ok += $count;
+            } elseif (substr($key, -5) === '_fail') {
+                $fail += $count;
+            }
+        }
+        $last = is_array($lifecycle['last_outcome'] ?? null) ? $lifecycle['last_outcome'] : array();
+        $activated_at = (int) get_site_option('rmmigrate_first_activated_at', 0);
+        if ($activated_at <= 0) {
+            $activated_at = (int) ($lifecycle['first_activated_at'] ?? 0);
+        }
+        if ($ok === 0 && $fail === 0) {
+            $left_after = 'nothing_run';
+        } elseif (($last['result'] ?? '') === 'fail') {
+            $left_after = 'failure';
+        } else {
+            $left_after = 'success';
+        }
+
+        return array(
+            'left_after'        => $left_after,
+            'had_success'       => $ok > 0,
+            'success_count'     => $ok,
+            'failure_count'     => $fail,
+            'outcome_counts'    => $counts,
+            'last_type'         => sanitize_key((string) ($last['type'] ?? '')),
+            'last_error_code'   => sanitize_key((string) ($last['error_code'] ?? '')),
+            'since_last'        => self::age_bucket(!empty($last['at']) ? time() - (int) $last['at'] : -1),
+            'since_activation'  => self::age_bucket($activated_at > 0 ? time() - $activated_at : -1),
+        );
+    }
+
+    /**
+     * Onboarding funnel props for backup outcomes: whether this is the first
+     * backup that ever finished (success or failure) and a coarse bucket of the
+     * time since first activation. The marker is stored locally either way;
+     * it only leaves the site inside a consented event.
+     *
+     * @return array<string,mixed>
+     */
+    private static function first_backup_props(): array
+    {
+        $lifecycle = get_site_option('rmmigrate_lifecycle', array());
+        if (!is_array($lifecycle)) {
+            $lifecycle = array();
+        }
+        $first = empty($lifecycle['first_backup_at']);
+        if ($first) {
+            $lifecycle['first_backup_at'] = time();
+            update_site_option('rmmigrate_lifecycle', $lifecycle);
+        }
+
+        $activated_at = (int) get_site_option('rmmigrate_first_activated_at', 0);
+        if ($activated_at <= 0) {
+            $activated_at = (int) ($lifecycle['first_activated_at'] ?? 0);
+        }
+
+        return array(
+            'first_run'        => $first,
+            'since_activation' => self::age_bucket($activated_at > 0 ? time() - $activated_at : -1),
+        );
+    }
+
+    /**
+     * Coarse age bucket so exact install times are never sent.
+     */
+    private static function age_bucket(int $seconds): string
+    {
+        if ($seconds < 0) {
+            return 'unknown';
+        }
+        if ($seconds < 15 * MINUTE_IN_SECONDS) {
+            return 'lt_15m';
+        }
+        if ($seconds < HOUR_IN_SECONDS) {
+            return 'lt_1h';
+        }
+        if ($seconds < DAY_IN_SECONDS) {
+            return 'lt_1d';
+        }
+        if ($seconds < 7 * DAY_IN_SECONDS) {
+            return 'lt_7d';
+        }
+        return 'gte_7d';
     }
 
     /**

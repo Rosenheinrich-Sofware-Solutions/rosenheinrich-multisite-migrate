@@ -1921,3 +1921,102 @@ a.multisite-migrate-wizard-card {
         text-align: center;
     }
 }
+/* First screen: primary action above the fold, everything else collapsed. */
+.mm-setup-onboarding--start {
+    gap: var(--mm-space-5);
+}
+
+.mm-setup-start__head {
+    margin-bottom: var(--mm-space-4);
+}
+
+.mm-setup-start__bar {
+    gap: var(--mm-space-3);
+}
+
+.mm-setup-start__hint {
+    margin: 0;
+    color: var(--mm-text-muted);
+    font-size: var(--mm-text-sm);
+}
+
+.mm-setup-intents {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: var(--mm-space-2) var(--mm-space-5);
+    margin: 0;
+    padding: var(--mm-space-3) 0 0;
+    list-style: none;
+    border-top: 1px solid #e4e8ee;
+    width: 100%;
+    max-width: 32rem;
+}
+
+.mm-setup-intents li {
+    margin: 0;
+}
+
+.mm-setup-intents .button-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    color: var(--mm-teal-text);
+    font-size: var(--mm-text-sm);
+    text-decoration: none;
+}
+
+.mm-setup-intents .button-link:hover,
+.mm-setup-intents .button-link:focus {
+    text-decoration: underline;
+}
+
+.mm-setup-start .mm-setup-disclosure {
+    max-width: 32rem;
+    margin-top: var(--mm-space-4);
+    margin-bottom: 0;
+}
+
+.mm-setup-precheck__item {
+    position: relative;
+    padding-left: 1.1rem;
+}
+
+.mm-setup-precheck__item::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0.4em;
+    width: 0.55rem;
+    height: 0.55rem;
+    border-radius: 50%;
+    background: var(--mm-teal, #0d9488);
+}
+
+.mm-setup-precheck__item.is-warn::before {
+    background: #d97706;
+}
+
+.mm-setup-precheck__item.is-blocker::before {
+    background: #dc2626;
+}
+
+.mm-setup-precheck .description {
+    margin: var(--mm-space-3) 0 0;
+    text-align: center;
+}
+
+.mm-setup-included .mm-setup-feature-grid {
+    margin-top: var(--mm-space-4);
+    gap: var(--mm-space-3);
+}
+
+.mm-setup-finish .mm-setup-skip-wrap {
+    margin: var(--mm-space-4) 0 0;
+    text-align: center;
+}
+
+.mm-setup-finish .mm-setup-skip {
+    color: var(--mm-text-muted);
+    font-size: var(--mm-text-sm);
+}
