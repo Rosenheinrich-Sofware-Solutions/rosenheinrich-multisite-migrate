@@ -32,10 +32,16 @@ $rmmigrate_worker_stale_hint = Rmmigrate_Job::should_warn_worker_stale($rmmigrat
     <p id="mm-active-job-worker-stale-hint" class="mm-active-job-worker-stale-hint mm-status-warn" role="status"><?php esc_html_e('No recent worker activity. If progress stays frozen, refresh the page, cancel the job, or wait — stale jobs are cleared automatically.', 'rosenheinrich-multisite-migrate'); ?></p>
     <?php endif; ?>
     <p class="mm-active-job-actions">
+        <?php if ($rmmigrate_worker_stale_hint) : ?>
+        <button type="button" class="button button-primary mm-btn-teal mm-resume-job" id="mm-active-job-resume" data-job-id="<?php echo esc_attr((string) $rmmigrate_active_job->get_id()); ?>" data-job-type="<?php echo esc_attr($rmmigrate_job_type); ?>"><?php esc_html_e('Resume job', 'rosenheinrich-multisite-migrate'); ?></button>
+        <?php endif; ?>
         <?php if ($rmmigrate_job_type === Rmmigrate_Job::JOB_TYPE_BACKUP) : ?>
             <button type="button" class="button" id="multisite-migrate-cancel"><?php esc_html_e('Cancel backup', 'rosenheinrich-multisite-migrate'); ?></button>
         <?php else : ?>
             <button type="button" class="button mm-cancel-restore-progress" data-job-id="<?php echo esc_attr((string) $rmmigrate_active_job->get_id()); ?>"><?php esc_html_e('Cancel restore', 'rosenheinrich-multisite-migrate'); ?></button>
+        <?php endif; ?>
+        <?php if ($rmmigrate_job_type !== Rmmigrate_Job::JOB_TYPE_RESTORE && Rmmigrate_Restore_Runner::is_maintenance_active() && !Rmmigrate_Access::is_subsite_scoped_operation()) : ?>
+            <button type="button" class="button mm-leave-maintenance-btn" id="mm-active-job-leave-maintenance"><?php esc_html_e('Leave maintenance mode', 'rosenheinrich-multisite-migrate'); ?></button>
         <?php endif; ?>
     </p>
 </div>

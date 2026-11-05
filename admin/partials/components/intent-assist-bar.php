@@ -27,6 +27,9 @@ $rmmigrate_intent_show_primary = $rmmigrate_can_backup_create && empty($rmmigrat
 ?>
 <nav class="mm-action-bar mm-home-quick-actions mm-intent-assist" aria-label="<?php esc_attr_e('What do you want to do?', 'rosenheinrich-multisite-migrate'); ?>">
     <p class="mm-intent-assist__lead screen-reader-text"><?php esc_html_e('What do you want to do?', 'rosenheinrich-multisite-migrate'); ?></p>
+    <?php if (!$rmmigrate_intent_is_network) : ?>
+        <p class="mm-intent-assist__single-site-note screen-reader-text"><?php esc_html_e('Works on standard single-site WordPress as well as Multisite networks. One package with your database and files, saved on this server — download it anytime, or import it on another site to move it.', 'rosenheinrich-multisite-migrate'); ?></p>
+    <?php endif; ?>
     <?php if ($rmmigrate_intent_show_primary) : ?>
         <button type="button" class="button button-primary mm-btn-teal" id="mm-toggle-create" data-mm-intent="backup">
             <?php echo esc_html($rmmigrate_intent_backup_label); ?>

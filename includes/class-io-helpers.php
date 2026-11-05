@@ -116,9 +116,13 @@ class RMMIGRATE_IO
         }
         $patterns[] = '/Bearer\s+[A-Za-z0-9._\-]+/i';
         $patterns[] = '/Authorization:\s*' . $val . '/i';
+        $patterns[] = '/\bMMIG-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}\b/i';
         foreach ($patterns as $pattern) {
             $message = preg_replace($pattern, '[redacted]', $message) ?? $message;
         }
+        // MySQL errors echo the DB user and the row data of a failed INSERT.
+        $message = preg_replace('/\bfor user\s+' . $quoted_val . '/i', 'for user \'[redacted]\'', $message) ?? $message;
+        $message = preg_replace('/\bVALUES\s*\((?:[^()]|\([^()]*\))*\)?/i', 'VALUES ([redacted])', $message) ?? $message;
         return $message;
     }
 

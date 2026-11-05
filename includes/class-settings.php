@@ -68,6 +68,9 @@ class Rmmigrate_Settings
             'encrypt_archives'          => false,
             'archive_passphrase'        => '',
             'safety_snapshot_enabled'   => true,
+            'auto_backup_before_update' => false,
+            'retention_pre_update'      => 3,
+            'pre_update_profile'        => 'db',
             'default_scope'             => 'network',
             'default_excluded_blogs'    => array(),
             'default_included_blogs'    => array(),
@@ -124,6 +127,9 @@ class Rmmigrate_Settings
             'local_storage_path',
             'storage_htaccess',
             'retention_network',
+            'auto_backup_before_update',
+            'retention_pre_update',
+            'pre_update_profile',
             'log_retention_months',
             'log_max_bytes',
             'log_max_rotated_files',
@@ -477,11 +483,39 @@ class Rmmigrate_Settings
     private static function archive_settings_from_post(array $post, array $current): array
     {
         return array(
-            'encrypt_archives'        => !empty($post['encrypt_archives']),
-            'archive_passphrase'      => self::secret_field($post, 'archive_passphrase', $current),
-            'safety_snapshot_enabled' => !empty($post['safety_snapshot_enabled']),
-            'exclude_paths'           => array_filter(array_map('trim', explode("\n", sanitize_textarea_field(wp_unslash($post['exclude_paths'] ?? ''))))),
+            'encrypt_archives'          => !empty($post['encrypt_archives']),
+            'archive_passphrase'        => self::secret_field($post, 'archive_passphrase', $current),
+            'safety_snapshot_enabled'   => !empty($post['safety_snapshot_enabled']),
+            'auto_backup_before_update' => !empty($post['auto_backup_before_update']),
+            'retention_pre_update'      => max(1, min(20, (int) ($post['retention_pre_update'] ?? ($current['retention_pre_update'] ?? 3)))),
+            'pre_update_profile'        => self::pre_update_profile_from($post['pre_update_profile'] ?? ($current['pre_update_profile'] ?? 'db')),
+            'exclude_paths'             => array_filter(array_map('trim', explode("\n", sanitize_textarea_field(wp_unslash($post['exclude_paths'] ?? ''))))),
         );
+    }
+
+    /**
+     * Sanitize an arbitrary settings payload against defaults.
+     *
+     * @param array<string,mixed> $input
+     * @return array<string,mixed>
+     */
+    public static function sanitize(array $input): array
+    {
+        $defaults = self::defaults();
+        $merged = array_merge($defaults, $input);
+        $merged['auto_backup_before_update'] = !empty($input['auto_backup_before_update']);
+        $merged['retention_pre_update'] = max(1, min(20, (int) ($input['retention_pre_update'] ?? $defaults['retention_pre_update'])));
+        $merged['pre_update_profile'] = self::pre_update_profile_from($input['pre_update_profile'] ?? $defaults['pre_update_profile']);
+        return $merged;
+    }
+
+    /**
+     * @param mixed $value
+     */
+    private static function pre_update_profile_from($value): string
+    {
+        $profile = sanitize_key(is_string($value) ? wp_unslash($value) : '');
+        return in_array($profile, array('db', 'full'), true) ? $profile : 'db';
     }
 
     /**

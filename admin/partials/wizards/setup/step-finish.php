@@ -63,6 +63,6 @@ if (!defined('ABSPATH')) {
     </div>
 
     <p class="mm-setup-skip-wrap">
-        <button type="button" class="button-link mm-setup-skip" data-archives-url="<?php echo esc_attr($rmmigrate_archives_url); ?>"><?php esc_html_e('Skip setup and go to Backups', 'rosenheinrich-multisite-migrate'); ?></button>
+        <button type="button" class="button-link mm-setup-skip" id="mm-wizard-skip" data-archives-url="<?php echo esc_attr($rmmigrate_archives_url); ?>"><?php esc_html_e('Skip setup and go to Backups', 'rosenheinrich-multisite-migrate'); ?></button>
     </p>
 </section>

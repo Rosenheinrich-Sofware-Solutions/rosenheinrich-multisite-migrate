@@ -13,6 +13,12 @@ class Rmmigrate_Search_Replace_Core
     /** @var array<int,array{search:string,replace:string}> */
     private $pairs = array();
 
+    /** @var array<string,bool> */
+    private $seen_searches = array();
+
+    /** @var bool */
+    private $pairs_sorted = false;
+
     /** @var array<string,int> */
     private $counts = array();
 
@@ -122,10 +128,12 @@ class Rmmigrate_Search_Replace_Core
 
     private function add_pair(string $search, string $replace): void
     {
-        if ($search === '' || $search === $replace) {
+        if ($search === '' || $search === $replace || isset($this->seen_searches[$search])) {
             return;
         }
+        $this->seen_searches[$search] = true;
         $this->pairs[] = array('search' => $search, 'replace' => $replace);
+        $this->pairs_sorted = false;
     }
 
     public function append_pair(string $search, string $replace): void
@@ -147,9 +155,20 @@ class Rmmigrate_Search_Replace_Core
             return $data;
         }
 
-        usort($this->pairs, static function ($a, $b) {
-            return strlen($b['search']) <=> strlen($a['search']);
-        });
+        if (!$this->pairs_sorted) {
+            // Longest search first; equal lengths keep insertion order, so the explicit
+            // old -> new pair beats its scheme variants (usort is not stable before PHP 8.0).
+            $order = array();
+            foreach ($this->pairs as $index => $pair) {
+                $order[] = array('i' => $index, 'p' => $pair);
+            }
+            usort($order, static function ($a, $b) {
+                $by_len = strlen($b['p']['search']) <=> strlen($a['p']['search']);
+                return $by_len !== 0 ? $by_len : $a['i'] <=> $b['i'];
+            });
+            $this->pairs = array_column($order, 'p');
+            $this->pairs_sorted = true;
+        }
 
         return $this->replace_string_or_serialized($data);
     }
@@ -197,10 +216,9 @@ class Rmmigrate_Search_Replace_Core
      */
     private function collect_non_cascading_matches(string $original): array
     {
-        $matches = array();
-        /** @var array<int,array{0:int,1:int}> $occupied */
-        $occupied = array();
-        $occupied_scan = 0;
+        /** @var array<int,array{pos:int,len:int,end:int,replace:string,search_key:string,ord:int}> $candidates */
+        $candidates = array();
+        $ord = 0;
 
         foreach ($this->pairs as $pair) {
             $search = $pair['search'];
@@ -210,27 +228,112 @@ class Rmmigrate_Search_Replace_Core
 
             $search_len = strlen($search);
             $offset = 0;
-            $occupied_scan = 0;
             while (($pos = strpos($original, $search, $offset)) !== false) {
-                if ($this->should_skip_prefix_extension_match($original, $pos, $search, $pair['replace'])) {
+                if ($this->should_skip_prefix_extension_match($original, $pos, $search, $pair['replace'])
+                    || $this->should_skip_partial_host_match($original, $pos, $search)) {
                     $offset = $pos + 1;
                     continue;
                 }
-                $end = $pos + $search_len;
-                if (!$this->interval_overlaps($occupied, $pos, $end, $occupied_scan)) {
-                    $matches[] = array(
-                        'pos'        => $pos,
-                        'len'        => $search_len,
-                        'replace'    => $pair['replace'],
-                        'search_key' => $search,
-                    );
-                    $this->insert_occupied_interval($occupied, $pos, $end);
-                }
+                $candidates[] = array(
+                    'pos'        => $pos,
+                    'len'        => $search_len,
+                    'end'        => $pos + $search_len,
+                    'replace'    => $pair['replace'],
+                    'search_key' => $search,
+                    'ord'        => $ord,
+                );
                 $offset = $pos + 1;
             }
+            $ord++;
+        }
+
+        if ($candidates === array()) {
+            return array();
+        }
+
+        usort($candidates, static function ($a, $b) {
+            if ($a['pos'] !== $b['pos']) {
+                return $a['pos'] <=> $b['pos'];
+            }
+            if ($a['len'] !== $b['len']) {
+                return $b['len'] <=> $a['len'];
+            }
+
+            return $a['ord'] <=> $b['ord'];
+        });
+
+        $matches = array();
+        $last_end = 0;
+        foreach ($candidates as $c) {
+            if ($c['pos'] < $last_end) {
+                continue;
+            }
+            $matches[] = array(
+                'pos'        => $c['pos'],
+                'len'        => $c['len'],
+                'replace'    => $c['replace'],
+                'search_key' => $c['search_key'],
+            );
+            $last_end = $c['end'];
         }
 
         return $matches;
+    }
+
+    /**
+     * A bare host pair (old.com -> new.com) must only match a whole host label:
+     * "gold.com" or "my-old.com" are different domains and stay untouched.
+     * Subdomains (cdn.old.com) and e-mail hosts (info@old.com) still match.
+     */
+    private function should_skip_partial_host_match(string $original, int $pos, string $search): bool
+    {
+        if ($pos <= 0 || $search === '') {
+            return false;
+        }
+        if (strpos($search, '://') !== false || strpos($search, ':\\/\\/') !== false) {
+            return false;
+        }
+        if (!preg_match('/^[A-Za-z0-9]/', $search)) {
+            return false;
+        }
+
+        // URL-encoded (%2F, %40) and JSON-escaped (\u002F, \u0040) separators end in a letter or digit.
+        if (preg_match('/(?:%2F|%40|\\\\u002F|\\\\u0040)$/i', substr($original, max(0, $pos - 6), min(6, $pos)))) {
+            return false;
+        }
+
+        return self::is_word_char_at($original, self::utf8_char_start($original, $pos - 1));
+    }
+
+    /**
+     * Byte offset of the first byte of the UTF-8 character that contains $byte.
+     */
+    private static function utf8_char_start(string $s, int $byte): int
+    {
+        $limit = max(0, $byte - 3);
+        while ($byte > $limit && (ord($s[$byte]) & 0xC0) === 0x80) {
+            $byte--;
+        }
+
+        return $byte;
+    }
+
+    /**
+     * Letters, digits (any script), "_" and "-" glue a host to its neighbour.
+     * Punctuation and spaces such as "«", "→" or a no-break space do not.
+     */
+    private static function is_word_char_at(string $s, int $byte): bool
+    {
+        $lead = ord($s[$byte]);
+        if ($lead < 0x80) {
+            return (bool) preg_match('/[A-Za-z0-9_-]/', $s[$byte]);
+        }
+        $len = $lead >= 0xF0 ? 4 : ($lead >= 0xE0 ? 3 : 2);
+        $char = substr($s, $byte, $len);
+        $hit = @preg_match('/^[\p{L}\p{N}\p{M}]$/u', $char);
+
+        // Invalid UTF-8 (e.g. Latin-1 data): keep the conservative "no partial match" rule.
+        return $hit === false ? true : (bool) $hit;
     }
 
     private function should_skip_prefix_extension_match(string $original, int $pos, string $search, string $replace): bool
@@ -244,7 +347,7 @@ class Rmmigrate_Search_Replace_Core
         }
         $next = $original[$after];
 
-        if (preg_match('/[A-Za-z0-9_-]/', $next)) {
+        if (self::is_word_char_at($original, $after)) {
             return true;
         }
         if ($next === ':' && ($after + 1) < strlen($original) && ctype_digit($original[$after + 1])) {
@@ -252,43 +355,6 @@ class Rmmigrate_Search_Replace_Core
         }
         if ($next === '.' && ($after + 1) < strlen($original)) {
             return (bool) preg_match('/[A-Za-z0-9]/', $original[$after + 1]);
-        }
-
-        return false;
-    }
-
-    /**
-     * @param array<int,array{0:int,1:int}> $occupied
-     */
-    private function insert_occupied_interval(array &$occupied, int $start, int $end): void
-    {
-        $interval = array($start, $end);
-        $count = count($occupied);
-        for ($i = 0; $i < $count; $i++) {
-            if ($start < $occupied[$i][0]) {
-                array_splice($occupied, $i, 0, array($interval));
-                return;
-            }
-        }
-        $occupied[] = $interval;
-    }
-
-    /**
-     * @param array<int,array{0:int,1:int}> $occupied
-     */
-    private function interval_overlaps(array $occupied, int $start, int $end, int &$from = 0): bool
-    {
-        $count = count($occupied);
-        while ($from < $count && $occupied[$from][1] <= $start) {
-            $from++;
-        }
-        for ($i = $from; $i < $count; $i++) {
-            if ($occupied[$i][0] >= $end) {
-                break;
-            }
-            if ($start < $occupied[$i][1] && $end > $occupied[$i][0]) {
-                return true;
-            }
         }
 
         return false;
@@ -407,6 +473,174 @@ class Rmmigrate_Search_Replace_Core
         }
         $token = $data[0];
         return in_array($token, array('s', 'a', 'O', 'b', 'i', 'd'), true);
+    }
+
+    /**
+     * Search-replace inside one SQL statement (INSERT ... VALUES ('...'), ...).
+     *
+     * Each quoted string literal is unescaped, run through apply() and
+     * re-escaped, so PHP-serialized values keep correct length prefixes. A plain
+     * replace on the raw statement would corrupt them whenever old and new URL
+     * differ in length. Text outside literals (identifiers, keywords, hex) is
+     * left untouched. Literals without a match are copied byte for byte.
+     */
+    public function apply_to_sql_statement(string $statement): string
+    {
+        if ($this->pairs === array() || !$this->sql_statement_may_match($statement)) {
+            return $statement;
+        }
+
+        $len = strlen($statement);
+        $out = '';
+        $i = 0;
+        while ($i < $len) {
+            $plain = strcspn($statement, "'\"`", $i);
+            if ($plain > 0) {
+                $out .= substr($statement, $i, $plain);
+                $i += $plain;
+            }
+            if ($i >= $len) {
+                break;
+            }
+
+            if ($statement[$i] === '`') {
+                $close = strpos($statement, '`', $i + 1);
+                if ($close === false) {
+                    $out .= substr($statement, $i);
+                    break;
+                }
+                $out .= substr($statement, $i, $close - $i + 1);
+                $i = $close + 1;
+                continue;
+            }
+
+            $quote = $statement[$i];
+            $j = $i + 1;
+            $closed = false;
+            while ($j < $len) {
+                $j += strcspn($statement, $quote . '\\', $j);
+                if ($j >= $len) {
+                    break;
+                }
+                if ($statement[$j] === '\\') {
+                    $j += 2;
+                    continue;
+                }
+                if ($j + 1 < $len && $statement[$j + 1] === $quote) {
+                    $j += 2;
+                    continue;
+                }
+                $closed = true;
+                break;
+            }
+            if (!$closed) {
+                // Unterminated literal: leave the rest exactly as it was.
+                $out .= substr($statement, $i);
+                break;
+            }
+
+            $out .= $quote . $this->replace_sql_literal(substr($statement, $i + 1, $j - $i - 1), $quote) . $quote;
+            $i = $j + 1;
+        }
+
+        return $out;
+    }
+
+    private function sql_statement_may_match(string $statement): bool
+    {
+        foreach ($this->pairs as $pair) {
+            $search = $pair['search'];
+            if (strpos($statement, $search) !== false) {
+                return true;
+            }
+            $escaped = self::escape_sql_literal($search);
+            if ($escaped !== $search && strpos($statement, $escaped) !== false) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function replace_sql_literal(string $raw, string $quote): string
+    {
+        $value = (strpos($raw, '\\') === false && strpos($raw, $quote . $quote) === false)
+            ? $raw
+            : self::unescape_sql_literal($raw, $quote);
+
+        $hit = false;
+        foreach ($this->pairs as $pair) {
+            if (strpos($value, $pair['search']) !== false) {
+                $hit = true;
+                break;
+            }
+        }
+        if (!$hit) {
+            return $raw;
+        }
+
+        $replaced = $this->apply($value);
+        if ($replaced === $value) {
+            return $raw;
+        }
+
+        return self::escape_sql_literal($replaced);
+    }
+
+    /**
+     * MySQL string-literal unescape (default sql_mode; NO_BACKSLASH_ESCAPES dumps are rejected on import).
+     */
+    private static function unescape_sql_literal(string $raw, string $quote): string
+    {
+        $map = array(
+            '0'  => "\0",
+            "'"  => "'",
+            '"'  => '"',
+            'b'  => "\x08",
+            'n'  => "\n",
+            'r'  => "\r",
+            't'  => "\t",
+            'Z'  => "\x1A",
+            '\\' => '\\',
+        );
+        $out = '';
+        $len = strlen($raw);
+        for ($i = 0; $i < $len; $i++) {
+            $ch = $raw[$i];
+            if ($ch === '\\' && $i + 1 < $len) {
+                $next = $raw[++$i];
+                if (isset($map[$next])) {
+                    $out .= $map[$next];
+                } elseif ($next === '%' || $next === '_') {
+                    // MySQL keeps the backslash for \% and \_.
+                    $out .= '\\' . $next;
+                } else {
+                    $out .= $next;
+                }
+                continue;
+            }
+            if ($ch === $quote && $i + 1 < $len && $raw[$i + 1] === $quote) {
+                $out .= $quote;
+                $i++;
+                continue;
+            }
+            $out .= $ch;
+        }
+
+        return $out;
+    }
+
+    private static function escape_sql_literal(string $value): string
+    {
+        return strtr($value, array(
+            '\\'   => '\\\\',
+            "\0"   => '\\0',
+            "\n"   => '\\n',
+            "\r"   => '\\r',
+            "'"    => "\\'",
+            '"'    => '\\"',
+            "\x1A" => '\\Z',
+        ));
     }
 
     /**

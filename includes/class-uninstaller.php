@@ -63,6 +63,9 @@ class Rmmigrate_Uninstaller
 
         self::clear_maintenance();
         self::clear_crons();
+        if (class_exists('Rmmigrate_DB_Dumper', false)) {
+            Rmmigrate_DB_Dumper::sweep_stale_mysqldump_defaults_files();
+        }
 
         if (!empty($plan['delete_settings'])) {
             self::delete_settings();
@@ -389,6 +392,7 @@ class Rmmigrate_Uninstaller
             'rmmigrate_hosting_status',
             'rmmigrate_last_error',
             'rmmigrate_recent_errors',
+            'rmmigrate_last_fatal',
             'rmmigrate_migration_notice',
             'rmmigrate_recover_point_job_id',
             'rmmigrate_recover_point_deployed_at',
@@ -500,7 +504,7 @@ class Rmmigrate_Uninstaller
         // NOT IN placeholder count must match shared_site_options_when_peer_installed().
         $wpdb->query(
             $wpdb->prepare(
-                "DELETE FROM {$wpdb->options} WHERE ((option_name LIKE %s AND option_name NOT LIKE %s) OR (option_name LIKE %s AND option_name NOT LIKE %s) OR (option_name LIKE %s AND option_name NOT LIKE %s)) AND option_name NOT IN (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                "DELETE FROM {$wpdb->options} WHERE ((option_name LIKE %s AND option_name NOT LIKE %s) OR (option_name LIKE %s AND option_name NOT LIKE %s) OR (option_name LIKE %s AND option_name NOT LIKE %s)) AND option_name NOT IN (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
                 $like_rmmigrate,
                 $like_not_pro,
                 $like_transient,
@@ -520,7 +524,8 @@ class Rmmigrate_Uninstaller
                 $preserve[10],
                 $preserve[11],
                 $preserve[12],
-                $preserve[13]
+                $preserve[13],
+                $preserve[14]
             )
         );
     }

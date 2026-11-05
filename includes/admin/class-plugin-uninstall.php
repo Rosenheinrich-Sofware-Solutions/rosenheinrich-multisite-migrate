@@ -67,7 +67,7 @@ class Rmmigrate_Plugin_Uninstall
                     'guides' => Rmmigrate_Links::docs_url('deactivate_survey'),
                     'forum'  => Rmmigrate_Links::support_forum_url(),
                 ),
-                'reasons'             => self::deactivate_survey_reasons(),
+                'reasons'             => self::with_reason_prompts(self::deactivate_survey_reasons()),
                 'i18n'                => array(
                     'deactivateTitle'         => __('Deactivate Multisite Migrate', 'rosenheinrich-multisite-migrate'),
                     'deactivateIntro'         => __('Your backups and settings stay in place. You can turn the plugin back on at any time.', 'rosenheinrich-multisite-migrate'),
@@ -75,7 +75,7 @@ class Rmmigrate_Plugin_Uninstall
                     'surveyDetails'           => __('Anything else? (optional)', 'rosenheinrich-multisite-migrate'),
                     'surveyDetailsPlaceholder' => __('A short note helps us improve.', 'rosenheinrich-multisite-migrate'),
                     'surveyContactLabel'      => __('Email for follow-up (optional)', 'rosenheinrich-multisite-migrate'),
-                    'surveyContactHint'       => __('We may contact you if we need more details about a problem. If you recently had backup, import, or restore errors, a short summary of those errors may be sent with your feedback to help us diagnose issues.', 'rosenheinrich-multisite-migrate'),
+                    'surveyContactHint'       => __('We may contact you if we need more details about a problem. Your feedback also includes a short summary of recent backup, import, or restore errors and of the last PHP error inside this plugin, if any. File paths and email addresses are removed first.', 'rosenheinrich-multisite-migrate'),
                     'helpStart'               => __('Most people start with one click: open Multisite Migrate and choose “Back up this site now”. To move a site, back it up here and import the archive on the new site.', 'rosenheinrich-multisite-migrate'),
                     'helpFailed'              => __('Sorry about that. Most failures come from hosting limits and can be fixed in a few minutes. The guides cover the common cases, and we answer in the support forum.', 'rosenheinrich-multisite-migrate'),
                     'helpGuides'              => __('Open the guides', 'rosenheinrich-multisite-migrate'),
@@ -128,6 +128,34 @@ class Rmmigrate_Plugin_Uninstall
             }
         }
         return sanitize_email($email);
+    }
+
+    /**
+     * Reason-specific label for the optional text field, so the note answers a concrete question.
+     *
+     * @param array<int,array<string,string>> $reasons
+     * @return array<int,array<string,string>>
+     */
+    private static function with_reason_prompts(array $reasons): array
+    {
+        $prompts = array(
+            'no_start' => __('What were you trying to do? (optional)', 'rosenheinrich-multisite-migrate'),
+            'backup_failed' => __('What went wrong, and at which step? (optional)', 'rosenheinrich-multisite-migrate'),
+            'too_complex' => __('Which step was confusing? (optional)', 'rosenheinrich-multisite-migrate'),
+            'missing_feature' => __('Which feature do you need? (optional)', 'rosenheinrich-multisite-migrate'),
+            'too_expensive' => __('Which Pro feature do you need? (optional)', 'rosenheinrich-multisite-migrate'),
+            'expected_other' => __('What did you expect it to do? (optional)', 'rosenheinrich-multisite-migrate'),
+            'found_alternative' => __('Which plugin or service do you use instead? (optional)', 'rosenheinrich-multisite-migrate'),
+            'broke_site' => __('What happened on your site? (optional)', 'rosenheinrich-multisite-migrate'),
+        );
+        foreach ($reasons as $i => $reason) {
+            $id = (string) ($reason['id'] ?? '');
+            if (isset($prompts[$id])) {
+                $reasons[$i]['prompt'] = $prompts[$id];
+            }
+        }
+
+        return $reasons;
     }
 
     /**

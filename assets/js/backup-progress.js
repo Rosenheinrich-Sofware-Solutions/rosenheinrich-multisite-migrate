@@ -1059,6 +1059,9 @@
         if (running) {
             return;
         }
+        if (window.rmmigratePreflightBlocked && window.rmmigratePreflightBlocked('backup')) {
+            return;
+        }
         if (!validateScope()) {
             return;
         }
@@ -1381,4 +1384,151 @@
         ensureSubsiteOption($fieldset, site, true);
         $(this).prop('disabled', true).text('✓ ' + (site.label || site.blog_id));
     });
+
+    $(document).on('click', '.mm-resume-job', function (e) {
+        var $btn = $(this);
+        var jobType = ($btn.attr('data-job-type') || $btn.data('job-type') || $('#mm-active-job-banner').attr('data-job-type') || 'backup').toString();
+        if (jobType === 'restore') {
+            return;
+        }
+        e.preventDefault();
+        if ($btn.prop('disabled')) {
+            return;
+        }
+        var resumeId = parseInt($btn.attr('data-job-id') || $btn.data('job-id') || $('#mm-active-job-banner').data('job-id') || jobId || 0, 10);
+        if (!resumeId) {
+            return;
+        }
+        $btn.prop('disabled', true);
+        $.post(rmmigrateAdmin.ajaxUrl, {
+            action: 'rmmigrate_resume_job',
+            job_id: resumeId,
+            nonce: rmmigrateAdmin.nonce
+        }).done(function (res) {
+            if (!res || !res.success || !res.data) {
+                rmmigrateAdminUI.toast((res && res.data && res.data.message) ? res.data.message : t('requestFailed', 'Request failed'), 'error');
+                return;
+            }
+            $('.mm-last-error-notice').remove();
+            var id = parseInt(res.data.job_id || resumeId, 10);
+            running = false;
+            if (!resumeBackupProgress(id)) {
+                redirectToJobProgress(id);
+            } else {
+                ensureWorkerPolling(id);
+            }
+        }).fail(function (xhr) {
+            rmmigrateAdminUI.toast(rmmigrateAdminUI.ajaxErrorMessage(xhr, t('requestFailed', 'Request failed')), 'error');
+        }).always(function () {
+            $btn.prop('disabled', false);
+        });
+    });
+
+    // backup-progress.js and restore-progress.js can load on the same page; bind once.
+    if (!window.rmmigratePreflightBound) {
+        window.rmmigratePreflightBound = true;
+        var preflightStartButtons = {
+            backup: '#multisite-migrate-start, #mm-quick-start-btn',
+            restore: '#mm-restore-start'
+        };
+        var syncPreflightStart = function ($ampel) {
+            var op = ($ampel.attr('data-preflight-op') || '').toString();
+            if (!preflightStartButtons[op]) {
+                return;
+            }
+            var blocked = $ampel.attr('data-can-proceed') === '0';
+            var summaryId = $ampel.find('.mm-preflight-ampel__summary').attr('id') || '';
+            $(preflightStartButtons[op]).each(function () {
+                var $start = $(this);
+                if (blocked) {
+                    $start.prop('disabled', true).attr('data-mm-preflight-blocked', '1');
+                    if (summaryId) {
+                        $start.attr('aria-describedby', summaryId);
+                    }
+                } else if ($start.attr('data-mm-preflight-blocked') === '1') {
+                    $start.prop('disabled', false).removeAttr('data-mm-preflight-blocked aria-describedby');
+                }
+            });
+        };
+        window.rmmigratePreflightBlocked = function (op) {
+            var $ampel = $('.mm-preflight-ampel[data-preflight-op="' + op + '"][data-can-proceed="0"]').first();
+            if (!$ampel.length) {
+                return false;
+            }
+            $ampel.attr('tabindex', '-1').trigger('focus');
+            return true;
+        };
+        $(function () {
+            $('.mm-preflight-ampel').each(function () {
+                syncPreflightStart($(this));
+            });
+        });
+        $(document).on('click', '.mm-preflight-refresh', function (e) {
+            e.preventDefault();
+            var $ampel = $(this).closest('.mm-preflight-ampel');
+            var op = ($ampel.attr('data-preflight-op') || 'backup').toString();
+            $(this).prop('disabled', true).attr('aria-busy', 'true');
+            $.post(rmmigrateAdmin.ajaxUrl, {
+                action: 'rmmigrate_preflight_check',
+                operation: op,
+                nonce: rmmigrateAdmin.nonce
+            }).done(function (res) {
+                if (!res || !res.success || !res.data || !res.data.html) {
+                    return;
+                }
+                var $fresh = $($.parseHTML(String(res.data.html).trim())).filter('.mm-preflight-ampel').first();
+                if (!$fresh.length) {
+                    return;
+                }
+                $ampel.attr({
+                    'class': $fresh.attr('class'),
+                    'data-preflight-status': $fresh.attr('data-preflight-status'),
+                    'data-can-proceed': $fresh.attr('data-can-proceed')
+                });
+                $ampel.children().not('.mm-preflight-ampel__live').remove();
+                $ampel.prepend($fresh.children().not('.mm-preflight-ampel__live'));
+                syncPreflightStart($ampel);
+                var message = ($ampel.find('.mm-preflight-ampel__badge').text() + ' ' + $ampel.find('.mm-preflight-ampel__summary').text()).replace(/\s+/g, ' ').trim();
+                var $live = $ampel.find('.mm-preflight-ampel__live').text('');
+                window.setTimeout(function () {
+                    $live.text(message);
+                }, 100);
+            }).always(function () {
+                $ampel.find('.mm-preflight-refresh').prop('disabled', false).removeAttr('aria-busy').trigger('focus');
+            });
+        });
+    }
+
+    // backup-progress.js and restore-progress.js can load on the same page; bind once.
+    if (!window.rmmigrateLeaveMaintenanceBound) {
+        window.rmmigrateLeaveMaintenanceBound = true;
+        $(document).on('click', '.mm-leave-maintenance-btn', function (e) {
+            e.preventDefault();
+            var $btn = $(this);
+            if ($btn.prop('disabled')) {
+                return;
+            }
+            $btn.prop('disabled', true);
+            $.post(rmmigrateAdmin.ajaxUrl, {
+                action: 'rmmigrate_leave_maintenance',
+                nonce: rmmigrateAdmin.nonce
+            }).done(function (res) {
+                if (!res || !res.success) {
+                    rmmigrateAdminUI.toast((res && res.data && res.data.message) ? res.data.message : t('requestFailed', 'Request failed'), 'error');
+                    return;
+                }
+                var msg = (res.data && res.data.message) ? res.data.message : t('maintenanceCleared', 'Maintenance mode has been turned off.');
+                rmmigrateAdminUI.toast(msg, 'success');
+                $('.mm-maintenance-active-banner, #mm-active-job-leave-maintenance').remove();
+                var $heading = $('.wrap h1').first();
+                if ($heading.length) {
+                    $heading.attr('tabindex', '-1').trigger('focus');
+                }
+            }).fail(function (xhr) {
+                rmmigrateAdminUI.toast(rmmigrateAdminUI.ajaxErrorMessage(xhr, t('requestFailed', 'Request failed')), 'error');
+            }).always(function () {
+                $btn.prop('disabled', false);
+            });
+        });
+    }
 })(jQuery);

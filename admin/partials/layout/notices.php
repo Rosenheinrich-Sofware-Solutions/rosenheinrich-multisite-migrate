@@ -97,6 +97,43 @@ if (!empty($rmmigrate_last_error['message'])) {
             ),
         ),
     );
+    if ($rmmigrate_error_job_id > 0) {
+        $rmmigrate_err_job = Rmmigrate_Job::get($rmmigrate_error_job_id);
+        if ($rmmigrate_err_job instanceof Rmmigrate_Job && $rmmigrate_err_job->can_resume()) {
+            array_unshift(
+                $rmmigrate_banner['actions'],
+                array(
+                    'type'    => 'button',
+                    'label'   => __('Resume job', 'rosenheinrich-multisite-migrate'),
+                    'class'   => 'mm-resume-job',
+                    'primary' => true,
+                    'attrs'   => array(
+                        'data-job-id'   => (string) $rmmigrate_err_job->get_id(),
+                        'data-job-type' => $rmmigrate_err_job->get_job_type(),
+                    ),
+                )
+            );
+        }
+    }
+    if ($rmmigrate_error_job_type === 'restore') {
+        $rmmigrate_rollback_scoped = Rmmigrate_Access::is_subsite_scoped_operation();
+        $rmmigrate_rollback_job = (!$rmmigrate_rollback_scoped || Rmmigrate_Access::can_current_site('backup_restore'))
+            ? Rmmigrate_Safety_Snapshot::get_latest_rollback_job($rmmigrate_rollback_scoped ? get_current_blog_id() : null)
+            : null;
+        if ($rmmigrate_rollback_job instanceof Rmmigrate_Job) {
+            array_unshift(
+                $rmmigrate_banner['actions'],
+                array(
+                    'type'  => 'button',
+                    'label' => __('Roll back last restore', 'rosenheinrich-multisite-migrate'),
+                    'class' => 'mm-rollback-last-restore',
+                    'attrs' => array(
+                        'data-safety-job-id' => (string) $rmmigrate_rollback_job->get_id(),
+                    ),
+                )
+            );
+        }
+    }
     include RMMIGRATE_PATH . 'admin/partials/components/admin-banner.php';
 }
 

@@ -23,6 +23,10 @@ $rmmigrate_import_subsite = !empty($rmmigrate_subsite_mode) || Rmmigrate_Access:
             <label for="mm-import-passphrase"><?php esc_html_e('Archive passphrase (.enc)', 'rosenheinrich-multisite-migrate'); ?></label>
             <input type="password" class="regular-text" id="mm-import-passphrase" autocomplete="off">
         </p>
+        <?php
+        $rmmigrate_preflight_op = 'migration';
+        include RMMIGRATE_PATH . 'admin/partials/components/preflight-ampel.php';
+        ?>
         <div class="mm-dropzone" id="mm-import-dropzone">
             <span class="dashicons dashicons-upload mm-dropzone__icon" aria-hidden="true"></span>
             <strong><?php esc_html_e('Drop your backup here', 'rosenheinrich-multisite-migrate'); ?></strong>

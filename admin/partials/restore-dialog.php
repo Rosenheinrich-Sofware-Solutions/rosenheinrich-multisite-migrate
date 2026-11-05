@@ -172,6 +172,10 @@ if (!defined('ABSPATH')) {
                     <p class="mm-restore-step-lead mm-restore-quick-lead mm-hidden" id="mm-restore-quick-lead" aria-live="polite"></p>
                     <p class="mm-restore-step-lead"><?php esc_html_e('Check the summary, tick the box, then start.', 'rosenheinrich-multisite-migrate'); ?></p>
                     <dl class="multisite-migrate-wizard-review" id="mm-restore-review-summary"></dl>
+                    <?php
+                    $rmmigrate_preflight_op = 'restore';
+                    include RMMIGRATE_PATH . 'admin/partials/components/preflight-ampel.php';
+                    ?>
                     <p class="mm-restore-confirm-row">
                         <label class="mm-restore-confirm-label" for="mm-restore-confirm">
                             <input type="checkbox" id="mm-restore-confirm" value="1">

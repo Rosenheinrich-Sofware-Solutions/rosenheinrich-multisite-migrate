@@ -116,6 +116,7 @@ final class Rmmigrate_Plugin
         require_once $includes . 'class-backup-runner.php';
         require_once $includes . 'class-restore-runner.php';
         require_once $includes . 'class-backup-retention.php';
+        require_once $includes . 'class-pre-update-backup.php';
         require_once $includes . 'class-activity-log.php';
         require_once $includes . 'admin/class-admin-router.php';
         require_once $includes . 'admin/class-expert-mode.php';
@@ -204,6 +205,9 @@ final class Rmmigrate_Plugin
         Rmmigrate_Storage_Self_Check::register();
         Rmmigrate_Engine_Config::register_http_hooks();
         Rmmigrate_Retention::register();
+        if (class_exists('Rmmigrate_Pre_Update_Backup')) {
+            Rmmigrate_Pre_Update_Backup::register();
+        }
         Rmmigrate_Job_Cleanup::register();
         Rmmigrate_Scheduler::register();
         Rmmigrate_Admin_Save::register();
@@ -218,11 +222,16 @@ final class Rmmigrate_Plugin
         Rmmigrate_Pro_Hints::register();
         Rmmigrate_Dashboard_Widget::register();
         Rmmigrate_Restore_Runner::register_maintenance_hooks();
+        Rmmigrate_Error_Recorder::register_fatal_capture();
         add_action('admin_init', array('Rmmigrate_Restore_Runner', 'recover_stale_maintenance'), 1);
 
         // MCP/Abilities need WP 6.9+; page still registers so admins see the WP 6.9 gate UI.
         if (Rmmigrate_Bootstrap::mcp_supported()) {
-            Rmmigrate_OAuth_Store::ensure_tables();
+            // Store methods create the tables on demand. Skip the two SHOW TABLES
+            // probes on normal front-end page loads.
+            if (is_admin() || wp_doing_cron()) {
+                Rmmigrate_OAuth_Store::ensure_tables();
+            }
             Rmmigrate_OAuth_Store::register_cron();
             Rmmigrate_OAuth_Bearer_Auth::register();
             Rmmigrate_OAuth_Server::register();

@@ -27,6 +27,74 @@ class Rmmigrate_Ajax_Backup
         add_action('wp_ajax_rmmigrate_test_hosting', array(__CLASS__, 'test_hosting'));
         add_action('wp_ajax_rmmigrate_test_destination', array(__CLASS__, 'test_destination'));
         add_action('wp_ajax_rmmigrate_search_subsites', array(__CLASS__, 'search_subsites'));
+        add_action('wp_ajax_rmmigrate_resume_job', array(__CLASS__, 'resume_job'));
+        add_action('wp_ajax_rmmigrate_preflight_check', array(__CLASS__, 'preflight_check'));
+    }
+
+    public static function resume_job(): void
+    {
+        $job_id = Rmmigrate_Request_Input::post_int('job_id');
+        // Passing the job id runs assert_job_access (blog scope) inside verify_request.
+        self::verify_request($job_id);
+        $existing = $job_id > 0 ? Rmmigrate_Job::get($job_id) : null;
+        $allowed = $existing !== null
+            && ($existing->is_restore() ? self::user_can_restore() : self::user_can_backup());
+        if (!$allowed) {
+            self::send_ajax_error(
+                __('Permission denied.', 'rosenheinrich-multisite-migrate'),
+                403,
+                'backup',
+                $job_id,
+                array('phase' => 'resume'),
+                'warning'
+            );
+        }
+        $job = Rmmigrate_Job::resume_job($job_id);
+        if ($job === null) {
+            self::send_ajax_error(
+                __('This job cannot be resumed right now. It may still be running, another job may be active, or a failed backup must be started again.', 'rosenheinrich-multisite-migrate'),
+                400,
+                'backup',
+                $job_id,
+                array('phase' => 'resume'),
+                'warning'
+            );
+        }
+        wp_send_json_success(array(
+            'job_id'       => $job->get_id(),
+            'job_type'     => $job->get_job_type(),
+            'worker_token' => Rmmigrate_Runner::worker_token($job->get_id(), 7200),
+        ));
+    }
+
+    public static function preflight_check(): void
+    {
+        self::verify_request();
+        if (!self::user_can_backup() && !self::user_can_restore()) {
+            self::send_ajax_error(
+                __('Permission denied.', 'rosenheinrich-multisite-migrate'),
+                403,
+                'backup',
+                0,
+                array('phase' => 'preflight'),
+                'warning'
+            );
+        }
+        if (class_exists('Rmmigrate_Job_Preflight') && method_exists('Rmmigrate_Job_Preflight', 'evaluate')) {
+            $operation = Rmmigrate_Request_Input::post_key('operation', 'backup');
+            $scope = Rmmigrate_Request_Input::post_text('scope');
+            $profile = Rmmigrate_Request_Input::post_text('backup_profile', 'full');
+            $rmmigrate_preflight_report = Rmmigrate_Job_Preflight::evaluate($operation, array(
+                'scope'          => $scope,
+                'backup_profile' => $profile,
+            ));
+            $rmmigrate_preflight_op = (string) ($rmmigrate_preflight_report['operation'] ?? $operation);
+            ob_start();
+            include RMMIGRATE_PATH . 'admin/partials/components/preflight-ampel.php';
+            $rmmigrate_preflight_report['html'] = (string) ob_get_clean();
+            wp_send_json_success($rmmigrate_preflight_report);
+        }
+        wp_send_json_success(array('ok' => true));
     }
 
     public static function search_subsites(): void

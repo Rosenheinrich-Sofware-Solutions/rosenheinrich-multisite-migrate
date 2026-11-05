@@ -451,6 +451,7 @@ class Rmmigrate_Restore_Runner
          * @since 1.0.6
          * @param Rmmigrate_Job $job Restore job.
          */
+        Rmmigrate_Safety_Snapshot::persist_link_after_restore($job);
         do_action('rmmigrate_restore_done', $job);
         return array('message' => __('Restore complete', 'rosenheinrich-multisite-migrate'));
     }
@@ -562,6 +563,7 @@ class Rmmigrate_Restore_Runner
          * @since 1.0.6
          * @param Rmmigrate_Job $job Restore job.
          */
+        Rmmigrate_Safety_Snapshot::persist_link_after_restore($job);
         do_action('rmmigrate_restore_done', $job);
 
         return array('message' => __('Migration complete', 'rosenheinrich-multisite-migrate'));
@@ -756,6 +758,11 @@ class Rmmigrate_Restore_Runner
     const MAINTENANCE_JOB_OPTION = 'rmmigrate_restore_maintenance_job';
     const MAINTENANCE_MARKER  = 'multisite-migrate-restore';
 
+    /**
+     * After this many seconds the front end re-checks whether a restore is still running.
+     */
+    const MAINTENANCE_STALE_AFTER = 1800;
+
     public static function register_maintenance_hooks(): void
     {
         add_action('template_redirect', array(__CLASS__, 'maybe_block_frontend'), 0);
@@ -763,7 +770,27 @@ class Rmmigrate_Restore_Runner
 
     public static function is_maintenance_active(): bool
     {
-        return (int) get_site_option(self::MAINTENANCE_OPTION, 0) > 0;
+        // A foreign ABSPATH/.maintenance (core/plugin updates) is WordPress's to expire, not ours.
+        return !empty(get_site_option(self::MAINTENANCE_OPTION, 0))
+            || (defined('ABSPATH') && self::has_owned_maintenance_file());
+    }
+
+    public static function set_maintenance(bool $enable, int $job_id = 0): void
+    {
+        if ($enable) {
+            self::enable_maintenance($job_id);
+            return;
+        }
+        self::disable_maintenance();
+    }
+
+    /**
+     * Seconds after which maintenance left by a restore is re-checked: never shorter than the
+     * configured stale-job window, so long quiet restores are not declared dead early.
+     */
+    public static function maintenance_stale_after(): int
+    {
+        return max(self::MAINTENANCE_STALE_AFTER, Rmmigrate_Job::stale_threshold_seconds());
     }
 
     public static function enable_maintenance(int $job_id = 0): void
@@ -782,6 +809,14 @@ class Rmmigrate_Restore_Runner
             return;
         }
 
+        $job_id = (int) get_site_option(self::MAINTENANCE_JOB_OPTION, 0);
+        $since = (int) get_site_option(self::MAINTENANCE_OPTION, 0);
+        $stale_after = self::maintenance_stale_after();
+        $threshold = ($since > 0 && (time() - $since) > $stale_after)
+            ? $stale_after
+            : null;
+        Rmmigrate_Job::recover_stale_active($threshold);
+
         $active = Rmmigrate_Job::get_active();
         if ($active !== null) {
             if ($legacy_file) {
@@ -794,7 +829,6 @@ class Rmmigrate_Restore_Runner
         }
 
         self::disable_maintenance();
-        $job_id = (int) get_site_option(self::MAINTENANCE_JOB_OPTION, 0);
         if (get_transient('rmmigrate_stale_maint_activity')) {
             return;
         }
@@ -824,6 +858,19 @@ class Rmmigrate_Restore_Runner
         }
         if ((defined('REST_REQUEST') && REST_REQUEST) || (defined('WP_CLI') && WP_CLI)) {
             return;
+        }
+
+        // Stale recovery normally runs on admin_init. If nobody opens wp-admin after an
+        // interrupted restore, the front end would stay in maintenance forever.
+        $since = (int) get_site_option(self::MAINTENANCE_OPTION, 0);
+        $needs_recheck = $since <= 0 || (time() - $since) > self::maintenance_stale_after();
+        if ($needs_recheck && !get_transient('rmmigrate_maint_frontend_recheck')) {
+            // Throttled: crawlers hitting a 503 must not scan the jobs table on every request.
+            set_transient('rmmigrate_maint_frontend_recheck', 1, MINUTE_IN_SECONDS);
+            self::recover_stale_maintenance();
+            if (!self::is_maintenance_active()) {
+                return;
+            }
         }
 
         if (!headers_sent()) {

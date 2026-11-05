@@ -260,6 +260,9 @@ class Rmmigrate_Job_Cleanup
         Rmmigrate_Runner::force_release_lock($job_id);
         self::clear_transients($job_id);
         self::unschedule_worker($job_id);
+        if (class_exists('Rmmigrate_DB_Dumper', false)) {
+            Rmmigrate_DB_Dumper::sweep_stale_mysqldump_defaults_files();
+        }
     }
 
     /**
@@ -276,6 +279,9 @@ class Rmmigrate_Job_Cleanup
         Rmmigrate_Runner::force_release_lock($job_id);
         self::clear_transients($job_id);
         self::unschedule_worker($job_id);
+        if (class_exists('Rmmigrate_DB_Dumper', false)) {
+            Rmmigrate_DB_Dumper::sweep_stale_mysqldump_defaults_files();
+        }
     }
 
     /**

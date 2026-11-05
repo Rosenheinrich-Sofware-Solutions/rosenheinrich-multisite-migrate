@@ -508,6 +508,11 @@ class Rmmigrate_Snap_DB
             $params[] = $filters['scope'];
         }
 
+        if (!empty($filters['triggered_by'])) {
+            $where[] = 'triggered_by = %s';
+            $params[] = (string) $filters['triggered_by'];
+        }
+
         if (isset($filters['blog_id'])) {
             $where[] = 'blog_id = %d';
             $params[] = (int) $filters['blog_id'];
@@ -646,12 +651,13 @@ class Rmmigrate_Snap_DB
         // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- Plugin jobs table; identifier via quote_identifier(); values use prepare().
         $rows = $wpdb->get_results(
             $wpdb->prepare(
-                'SELECT id FROM ' . $table . ' WHERE status = %d AND job_type = %s AND scope IN (%s, %s, %s) AND is_safety = 0 ORDER BY completed_at DESC',
+                'SELECT id FROM ' . $table . ' WHERE status = %d AND job_type = %s AND scope IN (%s, %s, %s) AND is_safety = 0 AND (triggered_by IS NULL OR triggered_by <> %s) ORDER BY completed_at DESC',
                 Rmmigrate_Job::STATUS_COMPLETE,
                 Rmmigrate_Job::JOB_TYPE_BACKUP,
                 Rmmigrate_Multisite_Scope::SCOPE_NETWORK,
                 Rmmigrate_Multisite_Scope::SCOPE_NETWORK_FILTERED,
-                Rmmigrate_Multisite_Scope::SCOPE_NETWORK_INCLUDED
+                Rmmigrate_Multisite_Scope::SCOPE_NETWORK_INCLUDED,
+                'pre_update'
             ),
             ARRAY_A
         );

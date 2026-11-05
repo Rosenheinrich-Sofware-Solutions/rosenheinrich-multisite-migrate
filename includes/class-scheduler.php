@@ -79,6 +79,9 @@ class Rmmigrate_Scheduler
 
     private static function tick_body(): void
     {
+        if (!Rmmigrate_Schedules::is_schedule_runner_site()) {
+            return;
+        }
         update_site_option(self::LAST_TICK_OPTION, time());
 
         Rmmigrate_Job::recover_stale_active();
@@ -264,6 +267,9 @@ class Rmmigrate_Scheduler
 
     public static function maybe_run_due_on_admin(): void
     {
+        if (!Rmmigrate_Schedules::is_schedule_runner_site()) {
+            return;
+        }
         if (self::is_background_admin_request()) {
             return;
         }

@@ -148,7 +148,7 @@ The free plugin does not phone home by default. It may contact external services
 
 * **Usage telemetry (opt-in, unticked by default):** setup screen or Settings → Privacy. Sends a pseudonymous install ID, site hash (not your URL), plugin/WordPress/PHP versions, setup choices, and sanitized backup/import/restore outcomes (including whether it was the first backup and a coarse time since activation) — never backup files or database content. While the plugin is active, an environment snapshot is sent about once a day. If you opted in, anonymous deactivation and uninstall signals are recorded when the plugin is deactivated or deleted.
 * **Product emails (opt-in, unticked by default):** setup screen only. Sends your admin email, name, site URL, site title, and version info to subscribe you to product updates.
-* **Feedback (explicit submit):** in-plugin feedback or deactivate survey. Sends your message, rating/reason, versions, and site hash; a contact email only if you type one in on deactivate.
+* **Feedback (explicit submit):** in-plugin feedback or deactivate survey. Sends your message, rating/reason, versions, and site hash; with the deactivate survey also a short summary of recent plugin errors (no file paths or email addresses); a contact email only if you type one in on deactivate.
 
 Privacy Policy: https://multisitemigrate.rosenheinrich.com/privacy-policy/
 Terms (Plus/Pro only; free plugin is GPLv2): https://multisitemigrate.rosenheinrich.com/terms-of-service/
@@ -247,10 +247,13 @@ Report security issues to phillip@rosenheinrich.com; we aim to respond within 72
 
 == Changelog ==
 
-= 1.2.25 – 2026-11-02 =
+= 1.2.25 =
+* New: Optional backup before updates, one-click rollback after restore, resume of interrupted jobs, and a server check before you start.
 * New: A simpler start. "Back up now" runs in one click, and Download and Restore sit right next to each backup.
 * Improvement: Restoring or moving a site asks fewer questions, and technical settings moved to an optional Expert mode.
 * Improvement: Clearer wording for single sites and networks. Product emails and usage data stay off unless you opt in.
+* Improvement: Better deactivation feedback.
+* Fix: Admin redirect after activation.
 * Fix: Various bug fixes and stability improvements.
 
 = 1.2.24 – 2026-10-27 =

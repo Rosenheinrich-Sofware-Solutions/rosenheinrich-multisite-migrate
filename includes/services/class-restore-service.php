@@ -20,6 +20,39 @@ final class Rmmigrate_Restore_Service
     }
 
     /**
+     * Start a 1-click rollback restore from a pre-restore safety snapshot.
+     *
+     * @return array<string,mixed>
+     */
+    public static function start_rollback(int $safety_job_id = 0): array
+    {
+        $blog_id = Rmmigrate_Access::is_subsite_scoped_operation() ? get_current_blog_id() : null;
+        $job = Rmmigrate_Safety_Snapshot::get_latest_rollback_job($blog_id);
+        if ($job !== null && $safety_job_id > 0 && $job->get_id() !== $safety_job_id) {
+            // The button was rendered for an older snapshot (or another site); never roll back to it.
+            $job = null;
+        }
+
+        if ($job === null || !$job->is_safety() || !Rmmigrate_Recovery_Points::is_restorable($job)) {
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Structured service exception payload.
+            throw new Rmmigrate_Service_Exception(
+                esc_html(__('No restorable safety snapshot is available for rollback.', 'rosenheinrich-multisite-migrate')),
+                array(),
+                sanitize_key(Rmmigrate_Error_Codes::SOURCE_NOT_FOUND)
+            );
+        }
+
+        return self::start_restore(array(
+            'source_job_id'     => $job->get_id(),
+            'restore_mode'      => Rmmigrate_Job::RESTORE_MODE_BOTH,
+            'restore_type'      => Rmmigrate_Job::RESTORE_TYPE_SAME_SERVER,
+            'confirm_overwrite' => true,
+            'safety_snapshot'   => false,
+            'kick_worker'       => true,
+        ));
+    }
+
+    /**
      * @return array<string,mixed>
      */
     public static function prefetch_archive(int $job_id): array
@@ -456,6 +489,7 @@ final class Rmmigrate_Restore_Service
             $create_options['user_merge'] = !empty($params['user_merge']);
         }
         $job = Rmmigrate_Job::create_restore($source_id, $mode, $create_options);
+        Rmmigrate_Safety_Snapshot::remember_for_restore($safety_id, $job);
 
         $kick = !empty($params['kick_worker']);
         if ($kick) {

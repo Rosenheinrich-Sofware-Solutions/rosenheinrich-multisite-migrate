@@ -464,7 +464,11 @@ class Rmmigrate_Restore_Topology_User_Merge
         }
 
         $table_prefix = preg_replace('/users$/', '', $users_table);
-        $base_prefix = self::base_prefix($table_prefix);
+        // The users table already sits at the network base prefix; only strip a trailing
+        // _<digits>_ when no sitemeta lives there (a base prefix such as wp_2024_ is valid).
+        $base_prefix = self::table_exists($pdo, $table_prefix . 'sitemeta')
+            ? $table_prefix
+            : self::base_prefix($table_prefix);
         $super_admin_logins = array();
         $sitemeta = $base_prefix . 'sitemeta';
         if (self::table_exists($pdo, $sitemeta)) {

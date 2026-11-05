@@ -148,6 +148,25 @@ class Rmmigrate_Admin_Menu
                 $callback
             );
         }
+        add_action('current_screen', array(__CLASS__, 'fill_hidden_page_title'));
+    }
+
+    /**
+     * Pages registered with an empty parent have no menu title, so core passes
+     * null to strip_tags() in admin-header.php (PHP 8.1+ deprecation). Give them one.
+     */
+    public static function fill_hidden_page_title(): void
+    {
+        global $title;
+        if (is_string($title) && $title !== '') {
+            return;
+        }
+        $titles = self::page_titles();
+        $page = self::page_from_request();
+        if (isset($titles[$page])) {
+            // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited -- Core reads $title for the admin <title>; hidden pages leave it unset.
+            $title = $titles[$page];
+        }
     }
 
     /**
@@ -181,6 +200,7 @@ class Rmmigrate_Admin_Menu
         }
         add_filter('parent_file', array(__CLASS__, 'highlight_parent'));
         add_filter('submenu_file', array(__CLASS__, 'highlight_submenu'));
+        add_action('current_screen', array(__CLASS__, 'fill_hidden_page_title'));
         if (Rmmigrate_Setup_Wizard::menu_visible()) {
             add_submenu_page(
                 $parent,

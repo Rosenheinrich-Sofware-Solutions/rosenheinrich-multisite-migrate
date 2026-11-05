@@ -16,7 +16,7 @@ if (!defined('ABSPATH')) {
             <?php if ($rmmigrate_setup_network) : ?>
                 <?php esc_html_e('One package with every subsite, the shared tables, and all files, saved on this server. Download it anytime, or import it on another network to move it.', 'rosenheinrich-multisite-migrate'); ?>
             <?php else : ?>
-                <?php esc_html_e('One package with your database and files, saved on this server. Download it anytime, or import it on another site to move it.', 'rosenheinrich-multisite-migrate'); ?>
+                <?php esc_html_e('Works on standard single-site WordPress as well as Multisite networks. One package with your database and files, saved on this server — download it anytime, or import it on another site to move it.', 'rosenheinrich-multisite-migrate'); ?>
             <?php endif; ?>
         </p>
     </header>
@@ -50,6 +50,14 @@ if (!defined('ABSPATH')) {
                 </button>
             </li>
         </ul>
+    </div>
+
+    <?php
+    $rmmigrate_archive_check = $rmmigrate_archive_check ?? Rmmigrate_Setup_Wizard::verify_first_archive();
+    ?>
+    <div class="mm-setup-archive-check<?php echo !empty($rmmigrate_archive_check['verified']) ? ' is-verified' : ''; ?>" id="mm-setup-archive-check" aria-live="polite">
+        <p class="mm-setup-archive-check__status"><?php echo esc_html((string) ($rmmigrate_archive_check['message'] ?? '')); ?></p>
+        <button type="button" class="button button-secondary" id="mm-setup-verify-archive"><?php esc_html_e('Verify first backup archive', 'rosenheinrich-multisite-migrate'); ?></button>
     </div>
 
     <?php if (!empty($rmmigrate_precheck['checks'])) : ?>

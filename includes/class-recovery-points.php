@@ -14,9 +14,10 @@ class Rmmigrate_Recovery_Points
     public static function get_recent(bool $is_network): array
     {
         $args = array(
-            'limit'        => self::DISPLAY_LIMIT,
-            'status_group' => 'completed',
-            'job_type'     => Rmmigrate_Job::JOB_TYPE_BACKUP,
+            'limit'          => self::DISPLAY_LIMIT,
+            'status_group'   => 'completed',
+            'job_type'       => Rmmigrate_Job::JOB_TYPE_BACKUP,
+            'include_safety' => true,
         );
         if (!$is_network && is_multisite()) {
             $args['scope'] = Rmmigrate_Multisite_Scope::SCOPE_SUBSITE;

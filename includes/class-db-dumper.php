@@ -826,6 +826,7 @@ class Rmmigrate_DB_Dumper
         if (!Rmmigrate_Filesystem::ensure_directory($dir)) {
             return null;
         }
+        self::sweep_stale_mysqldump_defaults_files($dir);
         $path = $dir . 'mysqldump-' . wp_generate_password(12, false, false) . '.cnf';
         if ($path === '') {
             return null;
@@ -842,6 +843,41 @@ class Rmmigrate_DB_Dumper
             return null;
         }
         return $path;
+    }
+
+    /**
+     * Remove credential files left behind when a request died before its cleanup ran
+     * (time limit, fatal error). Only our own file name and exact content format count.
+     */
+    public static function sweep_stale_mysqldump_defaults_files(string $dir = ''): void
+    {
+        if ($dir === '') {
+            if (!function_exists('get_temp_dir')) {
+                return;
+            }
+            $dir = trailingslashit(get_temp_dir());
+        } else {
+            $dir = trailingslashit($dir);
+        }
+        $files = glob($dir . 'mysqldump-*.cnf');
+        if (!is_array($files)) {
+            return;
+        }
+        $cutoff = time() - HOUR_IN_SECONDS;
+        foreach (array_slice($files, 0, 50) as $file) {
+            if (!preg_match('/^mysqldump-[A-Za-z0-9]{12}\.cnf$/', basename($file))) {
+                continue;
+            }
+            $mtime = @filemtime($file);
+            if ($mtime === false || $mtime > $cutoff) {
+                continue;
+            }
+            $content = Rmmigrate_Filesystem::get_contents($file);
+            if (!is_string($content) || !preg_match('/^\[client\]\npassword="(?:[^"\\\\]|\\\\.)*"\n$/', $content)) {
+                continue;
+            }
+            Rmmigrate_Filesystem::delete($file);
+        }
     }
 
     private function delete_mysqldump_defaults_extra_file(?string $path): void

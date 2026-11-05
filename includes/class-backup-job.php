@@ -20,10 +20,16 @@ class Rmmigrate_Job
 
     const STATUS_PENDING      = 0;
     const STATUS_INIT         = 5;
+    const STATUS_RUNNING      = 5;
     const STATUS_DUMPING_DB   = 10;
+    const STATUS_DB           = 10;
     const STATUS_DB_DONE      = 20;
     const STATUS_ARCHIVING    = 30;
+    const STATUS_FILES        = 30;
+    const STATUS_RESTORING    = 30;
     const STATUS_ARCHIVE_DONE = 40;
+    const STATUS_MANIFEST     = 40;
+    const STATUS_UPLOADING    = 50;
     const STATUS_COMPLETE     = 100;
     const STATUS_ERROR        = -1;
     const STATUS_CANCELLED    = -2;
@@ -592,7 +598,7 @@ class Rmmigrate_Job
             return false;
         }
 
-        if ($age < self::CRON_WAIT_CAP_SECONDS && self::is_waiting_for_cron_worker($job->get_id())) {
+        if (!$job->is_restore() && $age < self::CRON_WAIT_CAP_SECONDS && self::is_waiting_for_cron_worker($job->get_id())) {
             return false;
         }
 
@@ -649,13 +655,13 @@ class Rmmigrate_Job
      * Mark stuck active jobs as failed when the worker has been silent past the threshold.
      * Walks every active row so a newer job cannot hide an older stale duplicate.
      */
-    public static function recover_stale_active(): ?self
+    public static function recover_stale_active(?int $threshold_seconds = null): ?self
     {
         $last = null;
         $message = __('Worker stopped responding. The job was marked as failed. You can start a new backup or restore.', 'rosenheinrich-multisite-migrate');
         foreach (Rmmigrate_Snap_DB::jobs_get_active_ids() as $id) {
             $job = self::get($id);
-            if ($job === null || !self::is_stale($job)) {
+            if ($job === null || !self::is_stale($job, $threshold_seconds)) {
                 continue;
             }
             Rmmigrate_Logger::log_job($job->get_id(), $message);
@@ -917,6 +923,22 @@ class Rmmigrate_Job
     public function get_display_job_type(): string
     {
         if ($this->get_job_type() === self::JOB_TYPE_BACKUP) {
+            $triggered_by = method_exists($this, 'get_triggered_by')
+                ? (string) $this->get_triggered_by()
+                : (string) ($this->data['triggered_by'] ?? 'manual');
+            $profile = $this->get_backup_profile();
+            if ($triggered_by === 'pre_update') {
+                if ($profile === 'db') {
+                    return __('Database backup (before update)', 'rosenheinrich-multisite-migrate');
+                }
+                return __('Backup before update', 'rosenheinrich-multisite-migrate');
+            }
+            if ($profile === 'db') {
+                return __('Database backup', 'rosenheinrich-multisite-migrate');
+            }
+            if ($this->is_safety()) {
+                return __('Safety snapshot', 'rosenheinrich-multisite-migrate');
+            }
             return __('Full backup', 'rosenheinrich-multisite-migrate');
         }
         if ($this->get_job_type() === self::JOB_TYPE_RESTORE) {
@@ -1869,5 +1891,123 @@ class Rmmigrate_Job
     {
         $jobs = self::list_completed(1);
         return $jobs[0] ?? null;
+    }
+
+    public function get_archive_filename(): string
+    {
+        $path = $this->get_local_path();
+        if ($path !== '') {
+            return basename($path);
+        }
+        $resolved = Rmmigrate_Runner::resolve_local_path($this);
+        return $resolved !== '' ? basename($resolved) : '';
+    }
+
+    public function get_archive_size(): int
+    {
+        $size = $this->get_file_size();
+        if ($size > 0) {
+            return $size;
+        }
+        $resolved = Rmmigrate_Runner::resolve_local_path($this);
+        if ($resolved !== '' && Rmmigrate_Filesystem::exists($resolved)) {
+            return (int) @filesize($resolved);
+        }
+        return 0;
+    }
+
+    public function can_resume(): bool
+    {
+        $status = $this->get_status();
+        if (in_array(
+            $status,
+            array(
+                self::STATUS_PENDING,
+                self::STATUS_RUNNING,
+                self::STATUS_DB,
+                self::STATUS_DB_DONE,
+                self::STATUS_FILES,
+                self::STATUS_MANIFEST,
+                self::STATUS_UPLOADING,
+                self::STATUS_RESTORING,
+            ),
+            true
+        ) || self::is_status_active($status)) {
+            // Only a worker that stopped reporting may be taken over; a live one would race.
+            return self::should_warn_worker_stale($this);
+        }
+
+        if ($status === self::STATUS_ERROR) {
+            // Failed backups have their partial archive purged; continuing from saved offsets
+            // would finish with an incomplete archive marked complete.
+            if ($this->get_job_type() === self::JOB_TYPE_BACKUP) {
+                return false;
+            }
+            $progress = $this->get_progress();
+            return !empty($progress['step'])
+                || !empty($progress['database'])
+                || !empty($progress['archive'])
+                || !empty($progress['extract']);
+        }
+
+        return false;
+    }
+
+    public static function resume_job(int $job_id): ?self
+    {
+        if ($job_id <= 0) {
+            return null;
+        }
+        $job = self::get($job_id);
+        if ($job === null || !$job->can_resume()) {
+            return null;
+        }
+        $active_id = self::get_active_id();
+        if ($active_id !== null && $active_id !== $job_id) {
+            return null;
+        }
+
+        if (!Rmmigrate_Runner::lease_is_fresh($job_id)) {
+            Rmmigrate_Runner::force_release_lock($job_id);
+        }
+
+        global $wpdb;
+        $now = current_time('mysql', true);
+        if ($job->get_status() === self::STATUS_ERROR) {
+            $updated = $wpdb->update(
+                self::table_name(),
+                array(
+                    'status'        => self::STATUS_RUNNING,
+                    'error_message' => '',
+                    'updated_at'    => $now,
+                ),
+                array('id' => $job_id),
+                array('%d', '%s', '%s'),
+                array('%d')
+            );
+            if ($updated === false) {
+                return null;
+            }
+            if ($job->is_restore()) {
+                Rmmigrate_Restore_Runner::enable_maintenance($job_id);
+            }
+            $job->data['status'] = self::STATUS_RUNNING;
+            $job->data['error_message'] = '';
+            $job->data['updated_at'] = $now;
+            delete_site_option('rmmigrate_last_error');
+        } else {
+            $wpdb->update(
+                self::table_name(),
+                array('updated_at' => $now),
+                array('id' => $job_id),
+                array('%s'),
+                array('%d')
+            );
+            $job->data['updated_at'] = $now;
+        }
+
+        Rmmigrate_Runner::kick_worker($job_id);
+
+        return self::get($job_id) ?? $job;
     }
 }

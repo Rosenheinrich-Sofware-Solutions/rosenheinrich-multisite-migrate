@@ -302,6 +302,120 @@ class Rmmigrate_Setup_Wizard
         add_action('wp_ajax_rmmigrate_setup_wizard_newsletter', array(__CLASS__, 'ajax_newsletter'));
         add_action('wp_ajax_rmmigrate_setup_wizard_newsletter_confirm', array(__CLASS__, 'ajax_newsletter_confirm'));
         add_action('wp_ajax_rmmigrate_setup_wizard_newsletter_fallback', array(__CLASS__, 'ajax_newsletter_fallback'));
+        add_action('wp_ajax_rmmigrate_setup_wizard_verify_archive', array(__CLASS__, 'ajax_verify_archive'));
+    }
+
+    /**
+     * Verify the most recent completed backup archive on disk.
+     *
+     * @return array<string,mixed>
+     */
+    public static function verify_first_archive(bool $persist = false): array
+    {
+        global $wpdb;
+        if (!isset($wpdb) || !is_object($wpdb)) {
+            return array(
+                'verified' => false,
+                'status'   => 'pending',
+                'message'  => __('No backup archive created yet. Create your first backup above to verify it.', 'rosenheinrich-multisite-migrate'),
+            );
+        }
+
+        $jobs = Rmmigrate_Job::list_jobs(array(
+            'status_group' => 'completed',
+            'job_type'     => Rmmigrate_Job::JOB_TYPE_BACKUP,
+            'limit'        => 1,
+        ));
+        if (empty($jobs)) {
+            return array(
+                'verified' => false,
+                'status'   => 'pending',
+                'message'  => __('No backup archive created yet. Create your first backup above to verify it.', 'rosenheinrich-multisite-migrate'),
+            );
+        }
+
+        $job = $jobs[0];
+        $path = Rmmigrate_Runner::resolve_local_path($job);
+        if ($path === '' || !is_file($path)) {
+            return array(
+                'verified' => false,
+                'status'   => 'error',
+                'job_id'   => $job->get_id(),
+                'message'  => __('Backup archive file could not be verified on disk.', 'rosenheinrich-multisite-migrate'),
+            );
+        }
+
+        $file_size = (int) @filesize($path);
+        if ($file_size <= 0) {
+            return array(
+                'verified' => false,
+                'status'   => 'error',
+                'job_id'   => $job->get_id(),
+                'message'  => __('Backup archive file is empty.', 'rosenheinrich-multisite-migrate'),
+            );
+        }
+
+        $valid = self::archive_header_is_valid($path, $file_size);
+
+        if (!$valid) {
+            return array(
+                'verified' => false,
+                'status'   => 'error',
+                'job_id'   => $job->get_id(),
+                'message'  => __('Backup archive structure could not be verified.', 'rosenheinrich-multisite-migrate'),
+            );
+        }
+
+        if ($persist) {
+            self::mark_step('features');
+        }
+
+        return array(
+            'verified' => true,
+            'status'   => 'ok',
+            'job_id'   => $job->get_id(),
+            'filename' => $job->get_archive_filename(),
+            'size'     => size_format((int) ($job->get_archive_size() > 0 ? $job->get_archive_size() : $file_size)),
+            'message'  => __('First backup archive verified and ready for restore.', 'rosenheinrich-multisite-migrate'),
+        );
+    }
+
+    /**
+     * Cheap structural check without opening the whole archive: format magic at the
+     * start, plus the ZIP end-of-central-directory record for .zip files.
+     */
+    public static function archive_header_is_valid(string $path, int $file_size): bool
+    {
+        if (!Rmmigrate_Filesystem::is_readable($path)) {
+            return false;
+        }
+        $head = Rmmigrate_Filesystem::get_contents($path, 0, 8);
+        if ($head === false) {
+            return false;
+        }
+        $lower = strtolower($path);
+        if (substr($lower, -6) === '.mmenc') {
+            return strncmp($head, 'MMIGENC', 7) === 0;
+        }
+        if (substr($lower, -4) === '.daf') {
+            return strncmp($head, 'MMIGDAF', 7) === 0;
+        }
+        if (substr($lower, -4) === '.zip') {
+            if (strncmp($head, "PK\x03\x04", 4) !== 0) {
+                return false;
+            }
+            $tail_len = (int) min($file_size, 65557);
+            $tail = Rmmigrate_Filesystem::get_contents($path, max(0, $file_size - $tail_len), $tail_len);
+            return $tail !== false && strpos($tail, "PK\x05\x06") !== false;
+        }
+
+        return $head !== '';
+    }
+
+    public static function ajax_verify_archive(): void
+    {
+        self::verify_setup_ajax();
+        wp_send_json_success(self::verify_first_archive(true));
     }
 
     public static function maybe_redirect(): void
@@ -320,6 +434,11 @@ class Rmmigrate_Setup_Wizard
             return;
         }
         if (self::is_pending_post_activation_redirect()) {
+            // Only the admin who can open the wizard is redirected. Another user or a
+            // subsite admin would land on a "not allowed" page, so the flag stays set.
+            if (!self::can_run()) {
+                return;
+            }
             self::clear_pending_post_activation_redirect();
             $target_page = self::is_finished() ? 'multisite-migrate-archives' : 'multisite-migrate-setup';
             $target_url  = Rmmigrate_Admin_Router::admin_url(
@@ -359,7 +478,7 @@ class Rmmigrate_Setup_Wizard
             'redirect' => Rmmigrate_Admin_Router::admin_url(
                 'multisite-migrate-archives',
                 array(),
-                is_multisite() && is_network_admin()
+                is_multisite() && (is_network_admin() || current_user_can('manage_network'))
             ),
         ));
     }
@@ -386,7 +505,7 @@ class Rmmigrate_Setup_Wizard
         return Rmmigrate_Admin_Router::admin_url(
             $target['page'],
             $target['args'],
-            is_multisite() && is_network_admin()
+            is_multisite() && (is_network_admin() || current_user_can('manage_network'))
         );
     }
 

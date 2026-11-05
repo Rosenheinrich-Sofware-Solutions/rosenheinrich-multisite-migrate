@@ -260,6 +260,39 @@ class Rmmigrate_Schedules
     }
 
     /**
+     * Schedules are network-wide: always use the main site's timezone so every
+     * subsite computes the same wall-clock slot (subsites may use other timezones).
+     */
+    public static function schedule_timezone(): DateTimeZone
+    {
+        if (function_exists('is_multisite') && is_multisite() && function_exists('get_main_site_id')) {
+            $main = (int) get_main_site_id();
+            if ($main > 0 && (int) get_current_blog_id() !== $main) {
+                switch_to_blog($main);
+                try {
+                    return wp_timezone();
+                } finally {
+                    restore_current_blog();
+                }
+            }
+        }
+
+        return wp_timezone();
+    }
+
+    /**
+     * Only the main site runs and heals network schedules on multisite.
+     */
+    public static function is_schedule_runner_site(): bool
+    {
+        if (!function_exists('is_multisite') || !is_multisite()) {
+            return true;
+        }
+
+        return function_exists('is_main_site') ? is_main_site() : true;
+    }
+
+    /**
      * @param array<string,mixed> $schedule
      */
     public static function compute_next_run(array $schedule, ?int $from = null): int
@@ -268,7 +301,7 @@ class Rmmigrate_Schedules
         $minute = max(0, min(59, (int) ($schedule['minute'] ?? 0)));
         $interval = $schedule['interval'] ?? 'weekly';
         $now = $from ?? time();
-        $tz = wp_timezone();
+        $tz = self::schedule_timezone();
         $dt = new DateTime('@' . $now);
         $dt->setTimezone($tz);
 
@@ -639,6 +672,9 @@ class Rmmigrate_Schedules
      */
     public static function heal_mismatched_next_runs(): bool
     {
+        if (!self::is_schedule_runner_site()) {
+            return false;
+        }
         $changed = self::maybe_reclaim_local_schedules_from_legacy_storage();
         $settings = self::normalize(Rmmigrate_Settings::get());
         foreach ($settings['schedules'] as $index => $schedule) {
@@ -935,7 +971,7 @@ class Rmmigrate_Schedules
         $minute = max(0, min(59, (int) ($schedule['minute'] ?? 0)));
 
         $dt = new DateTimeImmutable('@' . $next_run);
-        $dt = $dt->setTimezone(wp_timezone());
+        $dt = $dt->setTimezone(self::schedule_timezone());
 
         if ((int) $dt->format('i') !== $minute) {
             return false;

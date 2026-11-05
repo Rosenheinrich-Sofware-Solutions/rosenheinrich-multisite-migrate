@@ -12,10 +12,58 @@ class Rmmigrate_Ajax_Restore
     {
         add_action('wp_ajax_rmmigrate_start_restore', array(__CLASS__, 'start_restore'));
         add_action('wp_ajax_rmmigrate_quick_restore', array(__CLASS__, 'quick_restore'));
+        add_action('wp_ajax_rmmigrate_rollback_restore', array(__CLASS__, 'rollback_restore'));
+        add_action('wp_ajax_rmmigrate_leave_maintenance', array(__CLASS__, 'leave_maintenance'));
         add_action('wp_ajax_rmmigrate_prefetch_archive', array(__CLASS__, 'prefetch_archive'));
         add_action('wp_ajax_rmmigrate_manifest', array(__CLASS__, 'get_manifest'));
         add_action('wp_ajax_rmmigrate_search_replace_preview', array(__CLASS__, 'search_replace_preview'));
         add_action('wp_ajax_rmmigrate_search_replace_run', array(__CLASS__, 'search_replace_run'));
+    }
+
+    public static function rollback_restore(): void
+    {
+        self::verify_request(0, false, 'backup_restore');
+        $safety_job_id = Rmmigrate_Request_Input::post_int('safety_job_id');
+        try {
+            $result = Rmmigrate_Restore_Service::start_rollback($safety_job_id);
+            if (is_array($result) && empty($result['awaiting_safety']) && !empty($result['job_id'])) {
+                $result['worker_token'] = Rmmigrate_Runner::worker_token((int) $result['job_id'], 7200);
+            }
+            wp_send_json_success($result);
+        } catch (Rmmigrate_Service_Exception $e) {
+            self::send_service_exception($e, 'restore', $safety_job_id, array('phase' => 'rollback'));
+        }
+    }
+
+    public static function leave_maintenance(): void
+    {
+        self::verify_request(0, false, 'backup_restore');
+        if (Rmmigrate_Access::is_subsite_scoped_operation()) {
+            self::send_ajax_error(
+                __('Only a network administrator can turn off maintenance mode for the network.', 'rosenheinrich-multisite-migrate'),
+                403,
+                'restore',
+                0,
+                array('phase' => 'leave_maintenance'),
+                'warning'
+            );
+        }
+        $active = Rmmigrate_Job::get_active();
+        if ($active !== null && $active->is_restore()) {
+            self::send_ajax_error(
+                __('A restore is still running. Wait for it to finish or cancel it, then try again.', 'rosenheinrich-multisite-migrate'),
+                409,
+                'restore',
+                $active->get_id(),
+                array('phase' => 'leave_maintenance'),
+                'warning'
+            );
+        }
+        Rmmigrate_Restore_Runner::set_maintenance(false);
+        wp_send_json_success(array(
+            'cleared' => true,
+            'message' => __('Maintenance mode has been turned off.', 'rosenheinrich-multisite-migrate'),
+        ));
     }
 
     public static function search_replace_preview(): void

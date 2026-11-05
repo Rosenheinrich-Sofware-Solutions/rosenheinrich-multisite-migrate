@@ -31,7 +31,7 @@
             id: 'keep_all',
             label: t('keepAllData', 'Keep all Multisite Migrate data'),
             help: '',
-            radio: true,
+            radio: false,
             defaultChecked: true
         };
         var options = [
@@ -110,6 +110,9 @@
             if (item.help) {
                 $input.attr('data-help', String(item.help));
             }
+            if (item.prompt) {
+                $input.attr('data-prompt', String(item.prompt));
+            }
             $label.append($input, $('<span></span>').text(item.label || item.id));
             $li.append($label);
             $list.append($li);
@@ -155,14 +158,18 @@
         var $msg = $('<textarea id="mm-deactivate-reason-message" class="mm-deactivate-survey-message" rows="3" maxlength="1000"></textarea>')
             .attr('placeholder', t('surveyDetailsPlaceholder', ''));
         $msgWrap.append($msgLabel, $msg);
+        $list.on('change', 'input[name="' + radioName + '"]', function () {
+            var prompt = ($(this).attr('data-prompt') || '').toString();
+            $msgLabel.text(prompt || t('surveyDetails', 'Anything else? (optional)'));
+        });
 
         var $emailLabel = $('<label class="mm-deactivate-survey-message-label"></label>')
             .attr('for', 'mm-deactivate-contact-email')
             .text(t('surveyContactLabel', 'Email for follow-up (optional)'));
-        var $emailHint = $('<p class="mm-deactivate-survey-contact-hint"></p>')
+        var $emailHint = $('<p id="mm-deactivate-contact-hint" class="mm-deactivate-survey-contact-hint"></p>')
             .text(t('surveyContactHint', 'We may contact you if we need more details about a problem.'));
         var defaultEmail = (cfg && cfg.defaultContactEmail) ? cfg.defaultContactEmail : '';
-        var $email = $('<input type="email" id="mm-deactivate-contact-email" class="mm-deactivate-survey-email" maxlength="100" autocomplete="email">')
+        var $email = $('<input type="email" id="mm-deactivate-contact-email" class="mm-deactivate-survey-email" maxlength="100" autocomplete="email" aria-describedby="mm-deactivate-contact-hint">')
             .val(defaultEmail);
         if (cfg && cfg.contactEmailPlaceholder) {
             $email.attr('placeholder', cfg.contactEmailPlaceholder);
@@ -206,7 +213,7 @@
         });
     }
 
-    function postAction(action, nonce, plan, $button, busyText, idleText, failText, pluginBasename) {
+    function postAction(action, nonce, plan, $button, busyText, idleText, failText, pluginBasename, fallbackHref) {
         $button.prop('disabled', true).text(busyText);
         return $.ajax({
             url: cfg.ajaxUrl,
@@ -233,6 +240,13 @@
                 console.error(errMsg);
             }
         }).fail(function (xhr, textStatus) {
+            var serverMessage = xhr && xhr.responseJSON && xhr.responseJSON.data && xhr.responseJSON.data.message;
+            if (fallbackHref && !serverMessage) {
+                // The AJAX handler broke (timeout, PHP error, invalid JSON). Fall back to
+                // core's own deactivate link so the user can always deactivate.
+                window.location.assign(fallbackHref);
+                return;
+            }
             $button.prop('disabled', false).text(idleText);
             var message = failText;
             if (textStatus === 'timeout') {
@@ -249,7 +263,7 @@
         });
     }
 
-    function showDataModal(mode, row) {
+    function showDataModal(mode, row, fallbackHref) {
         var pluginBasename = row ? row.getAttribute('data-plugin') : pluginBasenames[0];
         var isDelete = mode === 'delete';
         var titleId = 'mm-uninstall-title-' + String(Date.now());
@@ -285,7 +299,14 @@
         if (survey) {
             $body.append(survey.$el);
         }
-        $body.append($presets, $list);
+        if (isDelete) {
+            $body.append($presets, $list);
+        } else {
+            var $dataDetails = $('<details class="mm-uninstall-data-disclosure"></details>');
+            var $dataSummary = $('<summary></summary>').text(t('deleteIntro', 'Choose which local data to delete before removing the plugin.'));
+            $dataDetails.append($dataSummary, $presets, $list);
+            $body.append($dataDetails);
+        }
         $modal.append($title, $body, $actions);
         $overlay.append($modal);
         $('body').append($overlay);
@@ -339,6 +360,12 @@
                 $inputs.delete_backups.prop('checked', false);
                 $inputs.delete_logs.prop('checked', false);
                 $inputs.delete_settings.prop('checked', false);
+            } else if (
+                !$inputs.delete_backups.is(':checked')
+                && !$inputs.delete_logs.is(':checked')
+                && !$inputs.delete_settings.is(':checked')
+            ) {
+                $inputs.keep_all.prop('checked', true);
             }
         });
 
@@ -379,7 +406,7 @@
             var failText = t(failKey, isDelete ? 'Could not delete the plugin. Try again.' : 'Could not deactivate Multisite Migrate. Try again.');
 
             function runDeactivateOrDelete() {
-                postAction(action, nonce, plan, $confirm, busyText, idleText, failText, pluginBasename);
+                postAction(action, nonce, plan, $confirm, busyText, idleText, failText, pluginBasename, isDelete ? '' : (fallbackHref || ''));
             }
 
             if (isDelete || !survey) {
@@ -410,6 +437,11 @@
         });
     }
 
+    function coreDeactivateHref(link) {
+        var href = link ? (link.getAttribute('href') || '') : '';
+        return href.indexOf('action=deactivate') !== -1 ? link.href : '';
+    }
+
     document.addEventListener('click', function (e) {
         var row = e.target.closest(pluginRowSelector);
         if (!row) {
@@ -421,7 +453,14 @@
             e.preventDefault();
             e.stopPropagation();
             e.stopImmediatePropagation();
-            showDataModal('deactivate', row);
+            var deactivateHref = coreDeactivateHref(deactivateLink);
+            try {
+                showDataModal('deactivate', row, deactivateHref);
+            } catch (err) {
+                if (deactivateHref) {
+                    window.location.assign(deactivateHref);
+                }
+            }
             return;
         }
 

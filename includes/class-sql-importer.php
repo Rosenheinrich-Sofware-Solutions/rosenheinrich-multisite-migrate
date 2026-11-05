@@ -825,7 +825,7 @@ class Rmmigrate_SQL_Importer
     private function transform_statement(string $statement): string
     {
         if ($this->search_replace !== null) {
-            $statement = $this->search_replace->apply($statement);
+            $statement = $this->search_replace->apply_to_sql_statement($statement);
         }
 
         $progress = $this->job->get_progress();

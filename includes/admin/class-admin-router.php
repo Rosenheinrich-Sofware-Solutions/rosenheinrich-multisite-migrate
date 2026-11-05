@@ -10,6 +10,9 @@ class Rmmigrate_Admin_Router
     {
         add_action('admin_init', array(__CLASS__, 'maybe_redirect_legacy_page'), 1);
         add_action('admin_init', array(__CLASS__, 'maybe_redirect_legacy_section'), 2);
+        // Old slugs are no longer registered, so core denies them in menu.php
+        // before admin_init runs. Redirect them right before that 403.
+        add_action('admin_page_access_denied', array(__CLASS__, 'maybe_redirect_legacy_page'), 1);
     }
 
     /**
@@ -113,6 +116,13 @@ class Rmmigrate_Admin_Router
             } elseif (isset($settings_map[$old_tab])) {
                 $rmmigrate_args['tab'] = $settings_map[$old_tab];
             }
+        }
+
+        if (self::is_subsite_scoped_context() && !Rmmigrate_Access::subsite_page_visible((string) $rmmigrate_args['page'])) {
+            if (!Rmmigrate_Access::subsite_page_visible('multisite-migrate-archives')) {
+                return;
+            }
+            $rmmigrate_args = array('page' => 'multisite-migrate-archives');
         }
 
         wp_safe_redirect(add_query_arg($rmmigrate_args, self::admin_base_url()));

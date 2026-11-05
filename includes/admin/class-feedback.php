@@ -378,6 +378,10 @@ final class Rmmigrate_Feedback
                 $payload['recorded_error_code'] = $latest_code;
             }
         }
+        $recent_errors = self::recent_errors_for_feedback($recent);
+        if ($recent_errors !== array()) {
+            $payload['recent_errors'] = $recent_errors;
+        }
         if ($contact_email !== '') {
             $payload['contact_email'] = $contact_email;
         }
@@ -410,6 +414,24 @@ final class Rmmigrate_Feedback
 
         $ok = $code > 0 && $code < 400;
         wp_send_json_success(array('ok' => $ok));
+    }
+
+    /**
+     * Up to three recent plugin errors plus the last PHP fatal inside this plugin.
+     * The recorder already strips paths and email addresses from the messages.
+     *
+     * @param list<array{code:string,message:string,job_type:string,source:string,time:string}> $recent
+     * @return list<array{code:string,message:string,job_type:string,source:string,time:string}>
+     */
+    private static function recent_errors_for_feedback(array $recent): array
+    {
+        $out = array_slice($recent, 0, 3);
+        $fatal = Rmmigrate_Error_Recorder::get_last_fatal();
+        if ($fatal !== null) {
+            $out[] = $fatal;
+        }
+
+        return $out;
     }
 
     public static function ajax_dismiss(): void

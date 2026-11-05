@@ -205,10 +205,42 @@
         $.post(rmmigrateAdmin.ajaxUrl, {
             action: 'rmmigrate_setup_wizard_skip',
             nonce: rmmigrateAdmin.nonce
-        }).always(function () {
+        }).done(function (res) {
+            var url = (res && res.data && res.data.redirect) ? adminHref(res.data.redirect) : target;
+            window.location.assign(url);
+        }).fail(function () {
             window.location.assign(target);
         });
     }
+
+    $(document).on('click', '#mm-setup-verify-archive', function (e) {
+        e.preventDefault();
+        var $btn = $(this);
+        var $box = $('#mm-setup-archive-check');
+        var $status = $box.find('.mm-setup-archive-check__status');
+        $btn.prop('disabled', true);
+        $.post(rmmigrateAdmin.ajaxUrl, {
+            action: 'rmmigrate_setup_wizard_verify_archive',
+            nonce: rmmigrateAdmin.nonce
+        }).done(function (res) {
+            var data = (res && res.data) ? res.data : {};
+            if (data.message && $status.length) {
+                $status.text(data.message);
+            }
+            if (data.verified) {
+                $box.addClass('is-verified');
+                $('.mm-setup-stepper__item[data-step="features"]').removeClass('is-active').addClass('is-done').removeAttr('aria-current');
+                $('.mm-setup-stepper__item[data-step="finish"]').addClass('is-active').attr('aria-current', 'step');
+                rmmigrateAdminUI.toast(data.message || t('verified', 'Archive verified.'), 'success');
+            } else if (data.message) {
+                rmmigrateAdminUI.toast(data.message, data.status === 'error' ? 'error' : 'info');
+            }
+        }).fail(function (xhr) {
+            rmmigrateAdminUI.toast(rmmigrateAdminUI.ajaxErrorMessage(xhr, t('requestFailed', 'Request failed')), 'error');
+        }).always(function () {
+            $btn.prop('disabled', false);
+        });
+    });
 
     $(document).on('click', '.mm-setup-create-backup', function (e) {
         e.preventDefault();

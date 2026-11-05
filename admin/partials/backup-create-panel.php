@@ -196,6 +196,10 @@ $rmmigrate_uploads_placeholder = Rmmigrate_Engine_Config::uploads_basedir();
                     <h3 class="mm-setup-review-card__title"><?php esc_html_e('Backup summary', 'rosenheinrich-multisite-migrate'); ?></h3>
                     <dl class="mm-create-review-list" id="mm-create-review"></dl>
                 </div>
+                <?php
+                $rmmigrate_preflight_op = 'backup';
+                include RMMIGRATE_PATH . 'admin/partials/components/preflight-ampel.php';
+                ?>
             </div>
         </div>
 

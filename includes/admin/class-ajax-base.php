@@ -513,7 +513,8 @@ trait Rmmigrate_Ajax_Base
      */
     private static function prepare_binary_download_response(): void
     {
-        while (ob_get_level() > 0) {
+        $min_level = (defined('RMMIGRATE_UNIT_TEST') && RMMIGRATE_UNIT_TEST) ? 1 : 0;
+        while (ob_get_level() > $min_level) {
             if (ob_end_clean() === false) {
                 break;
             }
