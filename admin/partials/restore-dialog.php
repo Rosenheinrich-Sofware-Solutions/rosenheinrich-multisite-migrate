@@ -150,6 +150,31 @@ if (!defined('ABSPATH')) {
                                 <input type="number" class="small-text" id="mm-topology-network-blog-id" min="1" value="<?php echo is_multisite() ? (int) get_current_blog_id() : 1; ?>">
                             </p>
                         </div>
+                        <div id="mm-topology-extract-standalone" class="mm-hidden">
+                            <fieldset>
+                                <legend class="screen-reader-text"><?php esc_html_e('Extract one site to a standalone site', 'rosenheinrich-multisite-migrate'); ?></legend>
+                                <p>
+                                    <label>
+                                        <input type="radio" name="mm_topology_import" value="auto" checked>
+                                        <?php esc_html_e('Entire network (default)', 'rosenheinrich-multisite-migrate'); ?>
+                                    </label><br>
+                                    <label>
+                                        <input type="radio" name="mm_topology_import" value="extract_site_standalone">
+                                        <?php esc_html_e('Extract one site as standalone', 'rosenheinrich-multisite-migrate'); ?>
+                                    </label>
+                                </p>
+                                <p class="description"><?php esc_html_e('Turns one site of the network backup into this standalone WordPress site. Only that site’s content, media and users with their roles are restored.', 'rosenheinrich-multisite-migrate'); ?></p>
+                                <p>
+                                    <label for="mm-topology-source-blog-id"><?php esc_html_e('Site to extract', 'rosenheinrich-multisite-migrate'); ?></label><br>
+                                    <select id="mm-topology-source-blog-id" class="regular-text">
+                                        <option value=""><?php esc_html_e('Select a site…', 'rosenheinrich-multisite-migrate'); ?></option>
+                                    </select>
+                                </p>
+                            </fieldset>
+                        </div>
+                        <p id="mm-topology-extract-need-singlesite" class="description mm-hidden" role="status">
+                            <?php esc_html_e('To extract one site from this network backup, restore it on a single-site WordPress install.', 'rosenheinrich-multisite-migrate'); ?>
+                        </p>
                     </div>
                     <p class="mm-restore-safety-row">
                         <label>

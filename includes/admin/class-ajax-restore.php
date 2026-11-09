@@ -192,6 +192,9 @@ class Rmmigrate_Ajax_Restore
             'topology_target_url'  => array_key_exists('topology_target_url', $overrides)
                 ? (string) $overrides['topology_target_url']
                 : Rmmigrate_Request_Input::post_url_raw('topology_target_url'),
+            'topology_source_blog_id' => array_key_exists('topology_source_blog_id', $overrides)
+                ? (string) $overrides['topology_source_blog_id']
+                : Rmmigrate_Request_Input::post_text('topology_source_blog_id', '0'),
             'kick_worker'          => array_key_exists('kick_worker', $overrides)
                 ? !empty($overrides['kick_worker'])
                 : true,

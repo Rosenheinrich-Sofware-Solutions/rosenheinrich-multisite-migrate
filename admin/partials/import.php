@@ -20,7 +20,7 @@ $rmmigrate_import_subsite = !empty($rmmigrate_subsite_mode) || Rmmigrate_Access:
             <li><?php echo esc_html($rmmigrate_import_on_network ? __('Click Restore. Web addresses of all subsites are updated for this network automatically.', 'rosenheinrich-multisite-migrate') : __('Click Restore. Web addresses are updated for this site automatically.', 'rosenheinrich-multisite-migrate')); ?></li>
         </ol>
         <p id="mm-import-passphrase-wrap" class="mm-hidden">
-            <label for="mm-import-passphrase"><?php esc_html_e('Archive passphrase (.enc)', 'rosenheinrich-multisite-migrate'); ?></label>
+            <label for="mm-import-passphrase"><?php esc_html_e('Archive passphrase (.venc)', 'rosenheinrich-multisite-migrate'); ?></label>
             <input type="password" class="regular-text" id="mm-import-passphrase" autocomplete="off">
         </p>
         <?php
@@ -30,8 +30,8 @@ $rmmigrate_import_subsite = !empty($rmmigrate_subsite_mode) || Rmmigrate_Access:
         <div class="mm-dropzone" id="mm-import-dropzone">
             <span class="dashicons dashicons-upload mm-dropzone__icon" aria-hidden="true"></span>
             <strong><?php esc_html_e('Drop your backup here', 'rosenheinrich-multisite-migrate'); ?></strong>
-            <span><?php esc_html_e('Use the backup file you downloaded (.zip, .daf or .enc). Large files are fine.', 'rosenheinrich-multisite-migrate'); ?></span>
-            <input type="file" id="mm-import-local-file" accept=".zip,.daf,.enc" class="screen-reader-text">
+            <span><?php esc_html_e('Use the backup file you downloaded (.zip, .daf or .venc). Large files are fine.', 'rosenheinrich-multisite-migrate'); ?></span>
+            <input type="file" id="mm-import-local-file" accept=".zip,.daf,.venc" class="screen-reader-text">
             <label for="mm-import-local-file" class="button button-primary mm-btn-teal mm-dropzone__browse" id="mm-import-browse"><?php esc_html_e('Choose file', 'rosenheinrich-multisite-migrate'); ?></label>
         </div>
         <p><span id="mm-import-local-status"></span></p>

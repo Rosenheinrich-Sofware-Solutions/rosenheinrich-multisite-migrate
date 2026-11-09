@@ -2269,6 +2269,85 @@
     align-items: stretch;
 }
 
+/* Recovery tab: rollback card (primary), recent backups table, guides last. */
+.multisite-migrate-wrap .mm-recovery-docs .mm-recovery-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: stretch;
+    margin: 12px 0 0;
+}
+
+.multisite-migrate-wrap .mm-recovery-docs .mm-rollback-card {
+    margin: 0 0 var(--mm-space-5, 20px);
+    padding: 12px 16px;
+    border: 1px solid var(--mm-border);
+    border-inline-start: 4px solid var(--mm-btn-primary);
+    border-radius: 8px;
+    background: var(--mm-surface);
+}
+
+.multisite-migrate-wrap .mm-recovery-docs .mm-rollback-card p {
+    margin: 0 0 6px;
+}
+
+.multisite-migrate-wrap .mm-recovery-docs .mm-recovery-points-title {
+    margin: 20px 0 4px;
+    font-size: 14px;
+}
+
+.multisite-migrate-wrap .mm-recovery-docs .mm-recovery-points-table {
+    margin-top: 8px;
+}
+
+.multisite-migrate-wrap .mm-recovery-docs .mm-recovery-points-table td {
+    vertical-align: middle;
+}
+
+.multisite-migrate-wrap .mm-recovery-docs .mm-recovery-points-table .column-actions {
+    width: 1%;
+    white-space: nowrap;
+    text-align: end;
+}
+
+.multisite-migrate-wrap .mm-recovery-docs .mm-recovery-points-table .button {
+    min-width: 0;
+    gap: 4px;
+}
+
+.multisite-migrate-wrap .mm-recovery-docs .mm-recovery-points-table .button .dashicons {
+    width: 18px;
+    height: 18px;
+    margin: 0;
+    font-size: 18px;
+    line-height: 1;
+    vertical-align: middle;
+}
+
+.multisite-migrate-wrap .mm-recovery-docs .mm-recovery-points-id {
+    display: block;
+    color: var(--mm-text-muted);
+    font-size: 12px;
+}
+
+.multisite-migrate-wrap .mm-recovery-docs .mm-rollback-point-badge {
+    margin-inline-start: 6px;
+    white-space: nowrap;
+}
+
+.multisite-migrate-wrap .mm-recovery-docs .mm-recovery-guides {
+    margin-top: 28px;
+    padding-top: 20px;
+    border-top: 1px solid var(--mm-border);
+}
+
+@media (max-width: 782px) {
+    .multisite-migrate-wrap .mm-recovery-docs .mm-recovery-points-table .column-actions {
+        width: auto;
+        text-align: start;
+    }
+}
+
 /* Body-mounted confirm/uninstall/feedback + in-page doc CTAs: equal size, brand teal.
    .wp-core-ui raises specificity above stock admin button-primary. */
 .wp-core-ui .mm-confirm-actions .button,

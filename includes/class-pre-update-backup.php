@@ -117,7 +117,6 @@ final class Rmmigrate_Pre_Update_Backup
                 'backup_profile' => $profile,
             ));
 
-
             // Drive a short synchronous budget so the DB dump (and early file steps) preferably
             // finish before the upgrader overwrites files; then kick the background worker.
             self::run_sync_budget($job->get_id());

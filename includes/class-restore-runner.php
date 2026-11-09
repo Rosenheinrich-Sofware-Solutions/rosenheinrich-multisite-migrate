@@ -1207,12 +1207,17 @@ class Rmmigrate_Restore_Runner
 
         global $wpdb;
         $progress = $job->get_progress();
+        // An extracted site keeps this install's own table prefix (the job table lives there).
+        $remap_target = (string) ($progress['restore_mode'] ?? '') === 'extract_site_standalone'
+            && preg_match('/^[A-Za-z0-9_]+$/', (string) $wpdb->base_prefix)
+            ? (string) $wpdb->base_prefix
+            : 'wp_';
         $context = array(
             'db_prefix'           => (string) ($manifest['db_prefix'] ?? $wpdb->prefix),
             'destination'         => Rmmigrate_Restore_Topology_Destination::probe_for_plugin(),
             'migration_map'       => $map,
             'prefix_policy'       => (string) ($progress['prefix_policy'] ?? 'keep_source'),
-            'prefix_remap_target' => 'wp_',
+            'prefix_remap_target' => $remap_target,
             'restore_mode'        => (string) ($progress['restore_mode'] ?? ''),
             'site_owr_map'        => is_array($progress['site_owr_map'] ?? null) ? $progress['site_owr_map'] : array(),
             'target_blog_id'      => (int) ($progress['target_blog_id'] ?? 0),
@@ -1289,7 +1294,7 @@ class Rmmigrate_Restore_Runner
             'db_creds_source'     => is_file(ABSPATH . 'wp-config.php') ? 'wp_config' : 'manual',
             'migration_map'       => $map,
             'prefix_policy'       => $context['prefix_policy'],
-            'prefix_remap_target' => 'wp_',
+            'prefix_remap_target' => $remap_target,
         );
         if (Rmmigrate_Restore_Topology_Wp_Config::apply_plugin($wp_state, ABSPATH, $extract_dir)) {
             delete_site_option('rmmigrate_migration_notice');

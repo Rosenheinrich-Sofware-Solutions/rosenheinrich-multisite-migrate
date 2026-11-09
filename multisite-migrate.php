@@ -1,9 +1,9 @@
 <?php
 /**
- * Plugin Name:       Rosenheinrich Multisite Migrate – Network & Single Site Backup, Restore & Migration
+ * Plugin Name:       Multisite Migrate – Network Backup, Restore, Clone & Migration
  * Plugin URI:        https://multisitemigrate.rosenheinrich.com/
- * Description:       Back up, restore and move WordPress multisite networks — and single sites — in one click. Free full-network backups, no license key.
- * Version:           1.2.24
+ * Description:       Free multisite backup plugin: back up, restore and migrate a whole network or a single site. Chunked jobs for shared hosting. No license key.
+ * Version:           1.2.25
  * Requires at least: 6.2
  * Requires PHP:      7.4
  * Author:            Rosenheinrich Software Solutions
@@ -53,7 +53,7 @@ if (!defined('RMMIGRATE_FREE')) {
 }
 
 if (!defined('RMMIGRATE_VERSION')) {
-    define('RMMIGRATE_VERSION', '1.2.24');
+    define('RMMIGRATE_VERSION', '1.2.25');
 }
 if (!defined('RMMIGRATE_PATH')) {
     define('RMMIGRATE_PATH', plugin_dir_path(__FILE__));

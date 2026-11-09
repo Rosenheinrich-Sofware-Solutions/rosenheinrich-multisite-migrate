@@ -1,4 +1,6 @@
 = 1.2.25 =
+* Fix: Restoring a subsite backup as a standalone site while keeping its original table prefix no longer leaves users without a role.
+* New: Extract one site from a network backup into a standalone WordPress site, now free. Choose "Extract one site as standalone" when you restore a network backup on a single-site install.
 * New: Optional backup before updates, one-click rollback after restore, resume of interrupted jobs, and a server check before you start.
 * New: A simpler start. "Back up now" runs in one click, and Download and Restore sit right next to each backup.
 * Improvement: Restoring or moving a site asks fewer questions, and technical settings moved to an optional Expert mode.

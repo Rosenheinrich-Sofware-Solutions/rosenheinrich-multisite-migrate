@@ -199,6 +199,11 @@ class Rmmigrate_Restore_Topology_Standalone
         }
 
         $prefix_remap_applied = false;
+        if ($restore_mode === 'extract_site_standalone' && $base_prefix !== '' && $base_prefix !== $prefix) {
+            // A network dump carries every site's role keys; drop the other sites' keys before
+            // the remap so wp_N_capabilities never collides with the main site's wp_capabilities.
+            $report['usermeta_rows_purged'] = self::delete_foreign_usermeta($pdo, $prefix, $base_prefix);
+        }
         if (Rmmigrate_Restore_Topology_Prefix_Remap::should_remap($manifest, $context)) {
             $resolved_prefix = Rmmigrate_Restore_Topology_Prefix_Remap::resolve_remap_target($manifest, $context);
             $remap = Rmmigrate_Restore_Topology_Prefix_Remap::remap_tables($pdo, $prefix, $resolved_prefix);
@@ -223,8 +228,10 @@ class Rmmigrate_Restore_Topology_Standalone
         }
 
         if (!$prefix_remap_applied) {
-            $report['usermeta_rows_purged'] = self::purge_foreign_usermeta($pdo, $prefix, $base_prefix);
-            $report['option_names_remapped'] = self::update_options_table($pdo, $prefix, $base_prefix);
+            // keep_source: wp-config keeps the subsite prefix (e.g. wp_2_), so WordPress reads roles from
+            // {prefix}capabilities and {prefix}user_roles. Only drop the other sites' role keys; never rename
+            // them to the network base prefix (that left every user without a role).
+            $report['usermeta_rows_purged'] = self::delete_foreign_usermeta($pdo, $prefix, $base_prefix);
         }
         $report['urls_updated'] = self::update_site_urls($pdo, $prefix, self::migration_map($context));
 
@@ -895,7 +902,10 @@ class Rmmigrate_Restore_Topology_Standalone
         return false;
     }
 
-    private static function purge_foreign_usermeta(PDO $pdo, string $prefix, string $base_prefix): int
+    /**
+     * Delete per-site usermeta keys of every site except the kept prefix (no renames).
+     */
+    private static function delete_foreign_usermeta(PDO $pdo, string $prefix, string $base_prefix): int
     {
         $table = $prefix . 'usermeta';
         if (!self::table_exists($pdo, $table)) {
@@ -904,21 +914,13 @@ class Rmmigrate_Restore_Topology_Standalone
 
         $base_len = strlen($base_prefix);
         $prefix_len = strlen($prefix);
-        $base_like = self::escape_sql_like($base_prefix) . '%';
         $table_q = self::quote_sql_identifier($table);
-
         $stmt = $pdo->prepare(
             "DELETE FROM {$table_q} WHERE SUBSTRING(`meta_key`, 1, {$base_len}) = ? AND SUBSTRING(`meta_key`, 1, {$prefix_len}) <> ? AND `meta_key` LIKE ? ESCAPE '\\\\'"
         );
-        $stmt->execute(array($base_prefix, $prefix, $base_like));
-        $purged = $stmt->rowCount();
+        $stmt->execute(array($base_prefix, $prefix, self::escape_sql_like($base_prefix) . '%'));
 
-        $update = $pdo->prepare(
-            "UPDATE {$table_q} SET `meta_key` = CONCAT(?, SUBSTRING(`meta_key`, ?)) WHERE SUBSTRING(`meta_key`, 1, {$prefix_len}) = ?"
-        );
-        $update->execute(array($base_prefix, $prefix_len + 1, $prefix));
-
-        return $purged;
+        return $stmt->rowCount();
     }
 
     private static function escape_sql_like(string $value): string

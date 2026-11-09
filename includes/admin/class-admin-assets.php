@@ -437,6 +437,7 @@ class Rmmigrate_Admin_Assets
                 'importRestoreConfirm' => __('Restore will overwrite your current site with the imported backup. Continue?', 'rosenheinrich-multisite-migrate'),
                 'restoreComplete'     => __('Restore complete', 'rosenheinrich-multisite-migrate'),
                 'restoreFailed'       => __('Restore failed', 'rosenheinrich-multisite-migrate'),
+                'selectSite'          => __('Select a site…', 'rosenheinrich-multisite-migrate'),
                 'restoreInProgress'   => __('Restore in progress', 'rosenheinrich-multisite-migrate'),
                 'restoreRequestFailed' => __('Restore request failed. Refresh and try again.', 'rosenheinrich-multisite-migrate'),
                 'creatingSafetySnapshot' => __('Creating safety snapshot…', 'rosenheinrich-multisite-migrate'),

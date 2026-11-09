@@ -368,7 +368,7 @@ class Rmmigrate_Job
             $progress_data['user_merge'] = !empty($options['user_merge']);
         }
         if (!empty($options['topology']) && is_array($options['topology'])) {
-            foreach (array('restore_mode', 'site_owr_map', 'target_blog_id', 'prefix_policy', 'wp_config_policy', 'wp_config_merge_constants', 'import_skip_tables') as $topology_key) {
+            foreach (array('restore_mode', 'site_owr_map', 'target_blog_id', 'source_blog_id', 'prefix_policy', 'wp_config_policy', 'wp_config_merge_constants', 'import_skip_tables', 'manifest') as $topology_key) {
                 if (array_key_exists($topology_key, $options['topology'])) {
                     $progress_data[$topology_key] = $options['topology'][$topology_key];
                 }

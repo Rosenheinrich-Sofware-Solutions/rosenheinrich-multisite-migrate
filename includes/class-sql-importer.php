@@ -635,6 +635,9 @@ class Rmmigrate_SQL_Importer
         if ($table !== '' && $this->is_plugin_runtime_table($table)) {
             return true;
         }
+        if ($table !== '' && $this->is_import_skipped_table($table)) {
+            return true;
+        }
         if (!$this->preserves_network_globals()) {
             return false;
         }
@@ -658,6 +661,31 @@ class Rmmigrate_SQL_Importer
         }
 
         return true;
+    }
+
+    /**
+     * Tables the restore was told to leave out (unchecked tables, other sites of an extract).
+     */
+    private function is_import_skipped_table(string $table): bool
+    {
+        $progress = $this->job->get_progress();
+        $skip = $progress['import_skip_tables'] ?? array();
+        if (is_array($skip) && in_array($table, array_map('strval', $skip), true)) {
+            return true;
+        }
+        if ((string) ($progress['restore_mode'] ?? '') !== 'extract_site_standalone'
+            || !class_exists('Rmmigrate_Restore_Topology_Extract_Site', false)) {
+            return false;
+        }
+        // Fail closed when the manifest table list was incomplete: keep only the chosen site.
+        $manifest = is_array($progress['manifest'] ?? null) ? $progress['manifest'] : array();
+        $base = (string) ($manifest['source_base_prefix'] ?? '');
+        $blog_id = (int) ($progress['source_blog_id'] ?? 0);
+        if ($base === '' || $blog_id <= 0) {
+            return false;
+        }
+
+        return !Rmmigrate_Restore_Topology_Extract_Site::keeps_table($table, $base, $blog_id);
     }
 
     private function is_plugin_runtime_table(string $table): bool

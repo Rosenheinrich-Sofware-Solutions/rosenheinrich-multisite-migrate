@@ -378,6 +378,14 @@ final class Rmmigrate_Restore_Service
 
             $topology = self::apply_topology_extras($topology, $params, $manifest);
 
+            if (($topology['restore_mode'] ?? '') === Rmmigrate_Restore_Topology_Extract_Site::RESTORE_MODE) {
+                $extract = self::prepare_extract_site_standalone($topology, $manifest, $restore_type, $migration_map);
+                $topology = $extract['topology'];
+                $manifest = $extract['manifest'];
+                $restore_type = $extract['restore_type'];
+                $migration_map = $extract['migration_map'];
+            }
+
             if ($restore_type === Rmmigrate_Job::RESTORE_TYPE_MIGRATION) {
                 if (!class_exists('Rmmigrate_Migration_Preflight', false)) {
                     require_once RMMIGRATE_PATH . 'includes/shared/restore-topology/bootstrap.php';
@@ -564,10 +572,55 @@ final class Rmmigrate_Restore_Service
                 'topology_import'         => (string) ($params['topology_import'] ?? 'auto'),
                 'topology_target_blog_id' => (string) ($params['topology_target_blog_id'] ?? '0'),
                 'topology_target_url'     => (string) ($params['topology_target_url'] ?? ''),
+                'topology_source_blog_id' => (string) ($params['topology_source_blog_id'] ?? '0'),
                 'prefix_policy'           => (string) ($params['prefix_policy'] ?? 'keep_source'),
             ),
             $manifest,
             Rmmigrate_Restore_Topology_Destination::probe_for_plugin()
+        );
+    }
+
+    /**
+     * Network archive → one site as standalone: hand the runner a demoted (subsite-shaped)
+     * manifest, the table skip list and a URL map from the chosen site to this site.
+     *
+     * @param array<string,mixed> $topology
+     * @param array<string,mixed> $manifest
+     * @param array<string,mixed> $migration_map
+     * @return array{topology:array<string,mixed>,manifest:array<string,mixed>,restore_type:string,migration_map:array<string,mixed>}
+     */
+    private static function prepare_extract_site_standalone(array $topology, array $manifest, string $restore_type, array $migration_map): array
+    {
+        $blog_id = (int) ($topology['source_blog_id'] ?? 0);
+        $demoted = Rmmigrate_Restore_Topology_Extract_Site::demote_manifest($manifest, $blog_id);
+        $topology['manifest'] = $demoted;
+        $topology['prefix_policy'] = 'remap_to_wp';
+        // Never let a client-side table list widen the extract to other sites' tables.
+        $topology['import_skip_tables'] = Rmmigrate_Restore_Topology_Extract_Site::import_skip_tables($manifest, $blog_id);
+
+        if ($restore_type !== Rmmigrate_Job::RESTORE_TYPE_MIGRATION) {
+            // The extracted site always takes over this install's URL.
+            $restore_type = Rmmigrate_Job::RESTORE_TYPE_MIGRATION;
+            $migration_map = array(
+                'site_url' => array('old' => '', 'new' => (string) site_url()),
+                'home_url' => array('old' => '', 'new' => (string) home_url()),
+                'blogs'    => array(),
+            );
+        }
+        $old_site = (string) ($demoted['site_url'] ?? '');
+        $old_home = (string) ($demoted['home_url'] ?? $old_site);
+        if ($old_site !== '') {
+            $migration_map['site_url']['old'] = $old_site;
+            $migration_map['home_url']['old'] = $old_home !== '' ? $old_home : $old_site;
+        }
+        $migration_map['blogs'] = array();
+        unset($migration_map['site_path']);
+
+        return array(
+            'topology'      => $topology,
+            'manifest'      => $demoted,
+            'restore_type'  => $restore_type,
+            'migration_map' => $migration_map,
         );
     }
 

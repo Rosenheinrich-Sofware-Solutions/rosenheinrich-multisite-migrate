@@ -187,6 +187,14 @@ class Rmmigrate_Post_Import_Search_Replace
                 $manifest = is_string($json) ? json_decode($json, true) : null;
             }
         }
+        if (is_array($manifest)
+            && (string) ($this->job->get_progress()['restore_mode'] ?? '') === 'extract_site_standalone'
+            && Rmmigrate_Restore_Topology_Manifest::is_subsite_standalone_restore($manifest)) {
+            // Extracted site: its tables still carry the source blog prefix until finalize remaps them.
+            $prefix = Rmmigrate_Restore_Topology_Manifest::source_blog_prefix($manifest);
+
+            return $this->is_valid_table_prefix($prefix) ? array($prefix) : array();
+        }
         if (is_array($manifest) && Rmmigrate_Restore_Topology_Manifest::restore_as_multisite($manifest)) {
             return array_values(array_filter(
                 Rmmigrate_Restore_Topology_Manifest::table_prefixes($manifest),

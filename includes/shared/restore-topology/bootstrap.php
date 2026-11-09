@@ -16,6 +16,7 @@ require_once __DIR__ . '/class-restore-topology-network-import.php';
 require_once __DIR__ . '/class-restore-topology-network-to-subsite.php';
 require_once __DIR__ . '/class-restore-topology-user-merge.php';
 require_once __DIR__ . '/class-restore-topology-ui.php';
+require_once __DIR__ . '/class-restore-topology-extract-site.php';
 require_once __DIR__ . '/class-migration-preflight.php';
 require_once __DIR__ . '/class-network-restore-quarantine.php';
 require_once __DIR__ . '/class-network-restore-orchestration.php';

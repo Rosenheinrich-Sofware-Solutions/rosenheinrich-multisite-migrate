@@ -47,6 +47,21 @@ class Rmmigrate_Restore_Topology_Ui
     }
 
     /**
+     * Network archive → one site as standalone (single-site destination only).
+     *
+     * @param array<string,mixed> $manifest
+     * @param array<string,mixed> $destination
+     */
+    public static function offers_extract_site_standalone(array $manifest, array $destination): bool
+    {
+        if (!Rmmigrate_Restore_Topology_Extract_Site::network_scope_ok($manifest)) {
+            return false;
+        }
+
+        return empty($destination['is_multisite']);
+    }
+
+    /**
      * @param array<string,mixed> $raw
      * @param array<string,mixed> $manifest
      * @param array<string,mixed> $destination
@@ -59,6 +74,7 @@ class Rmmigrate_Restore_Topology_Ui
             'restore_mode'   => '',
             'site_owr_map'   => array(),
             'target_blog_id' => 0,
+            'source_blog_id' => 0,
             'prefix_policy'  => sanitize_key((string) ($raw['prefix_policy'] ?? 'keep_source')),
         );
 
@@ -76,6 +92,22 @@ class Rmmigrate_Restore_Topology_Ui
         }
         if ($topology === 'network_to_subsite' && !self::offers_network_to_subsite($manifest, $destination)) {
             return self::with_topology_error($out, 'network_to_subsite');
+        }
+        if ($topology === Rmmigrate_Restore_Topology_Extract_Site::RESTORE_MODE) {
+            $source_blog_id = (int) ($raw['topology_source_blog_id'] ?? 0);
+            if (!self::offers_extract_site_standalone($manifest, $destination) || $source_blog_id <= 0) {
+                return self::with_topology_error($out, Rmmigrate_Restore_Topology_Extract_Site::RESTORE_MODE);
+            }
+            $out['restore_mode'] = Rmmigrate_Restore_Topology_Extract_Site::RESTORE_MODE;
+            $out['source_blog_id'] = $source_blog_id;
+            // Same final shape as a single-site install: tables end up on the destination prefix.
+            $out['prefix_policy'] = 'remap_to_wp';
+            $out['import_skip_tables'] = Rmmigrate_Restore_Topology_Extract_Site::import_skip_tables(
+                $manifest,
+                $source_blog_id
+            );
+
+            return $out;
         }
 
         if ($topology === 'subsite_on_network' && self::offers_subsite_on_network($manifest, $destination)) {
@@ -123,6 +155,15 @@ class Rmmigrate_Restore_Topology_Ui
         $out['restore_mode'] = '';
         $out['site_owr_map'] = array();
         $out['target_blog_id'] = 0;
+        if ($requested_mode === Rmmigrate_Restore_Topology_Extract_Site::RESTORE_MODE) {
+            $out['topology_error'] = array(
+                'gate'          => 'topology_extract_source',
+                'message'       => __('Extracting one site needs a network backup, a single-site destination and the site to extract.', 'rosenheinrich-multisite-migrate'),
+                'recovery_hint' => __('Choose which site in the network backup should become this standalone site. Run the restore on a single-site WordPress install.', 'rosenheinrich-multisite-migrate'),
+            );
+
+            return $out;
+        }
         $out['topology_error'] = array(
             'gate'          => $requested_mode === 'network_to_subsite'
                 ? 'topology_network_to_subsite_target'

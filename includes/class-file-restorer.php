@@ -269,6 +269,7 @@ class Rmmigrate_File_Restorer
         if (Rmmigrate_Filesystem::is_dir($content_root)) {
             $uploads_only = $this->should_limit_to_subsite_uploads();
             $allowed_roots = $uploads_only ? $this->subsite_upload_dest_roots() : array();
+            $extract_blog_id = $this->extract_source_blog_id();
             $iterator = new RecursiveIteratorIterator(
                 new RecursiveDirectoryIterator($content_root, RecursiveDirectoryIterator::SKIP_DOTS),
                 RecursiveIteratorIterator::SELF_FIRST,
@@ -285,6 +286,10 @@ class Rmmigrate_File_Restorer
                 if ($uploads_only && !$this->dest_under_allowed_roots($dest, $allowed_roots)) {
                     continue;
                 }
+                if ($extract_blog_id > 0
+                    && Rmmigrate_Restore_Topology_Extract_Site::is_foreign_extract_upload_rel($rel, $extract_blog_id)) {
+                    continue;
+                }
                 if ($this->should_skip_migration_plugin_file($rel)) {
                     continue;
                 }
@@ -294,6 +299,22 @@ class Rmmigrate_File_Restorer
         }
 
         return $queue;
+    }
+
+    /**
+     * Source blog of an extract-one-site restore (0 for every other restore).
+     */
+    private function extract_source_blog_id(): int
+    {
+        $progress = $this->job->get_progress();
+        if ((string) ($progress['restore_mode'] ?? '') !== 'extract_site_standalone') {
+            return 0;
+        }
+        if (!class_exists('Rmmigrate_Restore_Topology_Extract_Site', false)) {
+            require_once RMMIGRATE_PATH . 'includes/shared/restore-topology/bootstrap.php';
+        }
+
+        return max(0, (int) ($progress['source_blog_id'] ?? 0));
     }
 
     /**

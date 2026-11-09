@@ -143,6 +143,10 @@ class Rmmigrate_Restore_Topology_Compatibility
             return null;
         }
 
+        if ($restore_mode === Rmmigrate_Restore_Topology_Extract_Site::RESTORE_MODE) {
+            return self::validate_extract_site_standalone($state, $manifest, $destination);
+        }
+
         $dest_multisite = !empty($destination['is_multisite']);
         if (!$dest_multisite) {
             return null;
@@ -193,6 +197,47 @@ class Rmmigrate_Restore_Topology_Compatibility
                 'topology_to_network',
                 __('The destination is already a WordPress multisite network. This backup cannot be imported as a subsite on that network yet.', 'rosenheinrich-multisite-migrate'),
                 __('Restore to a standalone server, or use a network-scope backup when migrating an entire multisite installation.', 'rosenheinrich-multisite-migrate')
+            );
+        }
+
+        return null;
+    }
+
+    /**
+     * @param array<string,mixed> $state
+     * @param array<string,mixed> $manifest
+     * @param array<string,mixed> $destination
+     * @return array{gate:string,message:string,recovery_hint:string}|null
+     */
+    private static function validate_extract_site_standalone(array $state, array $manifest, array $destination): ?array
+    {
+        if (!Rmmigrate_Restore_Topology_Extract_Site::network_scope_ok($manifest)) {
+            return self::gate(
+                'topology_extract_scope',
+                __('Extracting one site needs a network backup, not a single-site backup.', 'rosenheinrich-multisite-migrate'),
+                __('Use a full or filtered network backup. A single-site backup already restores as a standalone site.', 'rosenheinrich-multisite-migrate')
+            );
+        }
+        $source_blog_id = (int) ($state['source_blog_id'] ?? 0);
+        if ($source_blog_id <= 0) {
+            return self::gate(
+                'topology_extract_source',
+                __('Choose the site to extract from the network backup.', 'rosenheinrich-multisite-migrate'),
+                __('Pick one site from the list. It becomes this standalone WordPress site.', 'rosenheinrich-multisite-migrate')
+            );
+        }
+        if (!Rmmigrate_Restore_Topology_Extract_Site::blog_in_manifest($manifest, $source_blog_id)) {
+            return self::gate(
+                'topology_extract_blog_missing',
+                __('The selected site is not in this network backup.', 'rosenheinrich-multisite-migrate'),
+                __('Pick a site from the list. Sites that were excluded from the backup cannot be extracted.', 'rosenheinrich-multisite-migrate')
+            );
+        }
+        if (!empty($destination['is_multisite'])) {
+            return self::gate(
+                'topology_extract_destination',
+                __('Extracting one site needs a single-site WordPress destination, not a multisite network.', 'rosenheinrich-multisite-migrate'),
+                __('Install Multisite Migrate on a single-site WordPress install and restore the network backup there.', 'rosenheinrich-multisite-migrate')
             );
         }
 

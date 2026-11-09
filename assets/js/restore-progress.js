@@ -458,12 +458,41 @@
             && manifest.scope !== 'subsite'
             && dest.is_multisite
             && dest.is_multisite_subsite;
+        var networkArchive = !!manifest.is_multisite
+            && manifest.scope !== 'subsite';
+        var extractStandalone = networkArchive && !dest.is_multisite;
+        var extractNeedSingleSite = networkArchive && !!dest.is_multisite && !networkToSubsite;
         var $wrap = $('#mm-topology-options');
-        $wrap.toggleClass('mm-hidden', !subsiteOnNetwork && !networkToSubsite);
+        $wrap.toggleClass('mm-hidden', !subsiteOnNetwork && !networkToSubsite && !extractStandalone && !extractNeedSingleSite);
         $('#mm-topology-subsite-on-network').toggleClass('mm-hidden', !subsiteOnNetwork);
         $('#mm-topology-network-to-subsite').toggleClass('mm-hidden', !networkToSubsite);
+        $('#mm-topology-extract-standalone').toggleClass('mm-hidden', !extractStandalone);
+        $('#mm-topology-extract-need-singlesite').toggleClass('mm-hidden', !extractNeedSingleSite);
         if (networkToSubsite && dest.destination_blog_id) {
             $('#mm-topology-network-blog-id').val(dest.destination_blog_id);
+        }
+        if (extractStandalone) {
+            populateExtractBlogSelect(manifest.blogs || []);
+        }
+    }
+
+    function populateExtractBlogSelect(blogs) {
+        var $sel = $('#mm-topology-source-blog-id');
+        if (!$sel.length) {
+            return;
+        }
+        var current = $sel.val();
+        $sel.empty().append($('<option></option>').val('').text(t('selectSite', 'Select a site…')));
+        (blogs || []).forEach(function (blog) {
+            var id = parseInt(blog.blog_id, 10);
+            if (!id) {
+                return;
+            }
+            var label = blog.site_url || blog.path || ('#' + id);
+            $sel.append($('<option></option>').val(String(id)).text('#' + id + ' — ' + label));
+        });
+        if (current) {
+            $sel.val(current);
         }
     }
 
@@ -482,6 +511,8 @@
             payload.topology_target_blog_id = $('#mm-topology-target-blog-id').val() || '0';
         } else if (mode === 'network_to_subsite') {
             payload.topology_target_blog_id = $('#mm-topology-network-blog-id').val() || '0';
+        } else if (mode === 'extract_site_standalone') {
+            payload.topology_source_blog_id = $('#mm-topology-source-blog-id').val() || '0';
         }
         return payload;
     }
