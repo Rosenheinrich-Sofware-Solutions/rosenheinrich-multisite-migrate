@@ -110,6 +110,9 @@ class Rmmigrate_Job
         if ($scope === Rmmigrate_Multisite_Scope::SCOPE_NETWORK_INCLUDED && $included_blog_ids !== array()) {
             $progress_init['included_blogs'] = $included_blog_ids;
         }
+        if (!empty($args['restricted_export']) && $scope === Rmmigrate_Multisite_Scope::SCOPE_SUBSITE) {
+            $progress_init['restricted_export'] = true;
+        }
 
         $row = array(
             'blog_id'          => $blog_id,
@@ -215,6 +218,9 @@ class Rmmigrate_Job
                 'progress'         => wp_json_encode(array(
                     'step'      => 'import',
                     'log_token' => Rmmigrate_Activity_Log::generate_log_token(),
+                    // scope/blog_id above are self-declared by the uploaded archive. Only a manifest
+                    // sealed by this network may be handed to that site's administrator.
+                    'site_seal_verified' => is_array($manifest) && Rmmigrate_Manifest::verify_site_seal($manifest),
                 )),
                 'local_path'       => $local_rel_path,
                 'file_size'        => $file_size,
@@ -664,15 +670,32 @@ class Rmmigrate_Job
             if ($job === null || !self::is_stale($job, $threshold_seconds)) {
                 continue;
             }
-            Rmmigrate_Logger::log_job($job->get_id(), $message);
-            $job->set_status(self::STATUS_ERROR, $message, 'stale_worker');
+            $job_message = $message;
+            if ($job->is_restore()) {
+                // A killed worker leaves quarantined tables behind: put them back like cancel does.
+                try {
+                    Rmmigrate_Restore_Runner::attempt_network_rollback($job);
+                    $job = self::get($job->get_id()) ?? $job;
+                } catch (Throwable $e) {
+                    Rmmigrate_Logger::log_job($job->get_id(), 'Rollback after stale worker failed: ' . sanitize_text_field($e->getMessage()));
+                }
+                if (!class_exists('Rmmigrate_Migration_Preflight', false)) {
+                    require_once RMMIGRATE_PATH . 'includes/shared/restore-topology/bootstrap.php';
+                }
+                $recovery = Rmmigrate_Migration_Preflight::recovery_message_after_db_failure($job->get_progress());
+                if ($recovery !== '') {
+                    $job_message .= ' ' . $recovery;
+                }
+            }
+            Rmmigrate_Logger::log_job($job->get_id(), $job_message);
+            $job->set_status(self::STATUS_ERROR, $job_message, 'stale_worker');
             Rmmigrate_Runner::force_release_lock($job->get_id());
             if ($job->is_restore()) {
                 Rmmigrate_Restore_Runner::disable_maintenance();
             }
             Rmmigrate_Activity_Log::record(
                 $job->is_restore() ? 'restore' : 'backup',
-                $message,
+                $job_message,
                 'error',
                 array('job_id' => $job->get_id(), 'context' => array('recovered' => 'stale_worker'))
             );
@@ -964,7 +987,7 @@ class Rmmigrate_Job
                 $names = array();
                 $max_display = 2;
                 foreach (array_slice($included, 0, $max_display) as $blog_id) {
-                    $details = get_blog_details($blog_id);
+                    $details = function_exists('get_blog_details') ? get_blog_details($blog_id) : false;
                     if ($details && !empty($details->blogname)) {
                         $names[] = $details->blogname;
                     } elseif ($details && !empty($details->domain)) {
@@ -985,7 +1008,7 @@ class Rmmigrate_Job
         } elseif ($this->get_scope() === Rmmigrate_Multisite_Scope::SCOPE_SUBSITE) {
             $blog_id = (int) ($this->data['blog_id'] ?? 0);
             if ($blog_id > 0) {
-                $details = get_blog_details($blog_id);
+                $details = function_exists('get_blog_details') ? get_blog_details($blog_id) : false;
                 if ($details && !empty($details->blogname)) {
                     $label .= ': ' . $details->blogname;
                 } elseif ($details && !empty($details->domain)) {
@@ -1027,7 +1050,21 @@ class Rmmigrate_Job
             return array();
         }
         $decoded = json_decode($raw, true);
-        return is_array($decoded) ? $decoded : array();
+        $map = is_array($decoded) ? $decoded : array();
+        // Subsite restored into another blog slot: media URL pairs are only known after the
+        // database step picked the target blog, so they live in progress.
+        $slot_pairs = $this->get_progress()['slot_upload_pairs'] ?? null;
+        if ($map !== array() && is_array($slot_pairs) && $slot_pairs !== array()) {
+            $extra = isset($map['extra_pairs']) && is_array($map['extra_pairs']) ? $map['extra_pairs'] : array();
+            foreach ($slot_pairs as $pair) {
+                if (is_array($pair) && !in_array($pair, $extra, true)) {
+                    $extra[] = $pair;
+                }
+            }
+            $map['extra_pairs'] = $extra;
+        }
+
+        return $map;
     }
 
     public function get_restore_root(): string
@@ -1485,9 +1522,13 @@ class Rmmigrate_Job
                     Rmmigrate_Restore_Runner::attempt_network_rollback($this);
                     $progress = $this->get_progress();
                     $progress['step'] = 'cancelled_partial';
-                    $progress['cancel_notice'] = __(
-                        'Restore cancelled. The site may be inconsistent — use a recovery point or safety snapshot before retrying.',
-                        'rosenheinrich-multisite-migrate'
+                    if (!class_exists('Rmmigrate_Migration_Preflight', false)) {
+                        require_once RMMIGRATE_PATH . 'includes/shared/restore-topology/bootstrap.php';
+                    }
+                    // Say what actually happened to the database (rolled back, untouched, or not).
+                    $progress['cancel_notice'] = trim(
+                        __('Restore cancelled.', 'rosenheinrich-multisite-migrate') . ' '
+                        . Rmmigrate_Migration_Preflight::recovery_message_after_db_failure($progress)
                     );
                     $this->update_progress($progress);
                 }

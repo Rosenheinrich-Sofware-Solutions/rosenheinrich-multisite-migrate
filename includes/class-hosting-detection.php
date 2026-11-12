@@ -167,6 +167,25 @@ class Rmmigrate_Hosting_Detection
         return 'cron';
     }
 
+    /** How recent the last scheduler tick must be to count as a running system cron. */
+    const SYSTEM_CRON_WINDOW = 7200;
+
+    /**
+     * A system cron drives WP-Cron: DISABLE_WP_CRON is set, yet the scheduler tick (a WP-Cron
+     * event) ran recently, so something outside WordPress triggers cron.
+     */
+    public static function system_cron_detected(?bool $wp_cron_disabled = null, ?int $last_tick = null, ?int $now = null): bool
+    {
+        $wp_cron_disabled = $wp_cron_disabled ?? (defined('DISABLE_WP_CRON') && DISABLE_WP_CRON);
+        if (!$wp_cron_disabled) {
+            return false;
+        }
+        $last_tick = $last_tick ?? (int) get_site_option('rmmigrate_last_tick', 0);
+        $now = $now ?? time();
+
+        return $last_tick > 0 && ($now - $last_tick) <= self::SYSTEM_CRON_WINDOW;
+    }
+
     public static function effective_kickoff_mode(): string
     {
         $setting = self::settings_kickoff_mode();
@@ -371,6 +390,32 @@ class Rmmigrate_Hosting_Detection
         self::clear_hook_events(self::CRON_HOOK, array($job_id));
     }
 
+    /** Upper bound in seconds for one worker run started by a system cron through WP-CLI. */
+    const CLI_CRON_DRAIN_SECONDS = 600;
+
+    /**
+     * Run the job's next slice. Under WP-CLI (a system cron calling `wp cron event run`) keep
+     * going for up to CLI_CRON_DRAIN_SECONDS: with DISABLE_WP_CRON the next cron run can be many
+     * minutes away, and one slice per run would leave a backup crawling until someone opens the
+     * admin again. Web requests still run a single slice.
+     *
+     * @return array<string,mixed>
+     */
+    private static function process_cron_slices(int $job_id): array
+    {
+        $result = Rmmigrate_Runner::process($job_id);
+        if (!(defined('WP_CLI') && WP_CLI)) {
+            return $result;
+        }
+        $budget = (int) apply_filters('rmmigrate_cli_cron_drain_seconds', self::CLI_CRON_DRAIN_SECONDS);
+        $deadline = time() + max(0, $budget);
+        while (empty($result['done']) && empty($result['waiting']) && time() < $deadline) {
+            $result = Rmmigrate_Runner::process($job_id);
+        }
+
+        return $result;
+    }
+
     public static function run_cron_worker(int $job_id): void
     {
         if ($job_id <= 0) {
@@ -409,7 +454,7 @@ class Rmmigrate_Hosting_Detection
             Rmmigrate_Runner::note_worker_request($job_id, 'cron');
         }
 
-        $result = Rmmigrate_Runner::process($job_id);
+        $result = self::process_cron_slices($job_id);
 
         if (empty($result['done'])) {
             // Waiters must not stampede every +1s — that floods rate limits and

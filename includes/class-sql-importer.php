@@ -81,6 +81,10 @@ class Rmmigrate_SQL_Importer
                 $import = array();
             }
         }
+        if (empty($this->job->get_progress()['db_import_started'])) {
+            // Preflights and the statement guard passed; the next statement writes to the database.
+            $this->job->update_progress(array('db_import_started' => true));
+        }
         $buffer = $checkpoint !== null ? $checkpoint['buffer'] : $this->load_buffer($import);
         // Statements after this resume point that a crashed worker already applied are skipped.
         $this->marker_token = $checkpoint !== null ? $checkpoint['token'] : 'o' . $offset;
@@ -852,6 +856,10 @@ class Rmmigrate_SQL_Importer
      */
     private function transform_statement(string $statement): string
     {
+        // Before search-replace: it recomputes serialized lengths on the healed text.
+        if ($this->dump_needs_placeholder_heal()) {
+            $statement = Rmmigrate_Sql_Import_Ddl::heal_placeholder_escapes($statement);
+        }
         if ($this->search_replace !== null) {
             $statement = $this->search_replace->apply_to_sql_statement($statement);
         }
@@ -865,10 +873,40 @@ class Rmmigrate_SQL_Importer
         if ($from_prefix !== '' && $to_prefix !== '' && $from_prefix !== $to_prefix) {
             $statement = Rmmigrate_Sql_Import_Prefix_Rewrite::apply($statement, $from_prefix, $to_prefix);
         }
+        $table_map = is_array($progress['sql_table_name_map'] ?? null) ? $progress['sql_table_name_map'] : array();
+        if ($table_map !== array()) {
+            // Older copies of this shared helper (another edition still active) lack the map method.
+            if (method_exists('Rmmigrate_Sql_Import_Prefix_Rewrite', 'apply_table_map')) {
+                $statement = Rmmigrate_Sql_Import_Prefix_Rewrite::apply_table_map($statement, $table_map);
+            }
+        }
 
         $statement = $this->strip_foreign_key_constraints($statement);
 
         return Rmmigrate_Sql_Import_Ddl::sanitize_executable_statement($statement);
+    }
+
+    /** @var bool|null */
+    private $placeholder_heal = null;
+
+    /**
+     * Legacy PHP-mode dumps stored $wpdb placeholder escapes instead of "%".
+     */
+    private function dump_needs_placeholder_heal(): bool
+    {
+        if ($this->placeholder_heal === null) {
+            $progress = $this->job->get_progress();
+            $manifest = is_array($progress['manifest'] ?? null) ? $progress['manifest'] : null;
+            if ($manifest === null) {
+                $archive = class_exists('Rmmigrate_Restore_Runner', false) && method_exists('Rmmigrate_Restore_Runner', 'job_manifest_for_import')
+                    ? Rmmigrate_Restore_Runner::job_manifest_for_import($this->job)
+                    : null;
+                $manifest = is_array($archive) ? $archive : null;
+            }
+            $this->placeholder_heal = $manifest !== null && Rmmigrate_Sql_Import_Ddl::dump_needs_placeholder_heal($manifest);
+        }
+
+        return $this->placeholder_heal;
     }
 
     /**
@@ -1029,7 +1067,7 @@ class Rmmigrate_SQL_Importer
         throw Rmmigrate_Job_Exception::raise(
             sanitize_key('sql_import_statement_out_of_scope'),
             // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
-            __("This backup's database contains statements outside this site's tables. Import stopped before any change.", 'rosenheinrich-multisite-migrate')
+            __("This backup's database contains statements outside this site's tables. Import stopped.", 'rosenheinrich-multisite-migrate')
         );
     }
 
@@ -1153,7 +1191,7 @@ class Rmmigrate_SQL_Importer
                 throw Rmmigrate_Job_Exception::raise(
                     sanitize_key('database_sql_integrity_mismatch'),
                     // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
-                    __('database.sql does not match the backup manifest. The archive may have been modified. Import stopped before any change.', 'rosenheinrich-multisite-migrate')
+                    __('database.sql does not match the backup manifest. The archive may have been modified. Import stopped.', 'rosenheinrich-multisite-migrate')
                 );
             }
         }

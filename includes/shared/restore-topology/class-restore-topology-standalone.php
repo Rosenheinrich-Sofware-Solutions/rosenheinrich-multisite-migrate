@@ -234,8 +234,57 @@ class Rmmigrate_Restore_Topology_Standalone
             $report['usermeta_rows_purged'] = self::delete_foreign_usermeta($pdo, $prefix, $base_prefix);
         }
         $report['urls_updated'] = self::update_site_urls($pdo, $prefix, self::migration_map($context));
+        // A network-activated plugin is not listed in the subsite's own active_plugins: keep the
+        // plugin that ran the restore active on the new standalone site.
+        $keep = is_array($context['keep_active_plugins'] ?? null) ? $context['keep_active_plugins'] : array();
+        $report['plugins_kept_active'] = self::keep_plugins_active($pdo, $prefix . 'options', $keep);
 
         return $report;
+    }
+
+    /**
+     * Add plugin basenames to {prefix}options.active_plugins (no-op when already listed).
+     *
+     * @param string[] $basenames
+     */
+    public static function keep_plugins_active(PDO $pdo, string $options_table, array $basenames): int
+    {
+        $basenames = array_values(array_filter(array_map('strval', $basenames), static function (string $b): bool {
+            return preg_match('#^[A-Za-z0-9_-][A-Za-z0-9._-]*/[A-Za-z0-9_-][A-Za-z0-9._-]*\.php$#', $b) === 1;
+        }));
+        if ($basenames === array() || !self::table_exists($pdo, $options_table)) {
+            return 0;
+        }
+        $quoted = '`' . str_replace('`', '``', $options_table) . '`';
+        $stmt = $pdo->prepare("SELECT option_value FROM {$quoted} WHERE option_name = 'active_plugins' LIMIT 1");
+        $stmt->execute();
+        $raw = $stmt->fetchColumn();
+        $active = array();
+        if (is_string($raw) && $raw !== '') {
+            $decoded = @unserialize($raw, array('allowed_classes' => false));
+            $active = is_array($decoded) ? array_values(array_map('strval', $decoded)) : array();
+        }
+        $added = 0;
+        foreach ($basenames as $basename) {
+            if (!in_array($basename, $active, true)) {
+                $active[] = $basename;
+                $added++;
+            }
+        }
+        if ($added === 0) {
+            return 0;
+        }
+        sort($active);
+        $value = serialize($active);
+        if ($raw === false) {
+            $insert = $pdo->prepare("INSERT INTO {$quoted} (option_name, option_value, autoload) VALUES ('active_plugins', ?, 'yes')");
+            $insert->execute(array($value));
+        } else {
+            $update = $pdo->prepare("UPDATE {$quoted} SET option_value = ? WHERE option_name = 'active_plugins'");
+            $update->execute(array($value));
+        }
+
+        return $added;
     }
 
     /**

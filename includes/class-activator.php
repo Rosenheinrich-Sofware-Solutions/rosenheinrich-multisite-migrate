@@ -139,7 +139,7 @@ class Rmmigrate_Activator
         if (!wp_next_scheduled('rmmigrate_deferred_hosting_detect')) {
             wp_schedule_single_event(time() + 30, 'rmmigrate_deferred_hosting_detect');
         }
-        if (!wp_next_scheduled(Rmmigrate_Scheduler::HOOK)) {
+        if (Rmmigrate_Scheduler::is_tick_site() && !wp_next_scheduled(Rmmigrate_Scheduler::HOOK)) {
             wp_schedule_single_event(time() + Rmmigrate_Scheduler::tick_interval(), Rmmigrate_Scheduler::HOOK);
         }
 

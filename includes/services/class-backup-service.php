@@ -100,6 +100,16 @@ final class Rmmigrate_Backup_Service
         }
         $scope = $resolved['scope'];
         $excluded = $resolved['excluded_blogs'];
+        // Started by a site administrator without network rights: the archive must not carry
+        // network secrets (no wp-config.php, network tables or password hashes) and may be
+        // downloaded by that administrator. Scheduled (cron) runs are never restricted.
+        $restricted_export = is_multisite() && !$is_cron && !current_user_can('manage_network');
+        if ($restricted_export && $scope !== Rmmigrate_Multisite_Scope::SCOPE_SUBSITE) {
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Structured service exception payload.
+            throw new Rmmigrate_Service_Exception(
+                esc_html(__('Network backup requires super admin.', 'rosenheinrich-multisite-migrate')),
+                array(), sanitize_key(Rmmigrate_Error_Codes::PERMISSION_DENIED));
+        }
 
         if ($triggered_by === 'manual' && current_user_can(is_multisite() ? 'manage_network' : 'manage_options')) {
             $settings = Rmmigrate_Settings::get();
@@ -129,7 +139,9 @@ final class Rmmigrate_Backup_Service
 
         $args = array(
             'scope'              => $scope,
-            'blog_id'            => (int) ($input['blog_id'] ?? get_current_blog_id()),
+            // Users without network rights can only ever back up the site they are on.
+            'blog_id'            => $restricted_export ? get_current_blog_id() : (int) ($input['blog_id'] ?? get_current_blog_id()),
+            'restricted_export'  => $restricted_export,
             'excluded_blogs'     => $excluded,
             'included_blogs'     => $included,
             'excluded_tables'    => $excluded_tables,

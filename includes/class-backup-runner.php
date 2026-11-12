@@ -1414,15 +1414,36 @@ class Rmmigrate_Runner
         self::release_sql_job_lock($job_id);
         self::clear_worker_lease($job_id);
         // Drop the lock file inode so a new worker can proceed after stale recovery
-        // even if a dead NFS/peer flock left the path contested.
+        // even if a dead NFS/peer flock left the path contested. On local disks a lock that
+        // is still held belongs to a live worker: unlinking it would let a second worker
+        // write the same archive in parallel, so leave it in place.
         if ($job_id > 0 && Rmmigrate_Hosting_Detection::effective_lock_mode() !== 'sql') {
             $path = Rmmigrate_Plugin::backups_dir() . '/jobs/' . $job_id . '/.worker.lock';
             if (Rmmigrate_Filesystem::exists($path)) {
-                Rmmigrate_Filesystem::delete($path);
+                if (!Rmmigrate_Hosting_Detection::is_nfs_backups_dir() && self::lock_file_is_held($path)) {
+                    Rmmigrate_Logger::log_job($job_id, 'Worker lock is still held by a running worker - keeping it.');
+                } else {
+                    Rmmigrate_Filesystem::delete($path);
+                }
             }
         }
         delete_transient('rmmigrate_milestone_lock_acquired_' . $job_id);
         delete_transient(self::WAIT_BACKOFF_PREFIX . $job_id);
+    }
+
+    /**
+     * Whether another process currently holds the flock on a job lock file.
+     */
+    private static function lock_file_is_held(string $path): bool
+    {
+        $fh = Rmmigrate_Filesystem::open_lock($path, 'c+');
+        if ($fh === false) {
+            return false;
+        }
+        $acquired = Rmmigrate_Filesystem::try_exclusive_lock($fh);
+        Rmmigrate_Filesystem::release_lock($fh);
+
+        return !$acquired;
     }
 
     /**

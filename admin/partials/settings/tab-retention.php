@@ -6,6 +6,14 @@ if (!defined('ABSPATH')) {
 <div class="mm-form-section">
     <h2><?php esc_html_e('Retention', 'rosenheinrich-multisite-migrate'); ?></h2>
     <p class="description"><?php esc_html_e('How many completed backups to keep. Set to 0 to keep all backups (no automatic deletion).', 'rosenheinrich-multisite-migrate'); ?></p>
+    <p class="description"><?php
+    echo esc_html(sprintf(
+        /* translators: 1: number of days, 2: maximum number of entries kept */
+        __('Failed or cancelled backup entries are removed automatically after %1$d days, and at most the %2$d most recent are kept.', 'rosenheinrich-multisite-migrate'),
+        Rmmigrate_Retention::FAILED_MAX_AGE_DAYS,
+        Rmmigrate_Retention::FAILED_KEEP_MAX
+    ));
+    ?></p>
     <table class="form-table">
         <tr>
             <th><label for="retention_network"><?php echo is_multisite() ? esc_html__('Network backups to keep', 'rosenheinrich-multisite-migrate') : esc_html__('Backups to keep', 'rosenheinrich-multisite-migrate'); ?></label></th>

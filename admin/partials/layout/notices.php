@@ -160,6 +160,57 @@ if (Rmmigrate_Request_Input::get_exists('updated')) {
     include RMMIGRATE_PATH . 'admin/partials/components/admin-banner.php';
 }
 
+// After the keep counts change: say what the new rule would delete and offer to apply it now.
+// Nothing is deleted until the user clicks (or the next successful backup runs retention).
+if (Rmmigrate_Request_Input::get_exists('updated')
+    && class_exists('Rmmigrate_Retention')
+    && current_user_can(is_multisite() ? 'manage_network' : 'manage_options')
+) {
+    $rmmigrate_retention_review = Rmmigrate_Retention::take_review_notice();
+    if ($rmmigrate_retention_review !== null) {
+        $rmmigrate_retention_parts = array();
+        if ($rmmigrate_retention_review['backups'] > 0) {
+            $rmmigrate_retention_parts[] = sprintf(
+                /* translators: %d: number of completed backups beyond the retention limit */
+                _n('%d backup is beyond the new retention limit.', '%d backups are beyond the new retention limit.', $rmmigrate_retention_review['backups'], 'rosenheinrich-multisite-migrate'),
+                $rmmigrate_retention_review['backups']
+            );
+        }
+        if ($rmmigrate_retention_review['failed'] > 0) {
+            $rmmigrate_retention_parts[] = sprintf(
+                /* translators: %d: number of failed or cancelled backup entries that have expired */
+                _n('%d failed or cancelled entry has expired.', '%d failed or cancelled entries have expired.', $rmmigrate_retention_review['failed'], 'rosenheinrich-multisite-migrate'),
+                $rmmigrate_retention_review['failed']
+            );
+        }
+        $rmmigrate_retention_parts[] = __('Nothing has been deleted yet. They are removed automatically after the next successful backup, or right away with the button.', 'rosenheinrich-multisite-migrate');
+        $rmmigrate_retention_total = $rmmigrate_retention_review['backups'] + $rmmigrate_retention_review['failed'];
+        $rmmigrate_banner = array(
+            'variant' => 'warning',
+            'title'   => __('Retention changed', 'rosenheinrich-multisite-migrate'),
+            'text'    => implode(' ', $rmmigrate_retention_parts),
+            'class'   => 'mm-retention-review',
+            'actions' => array(
+                array(
+                    'type'    => 'button',
+                    'label'   => sprintf(
+                        /* translators: %d: number of backups and entries to delete */
+                        _n('Delete %d now', 'Delete %d now', $rmmigrate_retention_total, 'rosenheinrich-multisite-migrate'),
+                        $rmmigrate_retention_total
+                    ),
+                    'class'   => 'mm-retention-apply',
+                    'primary' => true,
+                ),
+                array(
+                    'type'   => 'dismiss',
+                    'button' => true,
+                ),
+            ),
+        );
+        include RMMIGRATE_PATH . 'admin/partials/components/admin-banner.php';
+    }
+}
+
 if (Rmmigrate_Request_Input::get_exists('email_sent')) {
     $rmmigrate_banner = array(
         'variant' => 'success',

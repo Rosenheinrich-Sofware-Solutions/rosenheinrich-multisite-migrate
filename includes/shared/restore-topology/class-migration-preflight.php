@@ -40,6 +40,36 @@ class Rmmigrate_Migration_Preflight
     }
 
     /**
+     * Subsite (or extracted site) → standalone: add the media URL pairs that follow the
+     * uploads/sites/<id>/ → uploads/ file move. No-op for every other restore.
+     *
+     * @param array<string,mixed> $map
+     * @param array<string,mixed> $manifest Demoted/subsite manifest.
+     * @return array<string,mixed>
+     */
+    public static function with_standalone_upload_pairs(array $map, array $manifest, bool $destination_multisite): array
+    {
+        if ($destination_multisite || !Rmmigrate_Restore_Topology_Manifest::is_subsite_standalone_restore($manifest)) {
+            return $map;
+        }
+        $blog_id = (int) ($manifest['blog_id'] ?? 0);
+        $new_site = (string) ($map['site_url']['new'] ?? '');
+        $pairs = Rmmigrate_Restore_Topology_Extract_Site::standalone_upload_url_pairs($manifest, $blog_id, $new_site);
+        if ($pairs === array()) {
+            return $map;
+        }
+        $existing = isset($map['extra_pairs']) && is_array($map['extra_pairs']) ? $map['extra_pairs'] : array();
+        foreach ($pairs as $pair) {
+            if (!in_array($pair, $existing, true)) {
+                $existing[] = $pair;
+            }
+        }
+        $map['extra_pairs'] = $existing;
+
+        return $map;
+    }
+
+    /**
      * @param array<string,mixed> $map
      * @param array<string,mixed> $manifest
      * @return array<string,mixed>
@@ -465,20 +495,60 @@ class Rmmigrate_Migration_Preflight
         $rollback = is_array($job_progress['network_rollback_report'] ?? null)
             ? $job_progress['network_rollback_report']
             : array();
-        if (!empty($rollback['restored'])) {
+        if (!empty($rollback['restored']) && empty($rollback['errors'])) {
             return __('The failed import was rolled back automatically and your previous database tables were restored.', 'rosenheinrich-multisite-migrate');
         }
 
-        $safety_id = (int) ($job_progress['safety_job_id'] ?? 0);
-        if ($safety_id <= 0 || empty($job_progress['db_prepared'])) {
-            return '';
+        // Never claim "nothing changed" once tables were renamed, dropped or imported.
+        $touched = self::database_touched($job_progress);
+        if (!$touched) {
+            return __('No database tables were changed.', 'rosenheinrich-multisite-migrate');
         }
 
-        return sprintf(
-            /* translators: %d: safety backup job ID */
-            __('The database was partially replaced. Restore safety backup job #%d from Activity, or contact your host for a server-level backup.', 'rosenheinrich-multisite-migrate'),
-            $safety_id
-        );
+        $safety_id = (int) ($job_progress['safety_job_id'] ?? 0);
+        if (!empty($job_progress['db_import_done'])) {
+            return $safety_id > 0
+                ? sprintf(
+                    /* translators: %d: safety backup job ID */
+                    __('The database had already been replaced with the backup\'s data when the restore stopped. To undo it, restore safety backup job #%d from Activity.', 'rosenheinrich-multisite-migrate'),
+                    $safety_id
+                )
+                : __('The database had already been replaced with the backup\'s data when the restore stopped.', 'rosenheinrich-multisite-migrate');
+        }
+
+        if ($safety_id > 0) {
+            return sprintf(
+                /* translators: %d: safety backup job ID */
+                __('The database was partially replaced. Restore safety backup job #%d from Activity, or contact your host for a server-level backup.', 'rosenheinrich-multisite-migrate'),
+                $safety_id
+            );
+        }
+
+        return __('Database tables of this restore were already removed or partly replaced and could not be put back automatically. Restore the site from a recovery point or another backup before using it.', 'rosenheinrich-multisite-migrate');
+    }
+
+    /**
+     * Whether live tables may differ from before the restore. Unknown states count as touched.
+     *
+     * @param array<string,mixed> $job_progress
+     */
+    public static function database_touched(array $job_progress): bool
+    {
+        if (!empty($job_progress['db_import_started']) || !empty($job_progress['db_import_done'])) {
+            return true;
+        }
+        if (!empty($job_progress['network_quarantine']['live_to_quarantine'])) {
+            return true;
+        }
+        if (empty($job_progress['db_prepare_started']) && empty($job_progress['db_prepared'])) {
+            return false;
+        }
+        if (!array_key_exists('db_prepare_changed', $job_progress)) {
+            // Preparation started but did not record its outcome (crash, or an older job).
+            return true;
+        }
+
+        return !empty($job_progress['db_prepare_changed']);
     }
 
     public static function urls_compatible_for_migration(string $a, string $b): bool

@@ -341,6 +341,7 @@ class Rmmigrate_Admin_Assets
                 'cancel'              => __('Cancel', 'rosenheinrich-multisite-migrate'),
                 'confirm'             => __('Confirm', 'rosenheinrich-multisite-migrate'),
                 'pruneConfirm'        => __('Delete old backups according to retention rules?', 'rosenheinrich-multisite-migrate'),
+                'retentionApplyConfirm' => __('Delete these backups now? This cannot be undone.', 'rosenheinrich-multisite-migrate'),
                 'cleanStorageConfirm' => __('Delete orphaned job work folders and partial uploads? Finished backups are kept.', 'rosenheinrich-multisite-migrate'),
                 /* translators: %d: number of paths */
                 'installCleanupConfirm' => __('Delete %d installation file path(s) from the web root? This cannot be undone.', 'rosenheinrich-multisite-migrate'),

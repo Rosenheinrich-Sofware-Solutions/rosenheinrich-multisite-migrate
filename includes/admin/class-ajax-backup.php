@@ -348,6 +348,10 @@ class Rmmigrate_Ajax_Backup
             wp_die(esc_html__('Backup not found.', 'rosenheinrich-multisite-migrate'));
         }
         self::assert_job_access($job);
+        if (!Rmmigrate_Access::can_download_job($job)) {
+            // Only restricted site exports may leave the server for users without network rights.
+            wp_die(esc_html__('Permission denied.', 'rosenheinrich-multisite-migrate'), '', array('response' => 403));
+        }
         $path = Rmmigrate_Runner::resolve_local_path($job);
         // Path-safety: current or legacy storage roots (pre DIR_NAME rename).
         if (!Rmmigrate_Engine_Config::is_path_under_allowed_storage($path)) {

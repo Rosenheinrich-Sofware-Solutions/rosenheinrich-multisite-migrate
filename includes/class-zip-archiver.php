@@ -419,6 +419,9 @@ class Rmmigrate_Zip_Archiver
     private function build_queue(string $work_dir, array $files): array
     {
         $queue = array();
+        // Subsite-scoped archives never carry wp-config.php (DB credentials, salts) or server config.
+        $include_root_files = !($this->job instanceof Rmmigrate_Job)
+            || (string) ($this->job->data['scope'] ?? '') !== Rmmigrate_Multisite_Scope::SCOPE_SUBSITE;
         $sql_path = trailingslashit($work_dir) . 'database.sql';
         if (Rmmigrate_Filesystem::exists($sql_path)) {
             $queue[] = array('path' => $sql_path, 'archive' => 'database.sql');
@@ -429,11 +432,11 @@ class Rmmigrate_Zip_Archiver
         }
 
         $wp_config = ABSPATH . 'wp-config.php';
-        if (Rmmigrate_Filesystem::exists($wp_config)) {
+        if ($include_root_files && Rmmigrate_Filesystem::exists($wp_config)) {
             $queue[] = array('path' => $wp_config, 'archive' => 'files/wp-config.php');
         }
         $htaccess = ABSPATH . '.htaccess';
-        if (Rmmigrate_Filesystem::exists($htaccess)) {
+        if ($include_root_files && Rmmigrate_Filesystem::exists($htaccess)) {
             $queue[] = array('path' => $htaccess, 'archive' => 'files/.htaccess');
         }
         foreach ($files as $f) {

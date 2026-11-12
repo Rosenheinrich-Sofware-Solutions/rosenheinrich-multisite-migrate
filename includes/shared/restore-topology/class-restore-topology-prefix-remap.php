@@ -143,10 +143,16 @@ class Rmmigrate_Restore_Topology_Prefix_Remap
             return $report;
         }
 
+        // A destination prefix that extends the source (wp_ → wp_new_) also matches the
+        // source LIKE: never re-rename tables that already carry the destination prefix.
+        $to_extends_from = strlen($to_base) > strlen($from_base) && strncmp($to_base, $from_base, strlen($from_base)) === 0;
         $table_names = Rmmigrate_Topology_Db_Connection::list_tables_with_prefix($pdo, $from_base);
         foreach ($table_names as $old_table) {
             $old_table = (string) $old_table;
             if ($old_table === '' || strncmp($old_table, $from_base, strlen($from_base)) !== 0) {
+                continue;
+            }
+            if ($to_extends_from && strncmp($old_table, $to_base, strlen($to_base)) === 0) {
                 continue;
             }
             if (self::is_plugin_runtime_table($old_table)) {
@@ -170,18 +176,66 @@ class Rmmigrate_Restore_Topology_Prefix_Remap
             $report['tables_renamed']++;
         }
 
+        // Every site's role keys move with the prefix: {from}capabilities AND {from}<N>_capabilities,
+        // {from}<N>_user_level, ... (WordPress reads {table_prefix}<N>_capabilities on subsites).
         $usermeta = $to_base . 'usermeta';
-        $report['usermeta_keys_remapped'] = self::remap_usermeta_keys($pdo, $usermeta, $from_base, $to_base);
+        $report['usermeta_keys_remapped'] = self::remap_network_usermeta_keys($pdo, $usermeta, $from_base, $to_base);
 
+        $options_re = '/^' . preg_quote($to_base, '/') . '(?:(\d+)_)?options$/';
         foreach (Rmmigrate_Topology_Db_Connection::list_tables_with_prefix($pdo, $to_base) as $table) {
             $table = (string) $table;
-            if ($table === '' || !str_ends_with($table, 'options')) {
+            if ($table === '' || preg_match($options_re, $table, $m) !== 1) {
                 continue;
             }
-            $report['option_names_remapped'] += self::remap_option_names($pdo, $table, $from_base, $to_base);
+            $blog_part = isset($m[1]) && $m[1] !== '' ? $m[1] . '_' : '';
+            // {to}options holds {from}user_roles; {to}<N>_options holds {from}<N>_user_roles.
+            $report['option_names_remapped'] += self::rename_option(
+                $pdo,
+                $table,
+                $from_base . $blog_part . 'user_roles',
+                $to_base . $blog_part . 'user_roles'
+            );
         }
 
         return $report;
+    }
+
+    private static function rename_option(PDO $pdo, string $table, string $from_name, string $to_name): int
+    {
+        if ($from_name === $to_name || !self::table_exists($pdo, $table)) {
+            return 0;
+        }
+        $quoted_table = self::quote_table_name($table);
+        $stmt = $pdo->prepare("UPDATE {$quoted_table} SET option_name = ? WHERE option_name = ?");
+        $stmt->execute(array($to_name, $from_name));
+
+        return $stmt->rowCount();
+    }
+
+    /**
+     * Network prefix change: rename every usermeta key that starts with the old base prefix,
+     * including the per-site {from}<N>_* keys. Keys that already carry the new prefix (when it
+     * extends the old one) are left alone.
+     */
+    private static function remap_network_usermeta_keys(PDO $pdo, string $table, string $from, string $to): int
+    {
+        if (!self::table_exists($pdo, $table)) {
+            return 0;
+        }
+
+        $quoted_table = self::quote_table_name($table);
+        $from_start = strlen($from) + 1;
+        $like = str_replace(array('\\', '_', '%'), array('\\\\', '\\_', '\\%'), $from) . '%';
+        $sql = "UPDATE {$quoted_table} SET meta_key = CONCAT(?, SUBSTRING(meta_key, ?)) WHERE meta_key LIKE ?";
+        $params = array($to, $from_start, $like);
+        if (strlen($to) > strlen($from) && strncmp($to, $from, strlen($from)) === 0) {
+            $sql .= ' AND meta_key NOT LIKE ?';
+            $params[] = str_replace(array('\\', '_', '%'), array('\\\\', '\\_', '\\%'), $to) . '%';
+        }
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($params);
+
+        return $stmt->rowCount();
     }
 
     /**

@@ -306,6 +306,9 @@ class Rmmigrate_Settings
         }
 
         update_site_option(self::OPTION_KEY, $merged);
+        if (class_exists('Rmmigrate_Retention', false)) {
+            Rmmigrate_Retention::flag_review_if_changed($prev, $merged);
+        }
         if (self::hosting_relevant_changed($prev, $merged)
             && class_exists('Rmmigrate_Hosting_Detection', false)
         ) {

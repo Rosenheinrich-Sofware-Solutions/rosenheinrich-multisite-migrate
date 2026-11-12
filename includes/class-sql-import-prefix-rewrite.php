@@ -26,6 +26,33 @@ class Rmmigrate_Sql_Import_Prefix_Rewrite
         'signups',
     );
 
+    /** @var bool When true, from/to are whole table names, not prefixes. */
+    private static $exact_names = false;
+
+    /**
+     * Rename whole tables (wpms_users => wpnew_users) with the same statement coverage as apply().
+     *
+     * @param array<string,string> $map
+     */
+    public static function apply_table_map(string $sql, array $map): string
+    {
+        foreach ($map as $from => $to) {
+            $from = (string) $from;
+            $to = (string) $to;
+            if ($from === '' || $to === '' || $from === $to || stripos($sql, $from) === false) {
+                continue;
+            }
+            self::$exact_names = true;
+            try {
+                $sql = self::apply($sql, $from, $to);
+            } finally {
+                self::$exact_names = false;
+            }
+        }
+
+        return $sql;
+    }
+
     public static function apply(string $sql, string $from_prefix, string $to_prefix): string
     {
         if ($from_prefix === '' || $to_prefix === '' || $from_prefix === $to_prefix) {
@@ -342,6 +369,9 @@ class Rmmigrate_Sql_Import_Prefix_Rewrite
         string $to_prefix,
         bool $selective_blog_one
     ): string {
+        if (self::$exact_names) {
+            return $table === $from_prefix ? $to_prefix : $table;
+        }
         $from_len = strlen($from_prefix);
         if ($from_len === 0 || strncmp($table, $from_prefix, $from_len) !== 0) {
             return $table;

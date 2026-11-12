@@ -149,6 +149,9 @@ class Rmmigrate_File_List
     {
         if ($job !== null) {
             $files = self::filter_by_profile($files, $job);
+            if ((string) ($job->data['scope'] ?? '') === Rmmigrate_Multisite_Scope::SCOPE_SUBSITE) {
+                $files = self::filter_subsite_sensitive_files($files);
+            }
         }
 
         $files = self::skip_oversized_files($files, $job);
@@ -556,6 +559,45 @@ class Rmmigrate_File_List
             }
             return false;
         }));
+    }
+
+    /**
+     * Subsite-scoped archives may be handed to a subsite administrator: never let them carry
+     * network secrets or server configuration. Core files are limited to wp-admin/,
+     * wp-includes/ and the stock root PHP/readme files; wp-config.php, .htaccess, web.config,
+     * .user.ini, php.ini and any other non-core ABSPATH content are dropped.
+     *
+     * @param array<int,array{path:string,size:int,archive:string}> $files
+     * @return array<int,array{path:string,size:int,archive:string}>
+     */
+    public static function filter_subsite_sensitive_files(array $files): array
+    {
+        return array_values(array_filter($files, static function ($file) {
+            return self::is_subsite_archive_entry_allowed((string) ($file['archive'] ?? ''));
+        }));
+    }
+
+    public static function is_subsite_archive_entry_allowed(string $archive): bool
+    {
+        $archive = ltrim(str_replace('\\', '/', $archive), '/');
+        if (strpos($archive, 'files/wp-content/') === 0) {
+            return true;
+        }
+        if (strpos($archive, 'files/') !== 0) {
+            return true;
+        }
+        $rel = substr($archive, 6);
+        if (strpos($rel, 'wp-admin/') === 0 || strpos($rel, 'wp-includes/') === 0) {
+            return true;
+        }
+        if (strpos($rel, '/') !== false) {
+            return false;
+        }
+        if (strtolower($rel) === 'wp-config.php') {
+            return false;
+        }
+
+        return preg_match('/^(?:index\.php|xmlrpc\.php|wp-[a-z0-9-]+\.php|license\.txt|readme\.html)$/i', $rel) === 1;
     }
 
     public static function save(string $work_dir, array $files): void

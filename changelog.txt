@@ -1,3 +1,13 @@
+= 1.2.27 =
+* Fix: A backup that is interrupted mid-step, for example because you leave the page, now resumes instead of failing its archive integrity check. With a system cron it can also finish without the browser tab open.
+* New: Failed and cancelled backup entries are removed automatically after 14 days, and at most the 10 newest are kept. Completed backups still follow your retention setting.
+* New: When you change how many backups to keep, a notice shows how many would be deleted and offers a one-click "Delete now". Nothing is deleted without it until the next successful backup.
+* Change: The server check recognises a system cron (DISABLE_WP_CRON) and no longer asks you to keep the tab open.
+* Fix: On a multisite network the background scheduler tick now runs only on the main site. Subsites remove a leftover tick event, so a system cron no longer leaves an overdue event there.
+
+= 1.2.26 =
+* Security: restrict backups to super admins and harden archive verification; fixes for prefix migration, subsite import into another network, standalone media URLs and aborted imports.
+
 = 1.2.25 =
 * Fix: Restoring a subsite backup as a standalone site while keeping its original table prefix no longer leaves users without a role.
 * New: Extract one site from a network backup into a standalone WordPress site, now free. Choose "Extract one site as standalone" when you restore a network backup on a single-site install.

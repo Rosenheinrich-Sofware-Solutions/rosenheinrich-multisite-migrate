@@ -23,10 +23,41 @@ class Rmmigrate_Activity_Log
         return Rmmigrate_Engine_Config::activity_max_entries();
     }
 
+    /** @var array<string,bool> */
+    private static $migrated_log_dirs = array();
+
     public static function logs_dir(): string
     {
         Rmmigrate_Plugin::ensure_backup_root();
-        return Rmmigrate_Plugin::backups_dir() . '/logs';
+        $legacy = Rmmigrate_Plugin::backups_dir() . '/logs';
+        $dir = Rmmigrate_Plugin::private_storage_dir('logs');
+        if ($dir !== $legacy && !isset(self::$migrated_log_dirs[$dir])) {
+            self::$migrated_log_dirs[$dir] = true;
+            self::migrate_legacy_log_files($legacy, $dir);
+        }
+
+        return $dir;
+    }
+
+    /**
+     * Move logs written by earlier versions from the guessable logs/ folder into the private one.
+     */
+    private static function migrate_legacy_log_files(string $legacy, string $dir): void
+    {
+        $files = glob(trailingslashit($legacy) . '*');
+        if (!is_array($files)) {
+            return;
+        }
+        foreach ($files as $file) {
+            $name = basename($file);
+            if (!is_file($file) || !preg_match('/^(?:activity(?:\.\d+)?\.jsonl(?:\.lock)?|(?:job|system|backup)[-.a-z0-9]*\.log)$/i', $name)) {
+                continue;
+            }
+            $target = trailingslashit($dir) . $name;
+            if (!file_exists($target)) {
+                Rmmigrate_Filesystem::move($file, $target);
+            }
+        }
     }
 
     public static function path(): string

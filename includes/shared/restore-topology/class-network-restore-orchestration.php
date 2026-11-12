@@ -32,6 +32,30 @@ if (!class_exists('Rmmigrate_Network_Restore_Orchestration', false)) {
         }
 
         /**
+         * Table prefix the database actually uses after import.
+         *
+         * A full network restore onto a different base prefix renames every table (and the
+         * role keys) to the destination prefix right after import, so wp-config.php and the
+         * blogs/site finalize must use the destination prefix, not the archive's.
+         *
+         * @param array<string,mixed> $manifest
+         * @param array<string,mixed> $context  db_prefix (import prefix), destination, restore_mode.
+         */
+        public static function effective_db_prefix(array $manifest, array $context): string
+        {
+            $prefix = (string) ($context['db_prefix'] ?? '');
+            if ($prefix === '') {
+                $prefix = (string) ($manifest['db_prefix'] ?? '');
+            }
+            $context['db_prefix'] = $prefix;
+            if (self::should_remap_prefixes($manifest, $context)) {
+                return self::destination_base_prefix($manifest, $context);
+            }
+
+            return $prefix;
+        }
+
+        /**
          * @param array<string,mixed> $manifest
          */
         public static function source_base_prefix(array $manifest): string

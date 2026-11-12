@@ -217,7 +217,7 @@ class Rmmigrate_Multisite_Scope
 
     public static function format_blog_label(int $blog_id): string
     {
-        $details = get_blog_details($blog_id);
+        $details = function_exists('get_blog_details') ? get_blog_details($blog_id) : false;
         if (!$details) {
             return '';
         }
@@ -603,9 +603,23 @@ class Rmmigrate_Multisite_Scope
             return array();
         }
 
+        global $wpdb;
         $merged = array();
         foreach ($this->included_blog_ids as $blog_id) {
             $merged = array_merge($merged, $this->get_subsite_tables($all_tables, (int) $blog_id));
+        }
+        // Network-level (super-admin) export of several sites keeps the network topology tables
+        // and, when the main site is included, its base-prefix network tables as before.
+        if (is_multisite()) {
+            $network_tables = array($wpdb->blogs, $wpdb->site, $wpdb->sitemeta);
+            if (in_array(1, array_map('intval', $this->included_blog_ids), true)) {
+                $network_tables = array_merge($network_tables, self::network_only_table_names((string) $wpdb->base_prefix));
+            }
+            foreach ($network_tables as $network_table) {
+                if (in_array($network_table, $all_tables, true)) {
+                    $merged[] = $network_table;
+                }
+            }
         }
 
         return $this->filter_tables_to_allowed_blogs(array_values(array_unique($merged)), $this->included_blog_ids);
@@ -740,6 +754,21 @@ class Rmmigrate_Multisite_Scope
      * @param int|null $blog_id
      * @return string[]
      */
+    /**
+     * Network-level tables that never belong to a single subsite archive.
+     *
+     * @return string[]
+     */
+    public static function network_only_table_names(string $base_prefix): array
+    {
+        $names = array();
+        foreach (array('blogs', 'blogmeta', 'site', 'sitemeta', 'signups', 'registration_log', 'blog_versions', 'sitecategories') as $suffix) {
+            $names[] = $base_prefix . $suffix;
+        }
+
+        return $names;
+    }
+
     private function get_subsite_tables(array $all_tables, ?int $blog_id = null): array
     {
         global $wpdb;
@@ -758,12 +787,10 @@ class Rmmigrate_Multisite_Scope
             }
         }
 
+        // Users/usermeta are row-filtered by the dumper to the site's own people. Network-only
+        // tables (blogs, site, sitemeta, blogmeta, signups, registration_log) are never part of a
+        // subsite archive: sitemeta holds network secrets and super-admin lists.
         $global = array($wpdb->users, $wpdb->usermeta);
-        if (is_multisite()) {
-            $global[] = $wpdb->blogs;
-            $global[] = $wpdb->site;
-            $global[] = $wpdb->sitemeta;
-        }
         if ($blog_id === 1 || !is_multisite()) {
             $global[] = $wpdb->options;
         }
@@ -772,6 +799,12 @@ class Rmmigrate_Multisite_Scope
             if (in_array($g, $all_tables, true) && !in_array($g, $include, true)) {
                 $include[] = $g;
             }
+        }
+        if (is_multisite()) {
+            $network_only = self::network_only_table_names((string) $base_prefix);
+            $include = array_values(array_filter($include, static function ($table) use ($network_only) {
+                return !in_array($table, $network_only, true);
+            }));
         }
 
         $include = array_values(array_unique($include));

@@ -16,7 +16,141 @@ class Rmmigrate_Manifest
 
     const SIGN_CONTEXT = 'manifest-sign';
 
-    const SEAL_CONTEXT = 'rmmigrate-site-seal-v1';
+    const SEAL_CONTEXT = 'rmmigrate-site-seal-v2';
+
+    /** Network option holding the per-install archive seal key (hex, 32 random bytes). */
+    const SEAL_KEY_OPTION = 'rmmigrate_archive_seal_key';
+
+    /**
+     * Network option with earlier seal keys of this network (newest first). They only verify
+     * seals, never sign: a full network restore brings the key of the restored dump back, and
+     * archives sealed with the key that was current before the restore must keep verifying.
+     */
+    const SEAL_KEYRING_OPTION = 'rmmigrate_archive_seal_keyring';
+
+    /** Earlier keys kept for verification, besides the current one. */
+    const SEAL_KEYRING_MAX = 5;
+
+    /** @var string */
+    private static $seal_key_cache = '';
+
+    /**
+     * Per-install secret used to seal and sign manifests.
+     *
+     * It is random and lives only in the network options, so unlike wp_salt() it cannot be
+     * recomputed from a leaked wp-config.php, and subsite-scoped archives (which never
+     * contain sitemeta) cannot carry it to a site administrator.
+     */
+    public static function seal_key(): string
+    {
+        if (self::$seal_key_cache !== '') {
+            return self::$seal_key_cache;
+        }
+        $valid = static function ($value): bool {
+            return is_string($value) && preg_match('/^[a-f0-9]{64}$/', $value) === 1;
+        };
+        $stored = function_exists('get_site_option') ? get_site_option(self::SEAL_KEY_OPTION, '') : '';
+        if (!$valid($stored)) {
+            $fresh = bin2hex(random_bytes(32));
+            $added = function_exists('add_site_option') && add_site_option(self::SEAL_KEY_OPTION, $fresh);
+            $stored = $added ? $fresh : (function_exists('get_site_option') ? get_site_option(self::SEAL_KEY_OPTION, '') : '');
+            if (!$valid($stored)) {
+                // Concurrent first use lost the race without a readable winner, or no options API.
+                $stored = $fresh;
+                if (function_exists('update_site_option')) {
+                    update_site_option(self::SEAL_KEY_OPTION, $fresh);
+                }
+            }
+        }
+        self::$seal_key_cache = (string) $stored;
+
+        return self::$seal_key_cache;
+    }
+
+    /**
+     * Test/rotation hook: forget the cached key (next call re-reads the option).
+     */
+    public static function reset_seal_key_cache(): void
+    {
+        self::$seal_key_cache = '';
+    }
+
+    private static function is_seal_key($value): bool
+    {
+        return is_string($value) && preg_match('/^[a-f0-9]{64}$/', $value) === 1;
+    }
+
+    /**
+     * Keys a seal or install token may verify against: the current key first, then the
+     * keyring. Callers must never hand these to a browser, a log or an archive.
+     *
+     * @return string[]
+     */
+    public static function verification_keys(): array
+    {
+        $keys = array(self::seal_key());
+        $ring = function_exists('get_site_option') ? get_site_option(self::SEAL_KEYRING_OPTION, array()) : array();
+        foreach (is_array($ring) ? $ring : array() as $key) {
+            if (count($keys) > self::SEAL_KEYRING_MAX) {
+                break;
+            }
+            if (self::is_seal_key($key) && !in_array($key, $keys, true)) {
+                $keys[] = $key;
+            }
+        }
+
+        return $keys;
+    }
+
+    private static function forget_cached_seal_options(): void
+    {
+        if (!function_exists('wp_cache_delete')) {
+            return;
+        }
+        wp_cache_delete('alloptions', 'options');
+        wp_cache_delete('notoptions', 'options');
+        foreach (array(self::SEAL_KEY_OPTION, self::SEAL_KEYRING_OPTION) as $option) {
+            wp_cache_delete($option, 'options');
+            if (function_exists('is_multisite') && is_multisite() && function_exists('get_current_network_id')) {
+                wp_cache_delete(get_current_network_id() . ':' . $option, 'site-options');
+            }
+        }
+        if (function_exists('is_multisite') && is_multisite() && function_exists('get_current_network_id')) {
+            wp_cache_delete(get_current_network_id() . ':notoptions', 'site-options');
+        }
+    }
+
+    /**
+     * After a database import replaced the network options: keep signing with the key that was
+     * current before the import ($before[0], from verification_keys()), and keep the imported
+     * key plus every earlier key for verification only. Without this, archives made after the
+     * restored snapshot stop verifying and their owners lose access to them.
+     *
+     * @param string[] $before
+     */
+    public static function restore_seal_keys_after_import(array $before): void
+    {
+        $before = array_values(array_filter($before, static function ($key): bool {
+            return self::is_seal_key($key);
+        }));
+        if ($before === array() || !function_exists('get_site_option') || !function_exists('update_site_option')) {
+            return;
+        }
+        self::forget_cached_seal_options();
+        $imported_key = get_site_option(self::SEAL_KEY_OPTION, '');
+        $imported_ring = get_site_option(self::SEAL_KEYRING_OPTION, array());
+        $current = $before[0];
+        $ring = array();
+        foreach (array_merge(array($imported_key), array_slice($before, 1), is_array($imported_ring) ? $imported_ring : array()) as $key) {
+            if (self::is_seal_key($key) && $key !== $current && !in_array($key, $ring, true)) {
+                $ring[] = $key;
+            }
+        }
+        update_site_option(self::SEAL_KEY_OPTION, $current);
+        update_site_option(self::SEAL_KEYRING_OPTION, array_slice($ring, 0, self::SEAL_KEYRING_MAX));
+        self::forget_cached_seal_options();
+        self::reset_seal_key_cache();
+    }
 
     /**
      * @return array<string,mixed>
@@ -80,6 +214,10 @@ class Rmmigrate_Manifest
             $manifest = array(
                 'plugin'         => 'multisite-migrate',
                 'plugin_version' => RMMIGRATE_VERSION,
+                // database.sql values are written without $wpdb placeholder escapes (see Snap_DB::escape_dump_string).
+                'sql_placeholder_safe' => true,
+                // Legacy ms-files networks serve subsite media from <site>/files/ (blogs.dir).
+                'ms_files_rewriting' => is_multisite() && function_exists('get_site_option') && (bool) get_site_option('ms_files_rewriting'),
                 'created_at'     => gmdate('c'),
                 'include_wp_core'    => (bool) $include_wp_core,
                 'has_wp_core_files'  => false,
@@ -109,7 +247,9 @@ class Rmmigrate_Manifest
                 'included_blogs' => $job->get_included_blogs(),
                 'archive_file'   => $zip_name,
                 'database_sha256' => self::database_digest($job),
-                'root_files'     => self::root_files_list(),
+                // Subsite-scoped archives never carry wp-config.php / .htaccess / web.config.
+                'root_files'     => $job_scope === Rmmigrate_Multisite_Scope::SCOPE_SUBSITE ? array() : self::root_files_list(),
+                'restricted_export' => !empty($progress['restricted_export']) || !empty($progress['init']['restricted_export']),
                 'rmmigrate_edition_tier' => apply_filters('rmmigrate_manifest_tier', 'free'),
                 'sql_import_transactions'        => Rmmigrate_Engine_Config::sql_import_transactions(),
                 'post_import_search_replace'     => Rmmigrate_Engine_Config::post_import_search_replace(),
@@ -333,11 +473,14 @@ class Rmmigrate_Manifest
             switch_to_blog($blog_id);
             try {
                 $details = get_blog_details($blog_id);
+                $uploads = function_exists('wp_upload_dir') ? wp_upload_dir(null, false) : array();
                 $blogs[] = array(
                     'blog_id'  => $blog_id,
                     'site_url' => site_url(),
                     'home_url' => home_url(),
                     'path'     => is_object($details) ? (string) ($details->path ?? '/') : '/',
+                    // Lets a standalone extract rewrite media URLs exactly (custom upload paths, CDN-less).
+                    'upload_baseurl' => is_array($uploads) ? (string) ($uploads['baseurl'] ?? '') : '',
                 );
             } finally {
                 restore_current_blog();
@@ -364,10 +507,24 @@ class Rmmigrate_Manifest
     /**
      * @param array<string,mixed> $manifest
      */
-    public static function install_token(string $archive_name, array $manifest): string
+    public static function install_token(string $archive_name, array $manifest, string $key = ''): string
     {
         $unsigned_json = self::unsigned_json($manifest);
-        return hash_hmac('sha256', $archive_name . '|' . $unsigned_json, wp_salt('auth'));
+        return hash_hmac('sha256', $archive_name . '|' . $unsigned_json, $key !== '' ? $key : self::seal_key());
+    }
+
+    /**
+     * True when $install_token was issued by this network with its current or an earlier key.
+     */
+    private static function install_token_matches(string $archive_name, array $manifest, string $install_token): bool
+    {
+        $matched = false;
+        foreach (self::verification_keys() as $key) {
+            // No early exit: every key is compared.
+            $matched = hash_equals(self::install_token($archive_name, $manifest, $key), $install_token) || $matched;
+        }
+
+        return $matched;
     }
 
     /**
@@ -411,8 +568,7 @@ class Rmmigrate_Manifest
         }
 
         $unsigned_json = self::unsigned_json($manifest);
-        $expected_token = self::install_token($archive_name, $manifest);
-        if (!hash_equals($expected_token, $install_token)) {
+        if (!self::install_token_matches($archive_name, $manifest, $install_token)) {
             return false;
         }
 
@@ -455,15 +611,16 @@ class Rmmigrate_Manifest
 
     /**
      * Name-independent seal: proves the manifest was produced on this installation
-     * (keyed by the site's auth salt), even after the archive was renamed on upload.
+     * (keyed by the per-install seal key, never by wp-config.php salts), even after the
+     * archive was renamed on upload.
      *
      * @param array<string,mixed> $manifest
      */
-    public static function site_seal(array $manifest): string
+    public static function site_seal(array $manifest, string $key = ''): string
     {
         unset($manifest['site_seal']);
 
-        return hash_hmac('sha256', self::SEAL_CONTEXT . '|' . self::unsigned_json($manifest), wp_salt('auth'));
+        return hash_hmac('sha256', self::SEAL_CONTEXT . '|' . self::unsigned_json($manifest), $key !== '' ? $key : self::seal_key());
     }
 
     /**
@@ -476,7 +633,14 @@ class Rmmigrate_Manifest
             return false;
         }
 
-        return hash_equals(self::site_seal($manifest), strtolower($seal));
+        $seal = strtolower($seal);
+        $matched = false;
+        foreach (self::verification_keys() as $key) {
+            // Current key or an earlier key of this network (see restore_seal_keys_after_import()).
+            $matched = hash_equals(self::site_seal($manifest, $key), $seal) || $matched;
+        }
+
+        return $matched;
     }
 
     /**

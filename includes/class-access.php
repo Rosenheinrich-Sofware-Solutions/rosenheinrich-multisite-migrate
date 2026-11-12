@@ -10,7 +10,10 @@ if (!defined('ABSPATH')) {
  * Backups and restores are administrator operations: on multisite the whole
  * network is managed by super admins (manage_network) from Network Admin, and
  * on single-site installs by administrators (manage_options). Subsite
- * administrators with manage_options can back up and restore their own site.
+ * administrators with manage_options can back up, restore and delete backups of
+ * their own site. Archive download is limited to restricted exports they created
+ * (no wp-config.php, no network tables, no password hashes); importing uploaded
+ * archives and every other network-level operation requires a super admin.
  */
 class Rmmigrate_Access
 {
@@ -85,6 +88,21 @@ class Rmmigrate_Access
         return self::subsite_any_page_visible();
     }
 
+    /**
+     * An uploaded archive whose manifest does not carry this network's seal. Its scope and
+     * blog_id are whatever the file claims, so site administrators must not see, restore or
+     * delete it as "their" backup; super admins still can.
+     */
+    public static function is_unverified_import_job(Rmmigrate_Job $job): bool
+    {
+        if ((string) ($job->data['triggered_by'] ?? '') !== 'import') {
+            return false;
+        }
+        $progress = $job->get_progress();
+
+        return empty($progress['site_seal_verified']);
+    }
+
     public static function assert_subsite_restore_source(Rmmigrate_Job $source): void
     {
         if (!self::is_subsite_scoped_operation()) {
@@ -93,6 +111,7 @@ class Rmmigrate_Access
 
         if ($source->get_scope() !== Rmmigrate_Multisite_Scope::SCOPE_SUBSITE
             || $source->get_blog_id() !== get_current_blog_id()
+            || self::is_unverified_import_job($source)
         ) {
             // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Structured exception payload.
             throw Rmmigrate_Service_Exception::forbidden(
@@ -176,7 +195,7 @@ class Rmmigrate_Access
         }
 
         if (self::is_subsite_scoped_operation()) {
-            if ($job->get_scope() !== Rmmigrate_Multisite_Scope::SCOPE_SUBSITE) {
+            if ($job->get_scope() !== Rmmigrate_Multisite_Scope::SCOPE_SUBSITE || self::is_unverified_import_job($job)) {
                 return false;
             }
 
@@ -227,13 +246,25 @@ class Rmmigrate_Access
     }
 
     /**
+     * Actions a subsite administrator may run on their own site without network rights.
+     *
+     * @return string[]
+     */
+    public static function subsite_self_service_actions(): array
+    {
+        return array('backup_create', 'backup_restore', 'backup_delete', 'backup_download');
+    }
+
+    /**
      * Whether the user may act on the given blog.
      *
-     * Authorization is blog-scope only; `$action` is accepted for caller compatibility
-     * (e.g. backup_create) but does not select different capability rules yet.
+     * Super admins (or single-site administrators) may do everything. Subsite
+     * administrators only get the self-service actions, on their own blog; import of
+     * uploaded archives (`import_run`) and cloud management stay network-only.
+     * `backup_download` is further limited per job by {@see can_download_job()}.
      *
      * @param int    $blog_id Target blog ID.
-     * @param string $action  Caller action label (reserved).
+     * @param string $action  Action label (backup_create, backup_restore, ...).
      */
     public static function can(int $blog_id, string $action): bool
     {
@@ -250,9 +281,54 @@ class Rmmigrate_Access
         }
 
         if (self::is_subsite_scoped_operation()) {
-            return $blog_id === get_current_blog_id();
+            return $blog_id === get_current_blog_id()
+                && in_array($action, self::subsite_self_service_actions(), true);
         }
 
         return false;
+    }
+
+    /**
+     * Network-level plugin management (settings, MCP/OAuth, abilities, full admin UI).
+     */
+    public static function can_manage_plugin(): bool
+    {
+        if (is_multisite()) {
+            return current_user_can('manage_network');
+        }
+
+        return current_user_can('manage_options');
+    }
+
+    /**
+     * Whether the archive file of a job may leave the server for the current user.
+     *
+     * Users without network rights may only download restricted exports (created by a
+     * site administrator: subsite scope, no wp-config.php, no network tables, no password
+     * hashes) of their own site. Archives a super admin created stay with super admins.
+     */
+    public static function can_download_job(Rmmigrate_Job $job): bool
+    {
+        if (!is_multisite()) {
+            return current_user_can('manage_options');
+        }
+        if (self::is_super_admin()) {
+            return true;
+        }
+        if (!self::can_view_job($job) || !self::can((int) $job->get_blog_id(), 'backup_download')) {
+            return false;
+        }
+
+        return self::is_restricted_export_job($job);
+    }
+
+    public static function is_restricted_export_job(Rmmigrate_Job $job): bool
+    {
+        if ($job->get_scope() !== Rmmigrate_Multisite_Scope::SCOPE_SUBSITE) {
+            return false;
+        }
+        $progress = $job->get_progress();
+
+        return !empty($progress['restricted_export']) || !empty($progress['init']['restricted_export']);
     }
 }

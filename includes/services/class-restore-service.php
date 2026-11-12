@@ -342,6 +342,7 @@ final class Rmmigrate_Restore_Service
         $manifest = self::resolve_job_manifest($source, $archive_path);
         $topology = array();
         if (is_array($manifest)) {
+            $params = self::with_default_subsite_slot_topology($params, $manifest, $source);
             $topology = self::parse_topology($params, $manifest);
             if (is_array($topology['topology_error'] ?? null)) {
                 $topology_error = $topology['topology_error'];
@@ -384,6 +385,19 @@ final class Rmmigrate_Restore_Service
                 $manifest = $extract['manifest'];
                 $restore_type = $extract['restore_type'];
                 $migration_map = $extract['migration_map'];
+            }
+
+            if ($restore_type !== Rmmigrate_Job::RESTORE_TYPE_MIGRATION && self::is_foreign_subsite_on_single_site($manifest)) {
+                // A network subsite archive restored onto a single site: "same server" would keep the
+                // subsite's URL (another install) and lock this site out. It always takes over this URL.
+                $restore_type = Rmmigrate_Job::RESTORE_TYPE_MIGRATION;
+                $old_site = (string) ($manifest['site_url'] ?? '');
+                $old_home = (string) ($manifest['home_url'] ?? '');
+                $migration_map = array(
+                    'site_url' => array('old' => $old_site, 'new' => (string) site_url()),
+                    'home_url' => array('old' => $old_home !== '' ? $old_home : $old_site, 'new' => (string) home_url()),
+                    'blogs'    => array(),
+                );
             }
 
             if ($restore_type === Rmmigrate_Job::RESTORE_TYPE_MIGRATION) {
@@ -485,6 +499,11 @@ final class Rmmigrate_Restore_Service
             }
         }
 
+        if ($restore_type === Rmmigrate_Job::RESTORE_TYPE_MIGRATION && is_array($manifest)) {
+            // Subsite/extracted site → single site: media moves from uploads/sites/<id>/ to uploads/.
+            $migration_map = Rmmigrate_Migration_Preflight::with_standalone_upload_pairs($migration_map, $manifest, is_multisite());
+        }
+
         $archive_passphrase = (string) ($params['archive_passphrase'] ?? '');
         $create_options = array(
             'restore_type'         => $restore_type,
@@ -561,6 +580,47 @@ final class Rmmigrate_Restore_Service
      * @param array<string,mixed> $manifest
      * @return array<string,mixed>
      */
+    /**
+     * A subsite backup restored on the network it belongs to (its own safety snapshot,
+     * recovery point or a local backup) goes back into its own blog slot by default.
+     * Without this a super admin restoring or rolling back such a backup from the UI hit
+     * "Importing into an existing WordPress network is not supported yet" and had to pass
+     * topology_import=subsite_overwrite by hand.
+     *
+     * @param array<string,mixed> $params
+     * @param array<string,mixed> $manifest
+     * @return array<string,mixed>
+     */
+    public static function with_default_subsite_slot_topology(array $params, array $manifest, Rmmigrate_Job $source): array
+    {
+        $requested = sanitize_key((string) ($params['topology_import'] ?? 'auto'));
+        if (($requested !== '' && $requested !== 'auto') || !is_multisite()) {
+            return $params;
+        }
+        if ((string) ($params['restore_type'] ?? Rmmigrate_Job::RESTORE_TYPE_SAME_SERVER) !== Rmmigrate_Job::RESTORE_TYPE_SAME_SERVER) {
+            return $params;
+        }
+        if ((string) ($manifest['scope'] ?? '') !== Rmmigrate_Multisite_Scope::SCOPE_SUBSITE) {
+            return $params;
+        }
+        $blog_id = (int) ($manifest['blog_id'] ?? 0);
+        if ($blog_id <= 0 || $blog_id !== (int) $source->get_blog_id()) {
+            return $params;
+        }
+        // Uploaded archives only count as "from this network" when they carry its seal.
+        $uploaded = (string) ($source->data['triggered_by'] ?? '') === 'import';
+        if ($uploaded && !Rmmigrate_Manifest::verify_site_seal($manifest)) {
+            return $params;
+        }
+        if (function_exists('get_site') && !get_site($blog_id)) {
+            return $params;
+        }
+        $params['topology_import'] = 'subsite_overwrite';
+        $params['topology_target_blog_id'] = (string) $blog_id;
+
+        return $params;
+    }
+
     private static function parse_topology(array $params, array $manifest): array
     {
         if (!class_exists('Rmmigrate_Restore_Topology_Ui', false)) {
@@ -578,6 +638,21 @@ final class Rmmigrate_Restore_Service
             $manifest,
             Rmmigrate_Restore_Topology_Destination::probe_for_plugin()
         );
+    }
+
+    /**
+     * Subsite-scope archive from a multisite network, restored on a single-site install.
+     *
+     * @param array<string,mixed> $manifest
+     */
+    public static function is_foreign_subsite_on_single_site(array $manifest): bool
+    {
+        if (is_multisite() || empty($manifest['is_multisite'])) {
+            return false;
+        }
+
+        return (string) ($manifest['scope'] ?? '') === Rmmigrate_Multisite_Scope::SCOPE_SUBSITE
+            && trim((string) ($manifest['site_url'] ?? '')) !== '';
     }
 
     /**

@@ -18,6 +18,15 @@
     var running = false;
     var workerFailCount = 0;
     var maxWorkerFails = 8;
+    // Navigating away aborts in-flight requests; those are not worker failures. The job keeps
+    // running server-side (loopback or cron) and this page picks it up again on return.
+    var pageLeaving = false;
+    $(window).on('pagehide.mmBackupProgress beforeunload.mmBackupProgress', function () {
+        pageLeaving = true;
+    });
+    function isNavigationAbort(xhr) {
+        return pageLeaving || !!(xhr && xhr.status === 0 && xhr.statusText === 'abort');
+    }
     var stuckPolls = 0;
     var lastPollKey = '';
     var lastFailsafeAt = 0;
@@ -849,8 +858,8 @@
                 trackStuckProgress(response.data);
             }
             scheduleNextTick(false);
-        }).fail(function () {
-            if (!running) {
+        }).fail(function (xhr) {
+            if (!running || isNavigationAbort(xhr)) {
                 return;
             }
             statusPollFailCount++;
@@ -908,7 +917,7 @@
             trackStuckProgress(data);
             scheduleNextTick(false);
         }).fail(function (xhr) {
-            if (!running) {
+            if (!running || isNavigationAbort(xhr)) {
                 return;
             }
             workerFailCount++;

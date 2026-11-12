@@ -143,6 +143,10 @@ class Rmmigrate_DB_Dumper
      */
     private function detect_mode(array $tables): string
     {
+        // Restricted (site-admin) exports blank password hashes row by row; mysqldump cannot.
+        if ($this->is_restricted_export()) {
+            return 'php';
+        }
         $settings = Rmmigrate_Settings::get();
         $mode = $settings['db_mode'] ?? 'auto';
 
@@ -538,7 +542,7 @@ class Rmmigrate_DB_Dumper
         $db = $this->job->get_progress()['database'] ?? array();
         $data_start = (int) ($db['mysqldump_data_start_bytes'] ?? 0);
 
-        if ($index === 0 && empty($db['mysqldump_data_mode']) && $this->can_mysqldump_data_bulk($tables) && !$this->should_exclude_revisions()) {
+        if ($index === 0 && empty($db['mysqldump_data_mode']) && $this->can_mysqldump_data_bulk($tables) && !$this->has_row_filters()) {
             return $this->run_mysqldump_data_bulk($tables, $total, $budget_sec, $data_start);
         }
 
@@ -547,8 +551,8 @@ class Rmmigrate_DB_Dumper
             $batch_size = $this->initial_mysqldump_data_batch_size($tables, $index);
         }
         $batch_size = min($batch_size, $total - $index);
-        // Revision filters need per-table --where; never batch those tables.
-        if ($this->should_exclude_revisions()) {
+        // Row filters (revisions, subsite user scoping) need per-table --where; never batch those tables.
+        if ($this->has_row_filters()) {
             $batch_size = 1;
         }
         $batch = array_slice($tables, $index, $batch_size);
@@ -573,7 +577,7 @@ class Rmmigrate_DB_Dumper
         $data_budget = max(1, min($budget_sec, self::MYSQLDUMP_DATA_BATCH_BUDGET_SEC));
         $where = '';
         if (count($batch) === 1) {
-            $where = $this->revision_exclude_sql_clause($batch[0]);
+            $where = $this->row_filter_sql_clause($batch[0]);
         }
         $db_host = $this->parse_db_host();
         $result = $this->stream_mysqldump_pass(
@@ -1423,7 +1427,7 @@ class Rmmigrate_DB_Dumper
                 }
             }
             $order_cols = implode(',', array_map(array('Rmmigrate_Snap_DB', 'quote_identifier'), $pk_cols));
-            $rev = $this->revision_exclude_sql_clause($table);
+            $rev = $this->row_filter_sql_clause($table);
             if ($rev !== '') {
                 if ($where === '') {
                     $where = 'WHERE (' . $rev . ')';
@@ -1435,7 +1439,7 @@ class Rmmigrate_DB_Dumper
         } else {
             // Tables without PKs use integer offset pagination.
             $offset = (int) $table_rows_done;
-            $rev = $this->revision_exclude_sql_clause($table);
+            $rev = $this->row_filter_sql_clause($table);
             $rev_sql = $rev !== '' ? ' WHERE (' . $rev . ')' : '';
             // Prefer scalar/indexed cols; TEXT/BLOB in ORDER BY is expensive and can fail.
             // No-PK + concurrent writes can still skip/dupe rows — PK tables are safer.
@@ -1482,8 +1486,14 @@ class Rmmigrate_DB_Dumper
         $has_rows = false;
         $current_sql_bytes = (int) ($db['sql_bytes_written'] ?? 0);
 
+        $blank_cols = $this->restricted_blank_columns($table);
         while ($row = Rmmigrate_Snap_DB::fetch_assoc($result)) {
             $has_rows = true;
+            foreach ($blank_cols as $blank_col) {
+                if (array_key_exists($blank_col, $row)) {
+                    $row[$blank_col] = '';
+                }
+            }
             if (empty($cols)) {
                 $cols = array_keys($row);
             }
@@ -2433,6 +2443,123 @@ class Rmmigrate_DB_Dumper
         $progress = $this->job->get_progress();
 
         return !empty($progress['exclude_revisions']);
+    }
+
+    /**
+     * Subsite-scoped export on a multisite network (users/usermeta limited to the site's people).
+     */
+    private function is_subsite_scoped_export(): bool
+    {
+        return function_exists('is_multisite') && is_multisite()
+            && (string) ($this->job->data['scope'] ?? '') === Rmmigrate_Multisite_Scope::SCOPE_SUBSITE;
+    }
+
+    /**
+     * Export started by a user without network rights: never carries password hashes.
+     */
+    private function is_restricted_export(): bool
+    {
+        $progress = $this->job->get_progress();
+
+        return !empty($progress['restricted_export']) || !empty($progress['init']['restricted_export']);
+    }
+
+    private function has_row_filters(): bool
+    {
+        return $this->should_exclude_revisions() || $this->is_subsite_scoped_export();
+    }
+
+    /**
+     * Combined per-table row predicate (no WHERE keyword), or '' for a full table.
+     */
+    private function row_filter_sql_clause(string $table): string
+    {
+        $parts = array();
+        $rev = $this->revision_exclude_sql_clause($table);
+        if ($rev !== '') {
+            $parts[] = $rev;
+        }
+        $users = $this->subsite_user_scope_sql_clause($table);
+        if ($users !== '') {
+            $parts[] = $users;
+        }
+        if ($parts === array()) {
+            return '';
+        }
+        if (count($parts) === 1) {
+            return $parts[0];
+        }
+
+        return '(' . implode(') AND (', $parts) . ')';
+    }
+
+    /**
+     * Columns blanked on export for restricted (site-admin) exports.
+     *
+     * @return string[]
+     */
+    private function restricted_blank_columns(string $table): array
+    {
+        if (!$this->is_restricted_export()) {
+            return array();
+        }
+        global $wpdb;
+        if ($table === $wpdb->base_prefix . 'users') {
+            return array('user_pass', 'user_activation_key');
+        }
+
+        return array();
+    }
+
+    /**
+     * Limit network users/usermeta in a subsite export to the site's members and post authors,
+     * and drop other sites' role keys and session tokens.
+     */
+    private function subsite_user_scope_sql_clause(string $table): string
+    {
+        if (!$this->is_subsite_scoped_export()) {
+            return '';
+        }
+        global $wpdb;
+        $base = (string) $wpdb->base_prefix;
+
+        return self::build_subsite_user_scope_sql_clause($table, $base, (int) $this->job->get_blog_id());
+    }
+
+    /**
+     * Pure helper (unit-tested): row predicate for users/usermeta in a subsite export.
+     */
+    public static function build_subsite_user_scope_sql_clause(string $table, string $base_prefix, int $blog_id): string
+    {
+        if ($blog_id <= 0 || $base_prefix === '') {
+            return '';
+        }
+        $users = $base_prefix . 'users';
+        $usermeta = $base_prefix . 'usermeta';
+        if ($table !== $users && $table !== $usermeta) {
+            return '';
+        }
+        $blog_prefix = $blog_id > 1 ? $base_prefix . $blog_id . '_' : $base_prefix;
+        $usermeta_q = Rmmigrate_Snap_DB::quote_identifier($usermeta);
+        $posts_q = Rmmigrate_Snap_DB::quote_identifier($blog_prefix . 'posts');
+        $cap_key = str_replace(array('\\', "'"), array('\\\\', "\\'"), $blog_prefix . 'capabilities');
+        $members = "SELECT `user_id` FROM {$usermeta_q} WHERE `meta_key` = '{$cap_key}'";
+        $authors = "SELECT DISTINCT `post_author` FROM {$posts_q}";
+        if ($table === $users) {
+            return "`ID` IN ({$members}) OR `ID` IN ({$authors})";
+        }
+        $base_re = preg_quote($base_prefix, '/');
+        $base_re = str_replace(array('\\', "'"), array('\\\\', "\\'"), $base_re);
+        $own_like = str_replace(array('\\', '_', '%', "'"), array('\\\\', '\\_', '\\%', "\\'"), $blog_prefix);
+        // Base-prefixed keys (capabilities, user_level, user-settings, ...) belong to the main site.
+        $base_like = str_replace(array('\\', '_', '%', "'"), array('\\\\', '\\_', '\\%', "\\'"), $base_prefix);
+        $other_blogs = $blog_id > 1
+            ? "(`meta_key` LIKE '{$base_like}%' AND `meta_key` NOT LIKE '{$own_like}%')"
+            : "`meta_key` REGEXP '^{$base_re}[0-9]+_'";
+
+        return "(`user_id` IN ({$members}) OR `user_id` IN ({$authors}))"
+            . " AND `meta_key` <> 'session_tokens'"
+            . " AND NOT {$other_blogs}";
     }
 
     /**

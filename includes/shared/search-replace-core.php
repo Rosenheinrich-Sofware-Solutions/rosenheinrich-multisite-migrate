@@ -53,6 +53,34 @@ class Rmmigrate_Search_Replace_Core
             }
         }
 
+        // Extra literal pairs (e.g. subsite media → standalone uploads root). URL pairs get the
+        // usual scheme/slash variants; path-only pairs are added as-is.
+        if (!empty($migration_map['extra_pairs']) && is_array($migration_map['extra_pairs'])) {
+            foreach ($migration_map['extra_pairs'] as $extra) {
+                if (!is_array($extra)) {
+                    continue;
+                }
+                $old = (string) ($extra['old'] ?? '');
+                $new = (string) ($extra['new'] ?? '');
+                if ($old === '' || $old === $new) {
+                    continue;
+                }
+                if (preg_match('#^https?://#i', $old) === 1 && preg_match('#^https?://#i', $new) === 1) {
+                    // Keep the given trailing slash (…/sites/2/ must never match …/sites/20/).
+                    $this->add_pair($old, $new);
+                    foreach (array('http', 'https') as $scheme) {
+                        $this->add_pair(
+                            (string) preg_replace('#^https?://#i', $scheme . '://', $old),
+                            (string) preg_replace('#^https?://#i', $scheme . '://', $new)
+                        );
+                    }
+                } else {
+                    $this->add_pair($old, $new);
+                    $this->add_pair(str_replace('/', '\\/', $old), str_replace('/', '\\/', $new));
+                }
+            }
+        }
+
         $this->add_json_escaped_url_variants();
     }
 
@@ -339,6 +367,11 @@ class Rmmigrate_Search_Replace_Core
     private function should_skip_prefix_extension_match(string $original, int $pos, string $search, string $replace): bool
     {
         if ($search === '' || $search === $replace) {
+            return false;
+        }
+        // A search that ends in a path separator already has a clean boundary
+        // (…/uploads/sites/2/ followed by 2026/… is the intended match).
+        if (substr($search, -1) === '/') {
             return false;
         }
         $after = $pos + strlen($search);

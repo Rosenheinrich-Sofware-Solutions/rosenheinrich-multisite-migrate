@@ -275,6 +275,58 @@ final class Rmmigrate_Plugin
     }
 
     /**
+     * Random, per-installation folder name for files that must not be reachable by URL on servers
+     * that ignore .htaccess (nginx). Empty when it cannot be stored (callers keep the legacy path).
+     */
+    public static function storage_token(): string
+    {
+        if (!function_exists('get_site_option') || !function_exists('update_site_option')) {
+            return '';
+        }
+        $token = (string) get_site_option('rmmigrate_storage_token', '');
+        if (preg_match('/^[a-f0-9]{32}$/', $token)) {
+            return $token;
+        }
+        try {
+            $token = bin2hex(random_bytes(16));
+        } catch (Throwable $e) {
+            return '';
+        }
+        update_site_option('rmmigrate_storage_token', $token);
+        $stored = (string) get_site_option('rmmigrate_storage_token', '');
+
+        return preg_match('/^[a-f0-9]{32}$/', $stored) ? $stored : '';
+    }
+
+    /**
+     * backups_dir()/$sub/<storage_token> (created with protection files), or backups_dir()/$sub.
+     */
+    public static function private_storage_dir(string $sub): string
+    {
+        $base = self::backups_dir() . '/' . $sub;
+        if (defined('RMMIGRATE_UNIT_TEST') && RMMIGRATE_UNIT_TEST && empty($GLOBALS['rmmigrate_test_private_storage'])) {
+            // Unit tests address the flat legacy layout unless they opt in.
+            return $base;
+        }
+        $token = self::storage_token();
+        if ($token === '') {
+            return $base;
+        }
+        $dir = $base . '/' . $token;
+        if (!Rmmigrate_Filesystem::is_dir($dir)) {
+            if (!Rmmigrate_Filesystem::ensure_directory($dir)) {
+                return $base;
+            }
+            if (!class_exists('Rmmigrate_Backup_Storage_Protection', false)) {
+                require_once RMMIGRATE_PATH . 'includes/class-backup-storage-protection.php';
+            }
+            Rmmigrate_Backup_Storage_Protection::ensure_protection_files($dir);
+        }
+
+        return $dir;
+    }
+
+    /**
      * Ensure backup root exists with protection files.
      */
     public static function ensure_backup_root(): bool
@@ -283,7 +335,8 @@ final class Rmmigrate_Plugin
         if (!Rmmigrate_Filesystem::ensure_directory($dir)) {
             return false;
         }
-        foreach (array('logs', 'jobs', 'imports', 'recover') as $sub) {
+        $subdirs = array('logs', 'jobs', 'imports', 'recover');
+        foreach ($subdirs as $sub) {
             if (!Rmmigrate_Filesystem::ensure_directory($dir . '/' . $sub)) {
                 return false;
             }
@@ -291,6 +344,12 @@ final class Rmmigrate_Plugin
 
         if (!class_exists('Rmmigrate_Backup_Storage_Protection', false)) {
             require_once RMMIGRATE_PATH . 'includes/class-backup-storage-protection.php';
+        }
+        // .htaccess/web.config only help Apache/IIS. index.php in every folder at least stops
+        // listings on nginx; secrets (logs, wp-config copies) additionally live under a random
+        // folder name (storage_token) and archives under random job folders / file names.
+        foreach ($subdirs as $sub) {
+            Rmmigrate_Backup_Storage_Protection::ensure_protection_files($dir . '/' . $sub);
         }
         if (!Rmmigrate_Backup_Storage_Protection::ensure_protection_files($dir)) {
             if (class_exists('Rmmigrate_Logger', false)) {

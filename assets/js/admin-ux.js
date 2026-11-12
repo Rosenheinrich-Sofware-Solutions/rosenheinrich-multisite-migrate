@@ -121,6 +121,38 @@
         });
     });
 
+    // Retention review notice after saving new keep counts: apply the rules now, on request only.
+    $(document).on('click', '.mm-retention-apply', function (e) {
+        e.preventDefault();
+        if (typeof rmmigrateAdmin === 'undefined' || !window.rmmigrateAdminUI) {
+            return;
+        }
+        var $btn = $(this);
+        if ($btn.prop('disabled')) {
+            return;
+        }
+        var $notice = $btn.closest('.mm-notice-card, .mm-banner');
+        rmmigrateAdminUI.confirm(rmmigrateAdminUI.i18n('retentionApplyConfirm', 'Delete these backups now? This cannot be undone.'), function () {
+            $btn.prop('disabled', true);
+            $.post(rmmigrateAdmin.ajaxUrl, {
+                action: 'rmmigrate_prune',
+                nonce: rmmigrateAdmin.nonce
+            }).done(function (res) {
+                if (res && res.success) {
+                    rmmigrateAdminUI.toast((res.data && res.data.message) ? res.data.message : rmmigrateAdminUI.i18n('done', 'Done'), 'success');
+                    fadeOutBannerNotice($notice);
+                    return;
+                }
+                $btn.prop('disabled', false);
+                rmmigrateAdminUI.toast((res && res.data && res.data.message) ? res.data.message : rmmigrateAdminUI.i18n('requestFailed', 'Request failed'), 'error');
+            }).fail(function (xhr) {
+                $btn.prop('disabled', false);
+                rmmigrateAdminUI.reportTransportFail('rmmigrate_prune', xhr, 'retention');
+                rmmigrateAdminUI.toast(rmmigrateAdminUI.ajaxErrorMessage(xhr), 'error');
+            });
+        });
+    });
+
     $(document).on('click', '.mm-dismiss-verify-restore', function (e) {
         e.preventDefault();
         e.stopPropagation();

@@ -49,6 +49,15 @@ class Rmmigrate_Restore_Topology_Db_Action
             // The caller never receives $context on failure, so a blog row allocated for a new
             // target URL would leak into wp_blogs. Revert it before rethrowing.
             self::revert_subsite_on_network_allocation($pdo, $context);
+            // Same for tables already renamed aside: put them back now.
+            $quarantine = is_array($context['network_quarantine'] ?? null) ? $context['network_quarantine'] : array();
+            if (!empty($quarantine['live_to_quarantine']) && class_exists('Rmmigrate_Network_Restore_Quarantine', false)) {
+                try {
+                    Rmmigrate_Network_Restore_Quarantine::rollback($pdo, $quarantine, array());
+                } catch (Throwable $rollback_error) {
+                    rmmigrate_shared_log_best_effort_failure($rollback_error);
+                }
+            }
             throw $e;
         } finally {
             if ($is_mysql) {
@@ -271,7 +280,14 @@ class Rmmigrate_Restore_Topology_Db_Action
                     (string) $topology_gate['message']
                 );
             }
-            $rewrite = self::subsite_on_network_sql_prefix_rewrite($base_prefix, $source_blog_id, $target_blog_id);
+            // The dump names tables with the SOURCE network's base prefix (wpms_2_posts), which may
+            // differ from this network's (wpnew_): rewrite from the archive's prefix, not ours.
+            $source_base_prefix = Rmmigrate_Restore_Topology_Manifest::source_base_prefix($manifest);
+            $rewrite = self::subsite_on_network_sql_prefix_rewrite($base_prefix, $source_blog_id, $target_blog_id, $source_base_prefix);
+            $table_map = self::subsite_on_network_global_table_map($source_base_prefix, $base_prefix);
+            if ($table_map !== array()) {
+                $context['sql_table_name_map'] = $table_map;
+            }
             $manifest_class = 'Rmmigrate_Restore_Topology_Manifest';
             if ($rewrite === null && $target_blog_id > 0 && !$manifest_class::restore_as_multisite($manifest)) {
                 $from = (string) ($manifest['db_prefix'] ?? $base_prefix);
@@ -335,7 +351,11 @@ class Rmmigrate_Restore_Topology_Db_Action
                         __('Subsite backups cannot target the network main site (blog 1). Choose another blog slot or use a network-scope backup.', 'rosenheinrich-multisite-migrate')
                     );
                 }
-                self::drop_prefixed_tables($pdo, $target_prefix, $base_prefix, $target_blog_id);
+                self::drop_or_quarantine_tables(
+                    $pdo,
+                    self::collect_prefixed_tables($pdo, $target_prefix, $base_prefix, $target_blog_id),
+                    $context
+                );
             }
 
             return;
@@ -362,7 +382,11 @@ class Rmmigrate_Restore_Topology_Db_Action
                 $base_prefix = self::infer_base_prefix($target_prefix, $target_blog_id);
             }
             if ($db_action !== 'skip') {
-                self::drop_prefixed_tables($pdo, $target_prefix, $base_prefix, $target_blog_id);
+                self::drop_or_quarantine_tables(
+                    $pdo,
+                    self::collect_prefixed_tables($pdo, $target_prefix, $base_prefix, $target_blog_id),
+                    $context
+                );
             }
 
             return;
@@ -628,7 +652,7 @@ class Rmmigrate_Restore_Topology_Db_Action
      * @param array<string,mixed> $manifest
      * @param array<string,mixed> $context
      */
-    private static function drop_subsite_owned_manifest_tables(PDO $pdo, array $manifest, array $context): void
+    private static function drop_subsite_owned_manifest_tables(PDO $pdo, array $manifest, array &$context): void
     {
         $tables = $manifest['tables'] ?? array();
         if (!is_array($tables) || $tables === array()) {
@@ -642,14 +666,97 @@ class Rmmigrate_Restore_Topology_Db_Action
             $blog_id = 1;
         }
         $base_prefix = self::infer_base_prefix($blog_prefix, $blog_id);
+        // The destination probe describes the site the restore was started from (often the main
+        // site in Network Admin). The tables being replaced belong to the restore's target blog;
+        // without this they were never quarantined and a cancelled import could not put them back.
+        // The destination probe is the site the restore was started from (the main site in Network
+        // Admin); the backup's tables belong to the target / source blog. Quarantine those too, or a
+        // cancelled import cannot put them back. Only tables listed in the manifest are touched.
+        $owners = array($blog_id => $blog_prefix);
+        foreach (array((int) ($context['target_blog_id'] ?? 0), (int) ($manifest['blog_id'] ?? 0)) as $owner_id) {
+            if ($owner_id > 0 && !isset($owners[$owner_id])) {
+                $owners[$owner_id] = $owner_id > 1 ? $base_prefix . $owner_id . '_' : $base_prefix;
+            }
+        }
 
+        $owned = array();
         foreach ($tables as $table) {
             $table = (string) $table;
-            if ($table === '' || self::is_plugin_runtime_table($table) || !self::is_blog_owned_table($table, $blog_prefix, $base_prefix, $blog_id)) {
+            if ($table === '' || self::is_plugin_runtime_table($table)) {
                 continue;
             }
+            foreach ($owners as $owner_id => $owner_prefix) {
+                if (self::is_blog_owned_table($table, (string) $owner_prefix, $base_prefix, (int) $owner_id)) {
+                    $owned[] = $table;
+                    break;
+                }
+            }
+        }
+        self::drop_or_quarantine_tables($pdo, $owned, $context);
+    }
+
+    /**
+     * Replace tables before import: rename them aside (quarantine) when the caller enabled it,
+     * so a failed or cancelled import can put the site's tables back; otherwise drop them.
+     *
+     * @param string[]            $tables
+     * @param array<string,mixed> $context
+     */
+    private static function drop_or_quarantine_tables(PDO $pdo, array $tables, array &$context): void
+    {
+        $tables = array_values(array_filter(array_map('strval', $tables), static function (string $table): bool {
+            return $table !== '' && !self::is_plugin_runtime_table($table);
+        }));
+        if ($tables === array()) {
+            return;
+        }
+        $use_quarantine = !empty($context['network_quarantine']['enabled'])
+            && class_exists('Rmmigrate_Network_Restore_Quarantine', false);
+        if ($use_quarantine) {
+            $token = (string) ($context['network_quarantine']['token'] ?? '');
+            if ($token === '') {
+                $token = Rmmigrate_Network_Restore_Quarantine::make_token((int) ($context['job_id'] ?? 0));
+            }
+            self::merge_network_quarantine_state($pdo, $context, $tables, $token);
+
+            return;
+        }
+
+        foreach ($tables as $table) {
             $pdo->exec('DROP TABLE IF EXISTS `' . str_replace('`', '``', $table) . '`');
         }
+    }
+
+    /**
+     * Blog-owned tables under $prefix; never other blogs' wp_N_* tables or plugin job tables.
+     *
+     * @return string[]
+     */
+    private static function collect_prefixed_tables(PDO $pdo, string $prefix, string $base_prefix = '', int $blog_id = 0): array
+    {
+        if ($prefix === '') {
+            return array();
+        }
+
+        $tables = array();
+        foreach (self::list_database_tables($pdo) as $table) {
+            if (strpos($table, $prefix) !== 0) {
+                continue;
+            }
+            if ($base_prefix !== '') {
+                if (!self::is_blog_owned_table($table, $prefix, $base_prefix, $blog_id > 0 ? $blog_id : 1)) {
+                    continue;
+                }
+            } elseif (preg_match('/^' . preg_quote($prefix, '/') . '\d+_/', $table)) {
+                continue;
+            }
+            if (self::is_plugin_runtime_table($table)) {
+                continue;
+            }
+            $tables[] = $table;
+        }
+
+        return $tables;
     }
 
     /**
@@ -711,35 +818,6 @@ class Rmmigrate_Restore_Topology_Db_Action
         return true;
     }
 
-    private static function drop_prefixed_tables(PDO $pdo, string $prefix, string $base_prefix = '', int $blog_id = 0): int
-    {
-        if ($prefix === '') {
-            return 0;
-        }
-
-        $dropped = 0;
-        foreach (self::list_database_tables($pdo) as $table) {
-            if (strpos($table, $prefix) !== 0) {
-                continue;
-            }
-            if ($base_prefix !== '') {
-                if (!self::is_blog_owned_table($table, $prefix, $base_prefix, $blog_id > 0 ? $blog_id : 1)) {
-                    continue;
-                }
-            } elseif (preg_match('/^' . preg_quote($prefix, '/') . '\d+_/', $table)) {
-                // Guard: when prefix is the network base (wp_), never drop other blogs' tables.
-                continue;
-            }
-            if (self::is_plugin_runtime_table($table)) {
-                continue;
-            }
-            $pdo->exec('DROP TABLE IF EXISTS `' . str_replace('`', '``', $table) . '`');
-            $dropped++;
-        }
-
-        return $dropped;
-    }
-
     /**
      * @param array<string,mixed> $context
      * @param array<string,mixed> $manifest
@@ -760,18 +838,41 @@ class Rmmigrate_Restore_Topology_Db_Action
     public static function subsite_on_network_sql_prefix_rewrite(
         string $base_prefix,
         int $source_blog_id,
-        int $target_blog_id
+        int $target_blog_id,
+        string $source_base_prefix = ''
     ): ?array {
-        if ($source_blog_id <= 0 || $target_blog_id <= 0 || $source_blog_id === $target_blog_id) {
+        if ($source_base_prefix === '') {
+            $source_base_prefix = $base_prefix;
+        }
+        if ($source_blog_id <= 0 || $target_blog_id <= 0
+            || ($source_blog_id === $target_blog_id && $source_base_prefix === $base_prefix)) {
             return null;
         }
-        $from = self::blog_table_prefix($base_prefix, $source_blog_id);
+        $from = self::blog_table_prefix($source_base_prefix, $source_blog_id);
         $to = self::blog_table_prefix($base_prefix, $target_blog_id);
         if ($from === $to) {
             return null;
         }
 
         return array('from' => $from, 'to' => $to);
+    }
+
+    /**
+     * Network user tables of a subsite archive from a network with another base prefix
+     * (wpms_users) land in this network's live names (wpnew_users), where user merge expects them.
+     *
+     * @return array<string,string> source table => destination table
+     */
+    public static function subsite_on_network_global_table_map(string $source_base_prefix, string $base_prefix): array
+    {
+        if ($source_base_prefix === '' || $base_prefix === '' || $source_base_prefix === $base_prefix) {
+            return array();
+        }
+
+        return array(
+            $source_base_prefix . 'users'    => $base_prefix . 'users',
+            $source_base_prefix . 'usermeta' => $base_prefix . 'usermeta',
+        );
     }
 
     public static function resolve_blog_id_from_site_url(PDO $pdo, string $base_prefix, string $site_url): int

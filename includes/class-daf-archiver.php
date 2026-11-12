@@ -433,6 +433,10 @@ class Rmmigrate_Daf_Archiver
         }
 
         if ($file_index >= $total) {
+            if (!$this->realign_finalized_archive($daf_path, $byte_offset, $archive)) {
+                // The archive was restarted from its first entry; the next slice rebuilds it.
+                return false;
+            }
             self::verify_finalized_archive($daf_path, $byte_offset);
             $rel = Rmmigrate_Local_Storage::work_dir_rel($this->job) . basename($daf_path);
             $this->job->save_fields(array(
@@ -488,6 +492,7 @@ class Rmmigrate_Daf_Archiver
             );
         }
 
+        clearstatcache(true, $daf_path);
         $actual_size = (int) Rmmigrate_Filesystem::filesize($daf_path);
         if ($actual_size !== $byte_offset) {
             // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
@@ -505,6 +510,35 @@ class Rmmigrate_Daf_Archiver
                 esc_html__('DAF archive failed its integrity check (manifest missing). The backup may be incomplete — please try again.', 'rosenheinrich-multisite-migrate')
             );
         }
+    }
+
+    /**
+     * A finished archive must end exactly at the last byte this worker wrote. Bytes past that
+     * point (left by an interrupted or overlapping worker) are trimmed. A file that is shorter
+     * restarts the archive within the realign budget, so an interrupted backup resumes instead
+     * of failing its integrity check.
+     *
+     * @param array<string,mixed> $archive
+     */
+    private function realign_finalized_archive(string $daf_path, int $byte_offset, array $archive): bool
+    {
+        clearstatcache(true, $daf_path);
+        $actual_size = (int) Rmmigrate_Filesystem::filesize($daf_path);
+        if ($actual_size === $byte_offset) {
+            return true;
+        }
+        if ($actual_size > $byte_offset) {
+            Rmmigrate_Logger::log(sprintf(
+                'DAF archive has %d byte(s) past its last entry - trimming them before the integrity check.',
+                $actual_size - $byte_offset
+            ));
+            RMMIGRATE_IO::truncate_file($daf_path, $byte_offset);
+            clearstatcache(true, $daf_path);
+            return true;
+        }
+        $this->restart_archive($daf_path, $archive, $actual_size, $byte_offset);
+
+        return false;
     }
 
     /**
@@ -574,6 +608,9 @@ class Rmmigrate_Daf_Archiver
     private function build_queue(string $work_dir, array $files): array
     {
         $queue = array();
+        // Subsite-scoped archives never carry wp-config.php (DB credentials, salts) or server config.
+        $include_root_files = !($this->job instanceof Rmmigrate_Job)
+            || (string) ($this->job->data['scope'] ?? '') !== Rmmigrate_Multisite_Scope::SCOPE_SUBSITE;
         $sql_path = trailingslashit($work_dir) . 'database.sql';
         if (Rmmigrate_Filesystem::exists($sql_path)) {
             $queue[] = array('path' => $sql_path, 'archive' => 'database.sql');
@@ -583,15 +620,15 @@ class Rmmigrate_Daf_Archiver
             $queue[] = array('path' => $manifest_path, 'archive' => 'manifest.json');
         }
         $wp_config = ABSPATH . 'wp-config.php';
-        if (Rmmigrate_Filesystem::exists($wp_config)) {
+        if ($include_root_files && Rmmigrate_Filesystem::exists($wp_config)) {
             $queue[] = array('path' => $wp_config, 'archive' => 'files/wp-config.php');
         }
         $htaccess = ABSPATH . '.htaccess';
-        if (Rmmigrate_Filesystem::exists($htaccess)) {
+        if ($include_root_files && Rmmigrate_Filesystem::exists($htaccess)) {
             $queue[] = array('path' => $htaccess, 'archive' => 'files/.htaccess');
         }
         $web_config = ABSPATH . 'web.config';
-        if (Rmmigrate_Filesystem::exists($web_config)) {
+        if ($include_root_files && Rmmigrate_Filesystem::exists($web_config)) {
             $queue[] = array('path' => $web_config, 'archive' => 'files/web.config');
         }
         foreach ($files as $f) {

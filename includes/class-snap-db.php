@@ -119,7 +119,25 @@ class Rmmigrate_Snap_DB
             }
             return '0x' . bin2hex($binary);
         }
-        return "'" . esc_sql((string) $value) . "'";
+        return "'" . self::escape_dump_string((string) $value) . "'";
+    }
+
+    /**
+     * esc_sql() for SQL that is written to a file and replayed later.
+     *
+     * The esc_sql() function swaps every "%" for $wpdb's per-request placeholder hash and only
+     * that same request's query filter turns it back. A dump replayed in another request (every restore)
+     * would store "{64 hex}" instead of "%" (permalinks, "50% off", serialized lengths).
+     */
+    public static function escape_dump_string(string $value): string
+    {
+        global $wpdb;
+        $escaped = esc_sql($value);
+        if (is_object($wpdb) && method_exists($wpdb, 'remove_placeholder_escape')) {
+            $escaped = (string) $wpdb->remove_placeholder_escape($escaped);
+        }
+
+        return (string) $escaped;
     }
 
     /**
@@ -699,6 +717,29 @@ class Rmmigrate_Snap_DB
                 Rmmigrate_Job::STATUS_COMPLETE,
                 Rmmigrate_Job::JOB_TYPE_BACKUP,
                 Rmmigrate_Multisite_Scope::SCOPE_SUBSITE
+            ),
+            ARRAY_A
+        );
+
+        return is_array($rows) ? $rows : array();
+    }
+
+    /**
+     * Failed and cancelled backup rows, newest first (retention for unusable entries).
+     *
+     * @return array<int,array<string,mixed>>
+     */
+    public static function jobs_retention_failed_rows(): array
+    {
+        global $wpdb;
+        $table = self::jobs_table_sql();
+        // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- Plugin jobs table; identifier via quote_identifier(); values use prepare().
+        $rows = $wpdb->get_results(
+            $wpdb->prepare(
+                'SELECT id, created_at, updated_at FROM ' . $table . ' WHERE status IN (%d, %d) AND job_type = %s ORDER BY id DESC',
+                Rmmigrate_Job::STATUS_ERROR,
+                Rmmigrate_Job::STATUS_CANCELLED,
+                Rmmigrate_Job::JOB_TYPE_BACKUP
             ),
             ARRAY_A
         );

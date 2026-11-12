@@ -210,8 +210,22 @@ final class Rmmigrate_Job_Preflight
 
         $low_exec = ($max_exec > 0 && $max_exec < 120);
         $low_mem = ($mem_bytes > 0 && $mem_bytes < 128 * 1024 * 1024);
+        // DISABLE_WP_CRON with a working system cron is a healthy setup, not a constraint.
+        $system_cron = array_key_exists('system_cron', $context)
+            ? (bool) $context['system_cron']
+            : (class_exists('Rmmigrate_Hosting_Detection') && Rmmigrate_Hosting_Detection::system_cron_detected($disable_wp_cron));
+        $system_cron = $disable_wp_cron && $system_cron;
+        $system_cron_hint = __('You can close this tab: the job continues through the system cron and may pause until its next run. Keep the tab open to follow the progress live.', 'rosenheinrich-multisite-migrate');
 
-        if ($low_exec || $low_mem || $disable_wp_cron) {
+        if ($system_cron && !$low_exec && !$low_mem) {
+            $checks[] = array(
+                'id'     => 'runtime',
+                'label'  => __('PHP runtime & background worker', 'rosenheinrich-multisite-migrate'),
+                'status' => 'green',
+                'detail' => __('WP-Cron is triggered by a system cron (DISABLE_WP_CRON is set), so the job keeps running in the background.', 'rosenheinrich-multisite-migrate'),
+                'hint'   => $system_cron_hint,
+            );
+        } elseif ($low_exec || $low_mem || $disable_wp_cron) {
             $runtime_notes = array();
             if ($low_exec) {
                 $runtime_notes[] = sprintf(
@@ -227,7 +241,7 @@ final class Rmmigrate_Job_Preflight
                     $raw_mem
                 );
             }
-            if ($disable_wp_cron) {
+            if ($disable_wp_cron && !$system_cron) {
                 $runtime_notes[] = __('DISABLE_WP_CRON is active', 'rosenheinrich-multisite-migrate');
             }
             $checks[] = array(
@@ -239,7 +253,7 @@ final class Rmmigrate_Job_Preflight
                     __('This server has tight limits (%s). The job runs in small steps that can resume after an interruption.', 'rosenheinrich-multisite-migrate'),
                     implode(', ', $runtime_notes)
                 ),
-                'hint'   => __('Keep this browser tab open until the job finishes.', 'rosenheinrich-multisite-migrate'),
+                'hint'   => $system_cron ? $system_cron_hint : __('Keep this browser tab open until the job finishes.', 'rosenheinrich-multisite-migrate'),
             );
         } else {
             $checks[] = array(

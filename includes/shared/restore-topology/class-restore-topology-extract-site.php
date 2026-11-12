@@ -198,11 +198,157 @@ class Rmmigrate_Restore_Topology_Extract_Site
     }
 
     /**
+     * Where a subsite's media lands on a standalone (single-site) install.
+     *
+     * A single site reads attachments from uploads/<YYYY>/..., so the subsite's own tree
+     * (uploads/sites/<id>/... or legacy blogs.dir/<id>/files/...) moves up to uploads/.
+     * Every other path is returned unchanged.
+     *
+     * @param string $rel Path relative to wp-content/ (may use \ or /).
+     */
+    public static function standalone_upload_rel(string $rel, int $blog_id): string
+    {
+        $norm = ltrim(str_replace('\\', '/', $rel), '/');
+        if ($blog_id <= 1) {
+            return $norm;
+        }
+        foreach (array('uploads/sites/' . $blog_id . '/', 'blogs.dir/' . $blog_id . '/files/') as $prefix) {
+            if (strpos($norm, $prefix) === 0) {
+                return 'uploads/' . substr($norm, strlen($prefix));
+            }
+        }
+
+        return $norm;
+    }
+
+    /**
+     * URL pairs that move a subsite's media URLs to the standalone uploads root.
+     *
+     * Runs in the same non-cascading pass as the site URL pair; the longer upload pair wins,
+     * so <old site>/wp-content/uploads/sites/<id>/x becomes <new site>/wp-content/uploads/x.
+     *
+     * @param array<string,mixed> $manifest Source (or demoted) manifest.
+     * @return array<int,array{old:string,new:string}>
+     */
+    public static function standalone_upload_url_pairs(array $manifest, int $blog_id, string $new_site_url): array
+    {
+        $new_site_url = rtrim($new_site_url, '/');
+        if ($blog_id <= 1 || $new_site_url === '') {
+            return array();
+        }
+        $entry = self::blog_entry($manifest, $blog_id);
+        $olds = array();
+        if (is_array($entry) && (string) ($entry['upload_baseurl'] ?? '') !== '') {
+            $olds[] = (string) $entry['upload_baseurl'];
+        }
+        foreach (array(
+            is_array($entry) ? (string) ($entry['site_url'] ?? '') : '',
+            (string) ($manifest['site_url'] ?? ''),
+            (string) ($manifest['network_site_url'] ?? ''),
+        ) as $site) {
+            if ($site !== '') {
+                $olds[] = rtrim($site, '/') . '/wp-content/uploads/sites/' . $blog_id;
+            }
+        }
+        // Legacy ms-files networks (pre-3.5 installs) serve blogs.dir/<id>/files/ as <site>/files/.
+        $subsite_url = is_array($entry) ? rtrim((string) ($entry['site_url'] ?? ''), '/') : '';
+        if ($subsite_url !== '' && !empty($manifest['ms_files_rewriting'])) {
+            $olds[] = $subsite_url . '/files';
+        }
+        $new_base = $new_site_url . '/wp-content/uploads';
+        $pairs = array();
+        $seen = array();
+        foreach ($olds as $old) {
+            $old = rtrim($old, '/');
+            if ($old === '' || isset($seen[$old]) || $old === $new_base) {
+                continue;
+            }
+            $seen[$old] = true;
+            $pairs[] = array('old' => $old . '/', 'new' => $new_base . '/');
+        }
+        // Root-relative links (/wp-content/uploads/sites/<id>/...) in content and blocks.
+        $pairs[] = array('old' => '/wp-content/uploads/sites/' . $blog_id . '/', 'new' => '/wp-content/uploads/');
+
+        return $pairs;
+    }
+
+    /**
      * Skip other sites' upload trees during an extract restore.
      * Keeps themes/plugins; only filters uploads/ and blogs.dir/.
      *
      * @param string $rel Path relative to wp-content/ (may use \ or /).
      */
+    /**
+     * Subsite restored into another blog slot of a network (alpha, blog 2 -> gamma, blog 4):
+     * its media tree moves from uploads/sites/<source>/ to uploads/sites/<target>/.
+     *
+     * @param string $rel Path relative to wp-content/ (may use \ or /).
+     */
+    public static function slot_upload_rel(string $rel, int $source_blog_id, int $target_blog_id): string
+    {
+        $norm = ltrim(str_replace('\\', '/', $rel), '/');
+        if ($source_blog_id <= 1 || $target_blog_id <= 1 || $source_blog_id === $target_blog_id) {
+            return $norm;
+        }
+        foreach (array('uploads/sites/' . $source_blog_id . '/', 'blogs.dir/' . $source_blog_id . '/files/') as $prefix) {
+            if (strpos($norm, $prefix) === 0) {
+                return 'uploads/sites/' . $target_blog_id . '/' . substr($norm, strlen($prefix));
+            }
+        }
+
+        return $norm;
+    }
+
+    /**
+     * URL pairs that follow the slot move of slot_upload_rel(). Same non-cascading pass as
+     * the site URL pair; the longer upload pair wins.
+     *
+     * @param array<string,mixed> $manifest
+     * @return array<int,array{old:string,new:string}>
+     */
+    public static function slot_upload_url_pairs(array $manifest, int $source_blog_id, int $target_blog_id, string $new_site_url): array
+    {
+        $new_site_url = rtrim($new_site_url, '/');
+        if ($source_blog_id <= 1 || $target_blog_id <= 1 || $source_blog_id === $target_blog_id || $new_site_url === '') {
+            return array();
+        }
+        $entry = self::blog_entry($manifest, $source_blog_id);
+        $olds = array();
+        if (is_array($entry) && (string) ($entry['upload_baseurl'] ?? '') !== '') {
+            $olds[] = (string) $entry['upload_baseurl'];
+        }
+        foreach (array(
+            is_array($entry) ? (string) ($entry['site_url'] ?? '') : '',
+            (string) ($manifest['site_url'] ?? ''),
+            (string) ($manifest['network_site_url'] ?? ''),
+        ) as $site) {
+            if ($site !== '') {
+                $olds[] = rtrim($site, '/') . '/wp-content/uploads/sites/' . $source_blog_id;
+            }
+        }
+        $subsite_url = is_array($entry) ? rtrim((string) ($entry['site_url'] ?? ''), '/') : rtrim((string) ($manifest['site_url'] ?? ''), '/');
+        if ($subsite_url !== '' && !empty($manifest['ms_files_rewriting'])) {
+            $olds[] = $subsite_url . '/files';
+        }
+        $new_base = $new_site_url . '/wp-content/uploads/sites/' . $target_blog_id;
+        $pairs = array();
+        $seen = array();
+        foreach ($olds as $old) {
+            $old = rtrim($old, '/');
+            if ($old === '' || isset($seen[$old]) || $old === $new_base) {
+                continue;
+            }
+            $seen[$old] = true;
+            $pairs[] = array('old' => $old . '/', 'new' => $new_base . '/');
+        }
+        $pairs[] = array(
+            'old' => '/wp-content/uploads/sites/' . $source_blog_id . '/',
+            'new' => '/wp-content/uploads/sites/' . $target_blog_id . '/',
+        );
+
+        return $pairs;
+    }
+
     public static function is_foreign_extract_upload_rel(string $rel, int $source_blog_id): bool
     {
         $rel = ltrim(str_replace('\\', '/', $rel), '/');

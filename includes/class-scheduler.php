@@ -38,6 +38,10 @@ class Rmmigrate_Scheduler
         if (wp_installing()) {
             return;
         }
+        if (!self::is_tick_site()) {
+            self::clear_subsite_tick();
+            return;
+        }
 
         if (class_exists('Rmmigrate_Bootstrap', false)) {
             Rmmigrate_Bootstrap::register_cron_schedules_filter();
@@ -68,8 +72,40 @@ class Rmmigrate_Scheduler
         wp_schedule_single_event($when, $hook, $args);
     }
 
+    /**
+     * The tick only does work on the schedule runner site (the main site on multisite), so only
+     * that site keeps the event. A subsite copy is a no-op that a system cron runner may skip,
+     * which leaves a permanently overdue event in that site's WP-Cron queue.
+     */
+    public static function is_tick_site(): bool
+    {
+        if (class_exists('Rmmigrate_Schedules', false)) {
+            return Rmmigrate_Schedules::is_schedule_runner_site();
+        }
+        if (!function_exists('is_multisite') || !is_multisite()) {
+            return true;
+        }
+
+        return function_exists('is_main_site') ? (bool) is_main_site() : true;
+    }
+
+    /**
+     * Remove a leftover tick event on a subsite (written only when one exists).
+     */
+    private static function clear_subsite_tick(): void
+    {
+        if (function_exists('wp_next_scheduled') && wp_next_scheduled(self::HOOK) && function_exists('wp_clear_scheduled_hook')) {
+            wp_clear_scheduled_hook(self::HOOK);
+        }
+    }
+
     public static function tick(): void
     {
+        if (!self::is_tick_site()) {
+            self::clear_subsite_tick();
+            return;
+        }
+
         if (!wp_next_scheduled(self::HOOK)) {
             wp_schedule_single_event(time() + self::tick_interval(), self::HOOK);
         }
@@ -85,6 +121,9 @@ class Rmmigrate_Scheduler
         update_site_option(self::LAST_TICK_OPTION, time());
 
         Rmmigrate_Job::recover_stale_active();
+        if (class_exists('Rmmigrate_Retention')) {
+            Rmmigrate_Retention::maybe_expire_failed();
+        }
 
         $settings = Rmmigrate_Schedules::normalize(Rmmigrate_Settings::get());
         if (!Rmmigrate_Schedules::has_enabled($settings)) {

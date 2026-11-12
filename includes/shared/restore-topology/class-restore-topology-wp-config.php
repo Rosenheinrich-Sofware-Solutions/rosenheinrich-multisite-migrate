@@ -196,6 +196,9 @@ class Rmmigrate_Restore_Topology_Wp_Config
         return false;
     }
 
+    /** @var string Pre-1.2.26 wp-config backup folder, when it differs from the current one. */
+    private static $legacy_backup_dir = '';
+
     private static function existing_dest_backup_path(string $dest_path): string
     {
         $dir = self::existing_dest_backup_dir();
@@ -207,7 +210,17 @@ class Rmmigrate_Restore_Topology_Wp_Config
             ? wp_normalize_path($dest_path)
             : str_replace('\\', '/', $dest_path);
 
-        return trailingslashit($dir) . 'wp-config-' . hash('sha256', $normalized) . '.bak';
+        $path = trailingslashit($dir) . 'wp-config-' . hash('sha256', $normalized) . '.bak';
+        if (self::$legacy_backup_dir !== '' && !is_file($path)) {
+            // Move a copy made by an earlier version so the original wp-config stays the backup.
+            $legacy = trailingslashit(self::$legacy_backup_dir) . basename($path);
+            if (is_file($legacy) && (is_dir($dir) || wp_mkdir_p($dir))) {
+                // phpcs:ignore WordPress.WP.AlternativeFunctions.rename_rename -- Same-volume move inside plugin storage.
+                @rename($legacy, $path);
+            }
+        }
+
+        return $path;
     }
 
     private static function existing_dest_backup_dir(): string
@@ -217,7 +230,18 @@ class Rmmigrate_Restore_Topology_Wp_Config
                 return '';
             }
 
-            return wp_normalize_path(Rmmigrate_Plugin::backups_dir() . '/recover/wp-config');
+            $legacy = wp_normalize_path(Rmmigrate_Plugin::backups_dir() . '/recover/wp-config');
+            if (!method_exists('Rmmigrate_Plugin', 'private_storage_dir')) {
+                return $legacy;
+            }
+            // Copies of wp-config.php hold DB credentials and salts: keep them under the random
+            // per-installation folder (URL not guessable on nginx, which ignores .htaccess).
+            $dir = wp_normalize_path(Rmmigrate_Plugin::private_storage_dir('recover') . '/wp-config');
+            if ($dir !== $legacy) {
+                self::$legacy_backup_dir = $legacy;
+            }
+
+            return $dir;
         }
 
         if (class_exists('Rmmigrate_Installer_Paths', false)) {
@@ -287,8 +311,16 @@ class Rmmigrate_Restore_Topology_Wp_Config
             return Rmmigrate_Restore_Topology_Manifest::source_blog_prefix($manifest);
         }
         $prefix = (string) ($state['db_prefix'] ?? 'wp_');
+        if (!class_exists('Rmmigrate_Network_Restore_Orchestration', false)
+            && is_file(__DIR__ . '/class-network-restore-orchestration.php')) {
+            require_once __DIR__ . '/class-network-restore-orchestration.php';
+        }
+        if (class_exists('Rmmigrate_Network_Restore_Orchestration', false)) {
+            // Network restore onto another base prefix: tables were renamed after import.
+            $prefix = Rmmigrate_Network_Restore_Orchestration::effective_db_prefix($manifest, $state);
+        }
 
-        return $prefix;
+        return $prefix !== '' ? $prefix : 'wp_';
     }
 
     private static function resolve_wp_config_source(string $dest_path, string $backup_path, callable $read, array $state = array()): string

@@ -124,7 +124,8 @@ final class Rmmigrate_Ai_Agents_Rest
             return false;
         }
         if (is_multisite()) {
-            return current_user_can('manage_network') || current_user_can('manage_options');
+            // MCP/OAuth/abilities reach network-level operations: super admins only.
+            return current_user_can('manage_network');
         }
         return current_user_can('manage_options');
     }

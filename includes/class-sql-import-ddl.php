@@ -19,6 +19,30 @@ class Rmmigrate_Sql_Import_Ddl
     /**
      * Unwrap mysqldump versioned comments to inner SQL before matching.
      */
+    /**
+     * Dumps written by Free <= 1.2.25 / Pro <= 1.0.33 in PHP mode carry $wpdb placeholder
+     * escapes ("{" . 64 hex . "}") where the data had "%". Newer manifests mark the dump as clean.
+     *
+     * @param array<string,mixed> $manifest
+     */
+    public static function dump_needs_placeholder_heal(array $manifest): bool
+    {
+        return empty($manifest['sql_placeholder_safe']);
+    }
+
+    /**
+     * Turn leaked $wpdb placeholder escapes back into "%" (exact inverse of add_placeholder_escape).
+     */
+    public static function heal_placeholder_escapes(string $statement): string
+    {
+        if (strpos($statement, '{') === false) {
+            return $statement;
+        }
+        $healed = preg_replace('/\{[0-9a-f]{64}\}/', '%', $statement);
+
+        return is_string($healed) ? $healed : $statement;
+    }
+
     public static function strip_definer_clauses(string $statement): string
     {
         $normalized = self::normalize_mysql_version_comments($statement);

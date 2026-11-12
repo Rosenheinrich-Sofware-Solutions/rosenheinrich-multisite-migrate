@@ -548,7 +548,8 @@ final class Rmmigrate_OAuth_Server
     private static function user_may_consent(): bool
     {
         if (is_multisite()) {
-            return current_user_can('manage_network') || current_user_can('manage_options');
+            // MCP/OAuth/abilities reach network-level operations: super admins only.
+            return current_user_can('manage_network');
         }
         return current_user_can('manage_options');
     }

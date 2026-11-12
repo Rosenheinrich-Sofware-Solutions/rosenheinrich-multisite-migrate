@@ -300,6 +300,7 @@ class Rmmigrate_Restore_Runner
 
         if ($done) {
             self::finish_database_import($job);
+            $job->update_progress(array('db_import_done' => true));
             $job->set_status(Rmmigrate_Job::STATUS_DB_DONE);
             self::enable_maintenance($job->get_id());
             $steps->advance_next();
@@ -426,10 +427,7 @@ class Rmmigrate_Restore_Runner
                     ? $progress['user_merge_protect_report']
                     : array();
                 if ($pdo !== null && $protect !== array()) {
-                    $global = Rmmigrate_Restore_Topology_User_Merge::resolve_global_prefix(
-                        $pdo,
-                        (string) ($manifest['db_prefix'] ?? $wpdb->prefix)
-                    );
+                    $global = self::user_merge_global_prefix($pdo, (string) ($manifest['db_prefix'] ?? $wpdb->prefix));
                     Rmmigrate_Restore_Topology_User_Merge::restore_protected_users($pdo, $protect, $global);
                 }
                 throw $e;
@@ -976,6 +974,18 @@ class Rmmigrate_Restore_Runner
 
         global $wpdb;
         $progress = $job->get_progress();
+        if (!array_key_exists('db_tables_before_prepare', $progress)) {
+            // Fingerprint of the live table set, so a rollback can prove nothing was left changed.
+            $before = self::live_table_names();
+            $job->update_progress(array(
+                'db_tables_before_prepare' => $before === null ? '' : md5(implode("\n", $before)),
+                // The import replaces the options/sitemeta row that names the private storage folder.
+                'storage_token_before'     => Rmmigrate_Plugin::storage_token(),
+                // Same for the archive seal key; removed again right after the import.
+                'seal_keys_before'         => Rmmigrate_Manifest::verification_keys(),
+            ));
+            $progress = $job->get_progress();
+        }
         $merge_context = array(
             'restore_mode' => (string) ($progress['restore_mode'] ?? ''),
             'user_merge'   => array_key_exists('user_merge', $progress) ? !empty($progress['user_merge']) : true,
@@ -983,10 +993,7 @@ class Rmmigrate_Restore_Runner
         );
         $pdo = self::topology_pdo();
         if ($pdo !== null && in_array((string) ($merge_context['restore_mode'] ?? ''), Rmmigrate_Restore_Topology_User_Merge::eligible_modes(), true)) {
-            $global = Rmmigrate_Restore_Topology_User_Merge::resolve_global_prefix(
-                $pdo,
-                (string) $merge_context['db_prefix']
-            );
+            $global = self::user_merge_global_prefix($pdo, (string) $merge_context['db_prefix']);
             $protect = Rmmigrate_Restore_Topology_User_Merge::protect_destination($pdo, $global);
             $job->update_progress(array('user_merge_protect_report' => $protect));
         }
@@ -1047,7 +1054,10 @@ class Rmmigrate_Restore_Runner
             require_once RMMIGRATE_PATH . 'includes/shared/restore-topology/bootstrap.php';
         }
         $destination = Rmmigrate_Restore_Topology_Destination::probe_for_plugin();
-        $use_quarantine = $is_network && Rmmigrate_Migration_Preflight::will_drop_network_tables($manifest);
+        // Rename replaced tables aside instead of dropping them, so a failed or cancelled import
+        // rolls the site back: full network restores and every single-site/subsite slot restore.
+        $use_quarantine = ($is_network && Rmmigrate_Migration_Preflight::will_drop_network_tables($manifest))
+            || (!$full_replace && ($is_subsite || $restore_mode === 'subsite_on_network' || $restore_mode === 'network_to_subsite'));
         $target_blog_id = self::resolve_prepare_target_blog_id($progress, $restore_mode);
         $prepare_context = array(
             'db_prefix'   => (string) ($manifest['db_prefix'] ?? $wpdb->prefix),
@@ -1068,21 +1078,32 @@ class Rmmigrate_Restore_Runner
                     : '',
             ),
         );
+        // From here on live tables may change: failure/cancel messages must say so.
+        $job->update_progress(array('db_prepare_started' => true));
+        $tables_before = self::live_table_names();
         $prepare_context = Rmmigrate_Restore_Topology_Db_Action::prepare_overwrite(
             $pdo,
             $db_action,
             $manifest,
             $prepare_context
         );
+        $tables_after = self::live_table_names();
         $progress_updates = array(
             'destination' => $destination,
             'db_prefix'   => (string) ($manifest['db_prefix'] ?? $wpdb->prefix),
+            // Lets failure messages tell "nothing changed yet" apart from "tables were dropped".
+            'db_prepare_changed' => $tables_before === null || $tables_after === null || $tables_before !== $tables_after
+                || !empty($prepare_context['network_quarantine']['live_to_quarantine'])
+                || !empty($prepare_context['subsite_on_network_allocated_blog']),
         );
         if (!empty($prepare_context['network_quarantine']['live_to_quarantine'])) {
             $progress_updates['network_quarantine'] = $prepare_context['network_quarantine'];
         }
         if (!empty($prepare_context['sql_table_prefix_rewrite'])) {
             $progress_updates['sql_table_prefix_rewrite'] = $prepare_context['sql_table_prefix_rewrite'];
+        }
+        if (!empty($prepare_context['sql_table_name_map']) && is_array($prepare_context['sql_table_name_map'])) {
+            $progress_updates['sql_table_name_map'] = $prepare_context['sql_table_name_map'];
         }
         if (!empty($prepare_context['subsite_on_network_target_blog_id'])) {
             $progress_updates['subsite_on_network_target_blog_id'] = (int) $prepare_context['subsite_on_network_target_blog_id'];
@@ -1093,10 +1114,84 @@ class Rmmigrate_Restore_Runner
         if (!empty($prepare_context['subsite_on_network_allocated_blog'])) {
             $progress_updates['subsite_on_network_allocated_blog'] = $prepare_context['subsite_on_network_allocated_blog'];
         }
+        $slot_target = (int) ($prepare_context['subsite_on_network_target_blog_id'] ?? 0);
+        $slot_source = (int) ($manifest['blog_id'] ?? 0);
+        if ((string) ($progress['restore_mode'] ?? '') === 'subsite_on_network'
+            && $slot_source > 1 && $slot_target > 1 && $slot_source !== $slot_target) {
+            $progress_updates['slot_upload_move'] = array($slot_source, $slot_target);
+            $slot_map = $job->get_migration_map();
+            $slot_pairs = Rmmigrate_Restore_Topology_Extract_Site::slot_upload_url_pairs(
+                $manifest,
+                $slot_source,
+                $slot_target,
+                (string) ($slot_map['site_url']['new'] ?? '')
+            );
+            if ($slot_pairs !== array()) {
+                $progress_updates['slot_upload_pairs'] = $slot_pairs;
+            }
+        }
         if (!empty($prepare_context['site_owr_map']) && is_array($prepare_context['site_owr_map'])) {
             $progress_updates['site_owr_map'] = $prepare_context['site_owr_map'];
         }
         $job->update_progress($progress_updates);
+    }
+
+    /**
+     * Without a quarantine there is nothing to swap back. When no import statement ran and the
+     * reverted preparation left exactly the tables that existed before, say so truthfully.
+     */
+    private static function record_rollback_when_unchanged(Rmmigrate_Job $job): void
+    {
+        $progress = $job->get_progress();
+        if (!empty($progress['db_import_started']) || !empty($progress['db_import_done'])) {
+            return;
+        }
+        if (empty($progress['db_prepare_started']) && empty($progress['db_prepared'])) {
+            return;
+        }
+        $before = (string) ($progress['db_tables_before_prepare'] ?? '');
+        $now = self::live_table_names();
+        if ($before === '' || $now === null || md5(implode("\n", $now)) !== $before) {
+            return;
+        }
+        $job->update_progress(array(
+            'network_rollback_report' => array('restored' => true, 'errors' => array(), 'reason' => 'nothing_imported'),
+        ));
+    }
+
+    /**
+     * Network users live under THIS network's base prefix, even when the archive came from a
+     * network with another one (wpms_ archive restored into a wpnew_ network).
+     */
+    private static function user_merge_global_prefix(PDO $pdo, string $operating_prefix): string
+    {
+        global $wpdb;
+        $base = is_object($wpdb) && isset($wpdb->base_prefix) ? (string) $wpdb->base_prefix : '';
+        if ($base !== '' && function_exists('is_multisite') && is_multisite()) {
+            return $base;
+        }
+
+        return Rmmigrate_Restore_Topology_User_Merge::resolve_global_prefix($pdo, $operating_prefix);
+    }
+
+    /**
+     * @return list<string>|null Sorted table names of this database, null when unknown.
+     */
+    private static function live_table_names(): ?array
+    {
+        global $wpdb;
+        if (!is_object($wpdb) || !method_exists($wpdb, 'get_col')) {
+            return null;
+        }
+        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Live schema snapshot around a restore.
+        $names = $wpdb->get_col('SHOW TABLES');
+        if (!is_array($names)) {
+            return null;
+        }
+        $names = array_map('strval', $names);
+        sort($names, SORT_STRING);
+
+        return $names;
     }
 
     public static function attempt_network_rollback(Rmmigrate_Job $job): void
@@ -1120,14 +1215,12 @@ class Rmmigrate_Restore_Runner
             global $wpdb;
             $pdo = self::topology_pdo();
             if ($manifest !== null && $pdo !== null) {
-                $global = Rmmigrate_Restore_Topology_User_Merge::resolve_global_prefix(
-                    $pdo,
-                    (string) ($manifest['db_prefix'] ?? $wpdb->prefix)
-                );
+                $global = self::user_merge_global_prefix($pdo, (string) ($manifest['db_prefix'] ?? $wpdb->prefix));
                 Rmmigrate_Restore_Topology_User_Merge::restore_protected_users($pdo, $protect, $global);
             }
         }
         if (!Rmmigrate_Network_Restore_Quarantine::progress_has_quarantine($progress)) {
+            self::record_rollback_when_unchanged($job);
             return;
         }
         if (!class_exists('Rmmigrate_Network_Restore_Orchestration', false)) {
@@ -1147,8 +1240,57 @@ class Rmmigrate_Restore_Runner
         ));
     }
 
+    /**
+     * Undo what the imported rows changed about the plugin that is running this restore:
+     * a standalone site restored from a subsite archive gets that subsite's active_plugins
+     * (which does not list a network-activated plugin), so the files and finalize steps would
+     * never run; and the private storage folder name must survive for the job log.
+     */
+    private static function restore_runtime_state_after_import(Rmmigrate_Job $job): void
+    {
+        $progress = $job->get_progress();
+        $token = (string) ($progress['storage_token_before'] ?? '');
+        if (preg_match('/^[a-f0-9]{32}$/', $token) && function_exists('update_site_option')) {
+            // The rows were replaced behind the object cache: a cached old value would turn the
+            // update into a no-op.
+            wp_cache_delete('alloptions', 'options');
+            wp_cache_delete('notoptions', 'options');
+            wp_cache_delete('rmmigrate_storage_token', 'options');
+            if (is_multisite() && function_exists('get_current_network_id')) {
+                wp_cache_delete(get_current_network_id() . ':rmmigrate_storage_token', 'site-options');
+                wp_cache_delete(get_current_network_id() . ':notoptions', 'site-options');
+            }
+            update_site_option('rmmigrate_storage_token', $token);
+        }
+        if (array_key_exists('seal_keys_before', $progress)) {
+            Rmmigrate_Manifest::restore_seal_keys_after_import(is_array($progress['seal_keys_before']) ? $progress['seal_keys_before'] : array());
+            // Do not keep key material in the job row longer than the import needs it.
+            $job->replace_progress_section('seal_keys_before', array());
+        }
+        if (is_multisite()) {
+            return;
+        }
+        $pdo = self::topology_pdo();
+        if ($pdo === null) {
+            return;
+        }
+        if (!class_exists('Rmmigrate_Restore_Topology_Standalone', false)) {
+            require_once RMMIGRATE_PATH . 'includes/shared/restore-topology/bootstrap.php';
+        }
+        global $wpdb;
+        try {
+            if (Rmmigrate_Restore_Topology_Standalone::keep_plugins_active($pdo, $wpdb->prefix . 'options', self::keep_active_plugin_basenames()) > 0) {
+                wp_cache_delete('alloptions', 'options');
+                wp_cache_delete('active_plugins', 'options');
+            }
+        } catch (Throwable $e) {
+            Rmmigrate_Logger::log_job($job->get_id(), 'Could not keep the plugin active after the database import: ' . sanitize_text_field($e->getMessage()));
+        }
+    }
+
     private static function finish_database_import(Rmmigrate_Job $job): void
     {
+        self::restore_runtime_state_after_import($job);
         if (!class_exists('Rmmigrate_Network_Restore_Orchestration', false)) {
             require_once RMMIGRATE_PATH . 'includes/shared/restore-topology/bootstrap.php';
         }
@@ -1174,12 +1316,15 @@ class Rmmigrate_Restore_Runner
                 $context = array(
                     'db_prefix'     => (string) ($manifest['db_prefix'] ?? $wpdb->prefix),
                     'migration_map' => $map,
+                    'restore_mode'  => (string) ($progress['restore_mode'] ?? ''),
                     'destination'   => is_array($progress['destination'] ?? null)
                         ? $progress['destination']
                         : Rmmigrate_Restore_Topology_Destination::probe_for_plugin(),
                     'migration_network_domains_applied' => !empty($progress['migration_network_domains_applied']),
                     'migration_network_paths_applied'   => !empty($progress['migration_network_paths_applied']),
                 );
+                // Tables already carry the destination prefix after a network prefix remap.
+                $context['db_prefix'] = Rmmigrate_Network_Restore_Orchestration::effective_db_prefix($manifest, $context);
                 $early = Rmmigrate_Restore_Topology_Standalone::apply_migration_network_urls_early($pdo, $manifest, $context);
                 if ($early !== array()) {
                     $job->update_progress($early);
@@ -1195,6 +1340,24 @@ class Rmmigrate_Restore_Runner
      * @param array<string,mixed> $map
      * @param array<string,mixed> $manifest
      */
+    /**
+     * Plugins that must stay active on a standalone site restored from a subsite archive
+     * (they were network-activated on the source, so the subsite options do not list them).
+     *
+     * @return string[]
+     */
+    public static function keep_active_plugin_basenames(): array
+    {
+        $out = array();
+        foreach (array('RMMIGRATE_BASENAME') as $constant) {
+            if (defined($constant) && (string) constant($constant) !== '') {
+                $out[] = (string) constant($constant);
+            }
+        }
+
+        return array_values(array_unique($out));
+    }
+
     private static function run_topology_finalize(Rmmigrate_Job $job, array $map, array $manifest): void
     {
         if ($manifest === array()) {
@@ -1228,6 +1391,13 @@ class Rmmigrate_Restore_Runner
             'migration_network_domains_applied' => !empty($progress['migration_network_domains_applied']),
             'migration_network_paths_applied'   => !empty($progress['migration_network_paths_applied']),
         );
+        if (!class_exists('Rmmigrate_Network_Restore_Orchestration', false)) {
+            require_once RMMIGRATE_PATH . 'includes/shared/restore-topology/bootstrap.php';
+        }
+        // A full network restore onto another base prefix already renamed every table:
+        // blogs/site finalize and wp-config.php must use the destination prefix.
+        $context['db_prefix'] = Rmmigrate_Network_Restore_Orchestration::effective_db_prefix($manifest, $context);
+        $context['keep_active_plugins'] = self::keep_active_plugin_basenames();
 
         $pdo = self::topology_pdo();
         if ($pdo !== null) {
@@ -1299,6 +1469,16 @@ class Rmmigrate_Restore_Runner
         if (Rmmigrate_Restore_Topology_Wp_Config::apply_plugin($wp_state, ABSPATH, $extract_dir)) {
             delete_site_option('rmmigrate_migration_notice');
         }
+    }
+
+    /**
+     * Manifest of the archive a restore job imports (progress copy, extracted file or archive).
+     *
+     * @return array<string,mixed>|null
+     */
+    public static function job_manifest_for_import(Rmmigrate_Job $job): ?array
+    {
+        return self::load_job_manifest($job);
     }
 
     /**

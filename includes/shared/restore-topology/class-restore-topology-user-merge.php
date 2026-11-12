@@ -203,6 +203,13 @@ class Rmmigrate_Restore_Topology_User_Merge
 
         $operating = (string) ($context['db_prefix'] ?? $manifest['db_prefix'] ?? 'wp_');
         $global = self::resolve_global_prefix($pdo, $operating);
+        $destination = is_array($context['destination'] ?? null) ? $context['destination'] : array();
+        $dest_base = $destination !== array() ? self::destination_network_base_prefix($destination, $manifest) : '';
+        if ($dest_base !== '' && $dest_base !== $global
+            && (self::table_exists($pdo, $dest_base . 'users') || self::table_exists($pdo, $dest_base . self::STAGING_DEST_USERS))) {
+            // Archive from a network with another base prefix: users were imported into ours.
+            $global = $dest_base;
+        }
         $dest_users = $global . self::STAGING_DEST_USERS;
         $dest_meta = $global . self::STAGING_DEST_USERMETA;
         $live_users = $global . 'users';

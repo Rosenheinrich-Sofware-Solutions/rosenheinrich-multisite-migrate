@@ -234,7 +234,10 @@ class Rmmigrate_File_Restorer
             $queue[] = array('src' => $web_config, 'dest' => $root . 'web.config', 'replace' => false);
         }
 
-        if (Rmmigrate_Archive_Index::has_core_files($files_root)) {
+        // WordPress core and root files belong to the whole network: a subsite restored into its
+        // slot (or limited to its uploads) must never write wp-admin/, wp-includes/ or /*.php.
+        $network_owned_root = $skip_server_config || $this->should_limit_to_subsite_uploads();
+        if (!$network_owned_root && Rmmigrate_Archive_Index::has_core_files($files_root)) {
             foreach (array('wp-admin', 'wp-includes') as $core_dir) {
                 $src_dir = $files_root . $core_dir;
                 if (!Rmmigrate_Filesystem::is_dir($src_dir)) {
@@ -270,6 +273,13 @@ class Rmmigrate_File_Restorer
             $uploads_only = $this->should_limit_to_subsite_uploads();
             $allowed_roots = $uploads_only ? $this->subsite_upload_dest_roots() : array();
             $extract_blog_id = $this->extract_source_blog_id();
+            $standalone_blog_id = $this->standalone_upload_blog_id($extract_blog_id);
+            $slot_progress = $this->job->get_progress()['slot_upload_move'] ?? null;
+            $slot_move = is_array($slot_progress) && count($slot_progress) === 2
+                ? array((int) $slot_progress[0], (int) $slot_progress[1])
+                : null;
+            $strict_config = $uploads_only || $extract_blog_id > 0 || $standalone_blog_id > 0;
+            $blocked = 0;
             $iterator = new RecursiveIteratorIterator(
                 new RecursiveDirectoryIterator($content_root, RecursiveDirectoryIterator::SKIP_DOTS),
                 RecursiveIteratorIterator::SELF_FIRST,
@@ -282,12 +292,24 @@ class Rmmigrate_File_Restorer
                 }
                 $src = wp_normalize_path($file->getPathname());
                 $rel = substr($src, strlen($content_root));
-                $dest = trailingslashit(WP_CONTENT_DIR) . $rel;
-                if ($uploads_only && !$this->dest_under_allowed_roots($dest, $allowed_roots)) {
+                if (self::is_blocked_content_rel($rel, $strict_config)) {
+                    // Never write executable code or server config into upload trees.
+                    $blocked++;
                     continue;
                 }
                 if ($extract_blog_id > 0
                     && Rmmigrate_Restore_Topology_Extract_Site::is_foreign_extract_upload_rel($rel, $extract_blog_id)) {
+                    continue;
+                }
+                if ($standalone_blog_id > 0) {
+                    // Standalone sites read media from uploads/, not uploads/sites/<id>/.
+                    $rel = Rmmigrate_Restore_Topology_Extract_Site::standalone_upload_rel($rel, $standalone_blog_id);
+                } elseif ($slot_move !== null) {
+                    // Subsite restored into another blog slot: uploads/sites/<source>/ -> sites/<target>/.
+                    $rel = Rmmigrate_Restore_Topology_Extract_Site::slot_upload_rel($rel, $slot_move[0], $slot_move[1]);
+                }
+                $dest = trailingslashit(WP_CONTENT_DIR) . $rel;
+                if ($uploads_only && !$this->dest_under_allowed_roots($dest, $allowed_roots)) {
                     continue;
                 }
                 if ($this->should_skip_migration_plugin_file($rel)) {
@@ -296,9 +318,81 @@ class Rmmigrate_File_Restorer
                 $replace = $this->should_replace_in_file($src);
                 $queue[] = array('src' => $src, 'dest' => $dest, 'replace' => $replace);
             }
+            if ($blocked > 0) {
+                Rmmigrate_Logger::log(sprintf('File restore: skipped %d executable or server-config file(s) inside upload directories.', $blocked));
+            }
         }
 
         return $queue;
+    }
+
+    /**
+     * Executable code and server configuration never belong in upload trees.
+     *
+     * PHP-ish files (any `.php*`, `.phtml`, `.pht`, `.phar`, `.phps` segment, so `x.php.jpg`
+     * counts too) are always refused under uploads/ and blogs.dir/. With $strict_config
+     * (site-scoped and standalone restores) `.htaccess`, `.user.ini`, `php.ini` and
+     * `web.config` are refused there as well, since they can turn images into code.
+     *
+     * @param string $rel Path relative to wp-content/ (may use \ or /).
+     */
+    public static function is_blocked_content_rel(string $rel, bool $strict_config = false): bool
+    {
+        $rel = strtolower(ltrim(str_replace('\\', '/', $rel), '/'));
+        if (strpos($rel, 'uploads/') !== 0 && strpos($rel, 'blogs.dir/') !== 0) {
+            return false;
+        }
+        $base = basename($rel);
+        $base = rtrim($base, ". \t");
+        $segments = explode('.', $base);
+        array_shift($segments);
+        foreach ($segments as $segment) {
+            $segment = trim($segment);
+            if (preg_match('/^(?:php\d*|phtml|pht|phar|phps|pgif|shtml|cgi|pl|py|asp|aspx|jsp)$/', $segment) === 1) {
+                return true;
+            }
+        }
+        if ($strict_config && in_array($base, array('.htaccess', '.user.ini', 'php.ini', 'web.config'), true)) {
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * Blog whose upload tree moves to uploads/ (subsite or extracted site → single site), else 0.
+     */
+    private function standalone_upload_blog_id(int $extract_blog_id): int
+    {
+        if (is_multisite()) {
+            return 0;
+        }
+        if ($extract_blog_id > 0) {
+            return $extract_blog_id;
+        }
+        // URL pairs for the move are only applied by migration restores (search-replace pass).
+        if ($this->job->get_restore_type() !== Rmmigrate_Job::RESTORE_TYPE_MIGRATION) {
+            return 0;
+        }
+        $progress = $this->job->get_progress();
+        $manifest = is_array($progress['manifest'] ?? null) ? $progress['manifest'] : array();
+        if ($manifest === array()) {
+            $path = trailingslashit($this->job->get_work_dir()) . 'extracted/manifest.json';
+            $json = Rmmigrate_Filesystem::exists($path) ? Rmmigrate_Filesystem::get_contents($path) : false;
+            $decoded = is_string($json) ? json_decode($json, true) : null;
+            $manifest = is_array($decoded) ? $decoded : array();
+        }
+        if ($manifest === array()) {
+            return 0;
+        }
+        if (!class_exists('Rmmigrate_Restore_Topology_Manifest', false)) {
+            require_once RMMIGRATE_PATH . 'includes/shared/restore-topology/bootstrap.php';
+        }
+        if (!Rmmigrate_Restore_Topology_Manifest::is_subsite_standalone_restore($manifest)) {
+            return 0;
+        }
+
+        return max(0, (int) ($manifest['blog_id'] ?? 0));
     }
 
     /**
@@ -529,6 +623,11 @@ class Rmmigrate_File_Restorer
                     }
                 }
             }
+        }
+        if ((string) ($manifest['backup_type'] ?? '') === 'incremental' || (int) ($manifest['parent_job_id'] ?? 0) > 0) {
+            // An incremental chain extracts several archives into one tree; this manifest only
+            // describes the newest link, so per-file checks would reject the parents' files.
+            return array();
         }
         $hashes = $manifest['file_hashes'] ?? null;
         if (!is_array($hashes) || $hashes === array()) {
