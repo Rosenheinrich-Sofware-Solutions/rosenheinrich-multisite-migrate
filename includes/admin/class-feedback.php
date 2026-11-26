@@ -168,7 +168,7 @@ final class Rmmigrate_Feedback
     {
         $review_url = class_exists('Rmmigrate_Review_Nudge', false)
             ? Rmmigrate_Review_Nudge::review_url()
-            : 'https://wordpress.org/support/plugin/rosenheinrich-multisite-migrate/reviews/#new-post';
+            : Rmmigrate_Links::wporg_review_form_url();
 
         return array(
             'enabled'         => self::user_can_see(),

@@ -46,7 +46,7 @@ if (!defined('ABSPATH')) {
             </div>
             <div class="multisite-migrate-wizard-modal-footer mm-modal-footer mm-feedback-footer">
                 <button type="button" class="button mm-feedback-later"><?php esc_html_e('Maybe later', 'rosenheinrich-multisite-migrate'); ?></button>
-                <a id="mm-feedback-review-link" class="button button-primary mm-btn-teal mm-feedback-review-cta-btn" href="<?php echo esc_url(class_exists('Rmmigrate_Review_Nudge', false) ? Rmmigrate_Review_Nudge::review_url() : 'https://wordpress.org/support/plugin/rosenheinrich-multisite-migrate/reviews/#new-post'); ?>" target="_blank" rel="noopener noreferrer"><?php esc_html_e('Leave a review', 'rosenheinrich-multisite-migrate'); ?></a>
+                <a id="mm-feedback-review-link" class="button button-primary mm-btn-teal mm-feedback-review-cta-btn" href="<?php echo esc_url(class_exists('Rmmigrate_Review_Nudge', false) ? Rmmigrate_Review_Nudge::review_url() : Rmmigrate_Links::wporg_review_form_url()); ?>" target="_blank" rel="noopener noreferrer"><?php esc_html_e('Leave a review', 'rosenheinrich-multisite-migrate'); ?></a>
                 <button type="button" class="button button-primary mm-btn-teal mm-feedback-submit mm-hidden" disabled><?php esc_html_e('Send feedback', 'rosenheinrich-multisite-migrate'); ?></button>
             </div>
         </div>

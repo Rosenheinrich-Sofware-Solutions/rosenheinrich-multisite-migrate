@@ -17,8 +17,6 @@ final class Rmmigrate_Review_Nudge
     const COOLDOWN_DAYS = 14;
     const MIN_ACTIVE_DAYS = 14;
     const MIN_BACKUPS = 2;
-    const WP_ORG_REVIEW_URL = 'https://wordpress.org/support/plugin/rosenheinrich-multisite-migrate/reviews/#new-post';
-
     /** @var array<string,true> */
     private static $terminal_states = array(
         'dismissed' => true,
@@ -120,7 +118,7 @@ final class Rmmigrate_Review_Nudge
 
     public static function review_url(): string
     {
-        return Rmmigrate_Capabilities::marketing_url(self::WP_ORG_REVIEW_URL, 'review_nudge');
+        return Rmmigrate_Capabilities::marketing_url(Rmmigrate_Links::wporg_review_form_url(), 'review_nudge');
     }
 
     public static function ajax_dismiss(): void

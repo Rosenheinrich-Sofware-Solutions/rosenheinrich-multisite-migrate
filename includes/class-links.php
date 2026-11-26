@@ -13,6 +13,17 @@ if (!defined('ABSPATH')) {
  */
 class Rmmigrate_Links
 {
+    /** wp.org directory slug for this (free) edition. */
+    const WPORG_PLUGIN_SLUG = 'rosenheinrich-multisite-migrate';
+
+    /**
+     * WordPress.org review form URL (no UTM).
+     */
+    public static function wporg_review_form_url(): string
+    {
+        return 'https://wordpress.org/support/plugin/' . self::WPORG_PLUGIN_SLUG . '/reviews/#new-post';
+    }
+
     /**
      * Pricing page on the marketing site, UTM-tagged for the given placement.
      */

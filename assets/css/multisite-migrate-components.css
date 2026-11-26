@@ -1186,6 +1186,35 @@
     gap: var(--mm-space-2);
 }
 
+/* Inline review card (body + actions; not the banner __inner layout). */
+.mm-review-card {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: var(--mm-space-3);
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    background: var(--mm-surface);
+    border: 1px solid var(--mm-border);
+    border-left: 5px solid var(--mm-teal);
+    border-radius: var(--mm-radius);
+    box-shadow: var(--mm-shadow-card);
+    overflow: hidden;
+}
+
+.mm-review-card .mm-notice-card__body {
+    flex: 1 1 12rem;
+    min-width: 0;
+}
+
+.mm-review-card .mm-notice-card__actions {
+    flex: 1 1 auto;
+    min-width: 0;
+    max-width: 100%;
+    margin-left: 0;
+}
+
 .mm-notice-card__inner {
     display: flex;
     align-items: flex-start;
@@ -2101,6 +2130,33 @@
         right: var(--mm-space-4);
         bottom: var(--mm-space-4);
         max-width: none;
+    }
+
+    .mm-review-card {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .mm-review-card .mm-notice-card__body {
+        flex: 0 1 auto;
+    }
+
+    .mm-review-card .mm-notice-card__actions {
+        width: 100%;
+        margin-left: 0;
+        padding-left: 0;
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .mm-review-card .mm-notice-card__actions .button,
+    .mm-review-card .mm-notice-card__actions a.button {
+        width: 100%;
+        max-width: 100%;
+        box-sizing: border-box;
+        flex: 1 1 auto;
+        white-space: normal;
+        min-height: var(--mm-touch-min, 44px);
     }
 }
 

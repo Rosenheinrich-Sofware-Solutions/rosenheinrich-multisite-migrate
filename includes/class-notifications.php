@@ -738,7 +738,7 @@ table { border-collapse: collapse; mso-table-lspace: 0pt; mso-table-rspace: 0pt;
 </td></tr>
 <tr><td align="center" style="font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',system-ui,Arial,sans-serif;font-size:11px;line-height:18px;color:#50575e;padding-bottom:12px;border-collapse:collapse;">
 <strong style="color:#0a1220;font-weight:700;">Rosenheinrich Software Solutions</strong><br />
-' . esc_html(__('Destouchesstr. 3, 80803 Munich, Germany', 'rosenheinrich-multisite-migrate')) . '
+' . esc_html(__('Robert-Schumann-Str. 12, 57076 Siegen, Germany', 'rosenheinrich-multisite-migrate')) . '
 </td></tr>
 <tr><td align="center" style="font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',system-ui,Arial,sans-serif;font-size:11px;line-height:18px;color:#50575e;padding-bottom:12px;border-collapse:collapse;">
 ' . $footer_link($privacy, __('Privacy policy', 'rosenheinrich-multisite-migrate')) . '

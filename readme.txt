@@ -2,9 +2,9 @@
 Contributors: rosenheinrich, phillipro
 Tags: multisite, backup, restore, migration, clone
 Requires at least: 6.2
-Tested up to: 7.1
+Tested up to: 7.2
 Requires PHP: 7.4
-Stable tag: 1.2.27
+Stable tag: 1.2.28
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -160,6 +160,9 @@ Report security issues to phillip@rosenheinrich.com; we aim to respond within 72
 
 == Changelog ==
 
+= 1.2.28 =
+* Compatibility: Tested with WordPress 7.2 (including 7.2 RC).
+
 = 1.2.27 =
 * Fix: A backup that is interrupted mid-step, for example because you leave the page, now resumes instead of failing its archive integrity check. With a system cron it can also finish without the browser tab open.
 * New: Failed and cancelled backup entries are removed automatically after 14 days, and at most the 10 newest are kept. Completed backups still follow your retention setting.
@@ -190,6 +193,9 @@ Report security issues to phillip@rosenheinrich.com; we aim to respond within 72
 Older entries are in changelog.txt, which ships with the plugin, and the full history is published at [https://multisitemigrate.rosenheinrich.com/changelog/](https://multisitemigrate.rosenheinrich.com/changelog/).
 
 == Upgrade Notice ==
+
+= 1.2.28 =
+Tested with WordPress 7.2 (including 7.2 RC). Recommended update.
 
 = 1.2.27 =
 Interrupted backups resume instead of failing, failed entries expire automatically, and retention changes show what would be deleted. Recommended update.
