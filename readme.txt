@@ -173,23 +173,6 @@ Report security issues to phillip@rosenheinrich.com; we aim to respond within 72
 = 1.2.26 =
 * Security: restrict backups to super admins and harden archive verification; fixes for prefix migration, subsite import into another network, standalone media URLs and aborted imports.
 
-= 1.2.25 =
-* Fix: Restoring a subsite backup as a standalone site while keeping its original table prefix no longer leaves users without a role.
-* New: Extract one site from a network backup into a standalone WordPress site, now free. Choose "Extract one site as standalone" when you restore a network backup on a single-site install.
-* New: Optional backup before updates, one-click rollback after restore, resume of interrupted jobs, and a server check before you start.
-* New: A simpler start. "Back up now" runs in one click, and Download and Restore sit right next to each backup.
-* Improvement: Restoring or moving a site asks fewer questions, and technical settings moved to an optional Expert mode.
-* Improvement: Clearer wording for single sites and networks. Product emails and usage data stay off unless you opt in.
-* Improvement: Better deactivation feedback.
-* Fix: Admin redirect after activation.
-* Fix: Various bug fixes and stability improvements.
-
-= 1.2.24 – 2026-10-27 =
-* Fix: SQL export checkpoint recovery on resume and fewer false activity-log errors from gateway timeouts and background polling.
-
-= 1.2.23 – 2026-10-26 =
-* Security fixes.
-
 Older entries are in changelog.txt, which ships with the plugin, and the full history is published at [https://multisitemigrate.rosenheinrich.com/changelog/](https://multisitemigrate.rosenheinrich.com/changelog/).
 
 == Upgrade Notice ==
