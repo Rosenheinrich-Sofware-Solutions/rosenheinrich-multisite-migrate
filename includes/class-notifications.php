@@ -26,7 +26,8 @@ class Rmmigrate_Notifications
         }
 
         $is_success = $status === Rmmigrate_Job::STATUS_COMPLETE;
-        $is_failure = $status === Rmmigrate_Job::STATUS_ERROR;
+        $is_failure = $status === Rmmigrate_Job::STATUS_ERROR
+            || $status === Rmmigrate_Job::STATUS_CANCELLED;
         if (!$is_success && !$is_failure) {
             return;
         }
@@ -39,8 +40,8 @@ class Rmmigrate_Notifications
             return;
         }
 
-        $subject = self::build_subject($job, $is_success);
-        $body = self::build_body($job, $is_success, $error);
+        $subject = self::build_subject($job, $is_success, $status);
+        $body = self::build_body($job, $is_success, $error, $status);
         $activity_url = Rmmigrate_Admin_Router::admin_url(
             'multisite-migrate-activity',
             array(),
@@ -56,7 +57,11 @@ class Rmmigrate_Notifications
                     $is_success,
                     $body,
                     $activity_url,
-                    __('Open Activity Log', 'rosenheinrich-multisite-migrate')
+                    __('Open Activity Log', 'rosenheinrich-multisite-migrate'),
+                    $status === Rmmigrate_Job::STATUS_CANCELLED
+                        ? __('The job was cancelled.', 'rosenheinrich-multisite-migrate')
+                        : null,
+                    $status === Rmmigrate_Job::STATUS_CANCELLED ? 'warning' : ''
                 ),
                 'job_id'       => $job->get_id(),
             )
@@ -257,15 +262,21 @@ class Rmmigrate_Notifications
         return false;
     }
 
-    private static function build_subject(Rmmigrate_Job $job, bool $success): string
+    private static function build_subject(Rmmigrate_Job $job, bool $success, int $status = 0): string
     {
         $site = wp_specialchars_decode(get_bloginfo('name'), ENT_QUOTES);
         $site = str_replace(array("\r", "\n"), '', $site);
-        $label = $success ? __('completed', 'rosenheinrich-multisite-migrate') : __('failed', 'rosenheinrich-multisite-migrate');
+        if ($success) {
+            $label = __('completed', 'rosenheinrich-multisite-migrate');
+        } elseif ($status === Rmmigrate_Job::STATUS_CANCELLED) {
+            $label = __('cancelled', 'rosenheinrich-multisite-migrate');
+        } else {
+            $label = __('failed', 'rosenheinrich-multisite-migrate');
+        }
         $type_label = self::job_type_subject_label($job->get_job_type());
 
         return sprintf(
-            /* translators: 1: site name, 2: job type label, 3: job ID, 4: completed/failed label */
+            /* translators: 1: site name, 2: job type label, 3: job ID, 4: completed/failed/cancelled label */
             __('[%1$s] Multisite Migrate %2$s #%3$d %4$s', 'rosenheinrich-multisite-migrate'),
             $site,
             $type_label,
@@ -286,15 +297,22 @@ class Rmmigrate_Notifications
         }
     }
 
-    private static function build_body(Rmmigrate_Job $job, bool $success, ?string $error): string
+    private static function build_body(Rmmigrate_Job $job, bool $success, ?string $error, int $status = 0): string
     {
+        if ($success) {
+            $status_label = __('Complete', 'rosenheinrich-multisite-migrate');
+        } elseif ($status === Rmmigrate_Job::STATUS_CANCELLED) {
+            $status_label = __('Cancelled', 'rosenheinrich-multisite-migrate');
+        } else {
+            $status_label = __('Error', 'rosenheinrich-multisite-migrate');
+        }
         $lines = array(
             /* translators: %d: job ID */
             sprintf(__('Job ID: %1$d', 'rosenheinrich-multisite-migrate'), $job->get_id()),
             /* translators: %s: job type */
             sprintf(__('Type: %1$s', 'rosenheinrich-multisite-migrate'), $job->get_job_type()),
             /* translators: %s: job status */
-            sprintf(__('Status: %1$s', 'rosenheinrich-multisite-migrate'), $success ? __('Complete', 'rosenheinrich-multisite-migrate') : __('Error', 'rosenheinrich-multisite-migrate')),
+            sprintf(__('Status: %1$s', 'rosenheinrich-multisite-migrate'), $status_label),
         );
         if ($error) {
             /* translators: %s: error message */

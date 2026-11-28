@@ -434,6 +434,11 @@ class Rmmigrate_Restore_Runner
             }
         }
 
+        $cancelled = self::abort_if_cancelled($job);
+        if ($cancelled !== null) {
+            return $cancelled;
+        }
+
         Rmmigrate_Post_Migration::purge_caches();
         Rmmigrate_Post_Migration::cleanup_bridge_mu_plugin();
         Rmmigrate_Post_Migration::maybe_revalidate_after_migration();
@@ -546,6 +551,11 @@ class Rmmigrate_Restore_Runner
             Rmmigrate_Filesystem::delete_directory($extract_dir);
         }
 
+        $cancelled = self::abort_if_cancelled($job);
+        if ($cancelled !== null) {
+            return $cancelled;
+        }
+
         $job->set_status(Rmmigrate_Job::STATUS_COMPLETE, self::restore_complete_warning($job));
         Rmmigrate_Runner::force_release_lock($job->get_id());
         self::disable_maintenance();
@@ -565,6 +575,26 @@ class Rmmigrate_Restore_Runner
         do_action('rmmigrate_restore_done', $job);
 
         return array('message' => __('Migration complete', 'rosenheinrich-multisite-migrate'));
+    }
+
+    /**
+     * Stop a restore from being marked complete if the user already cancelled it.
+     *
+     * @return array{message:string}|null
+     */
+    private static function abort_if_cancelled(Rmmigrate_Job $job): ?array
+    {
+        $requested = class_exists('Rmmigrate_Job_Cleanup', false)
+            && Rmmigrate_Job_Cleanup::cancel_flag_requested($job->get_id());
+        if (!$requested && $job->get_status() !== Rmmigrate_Job::STATUS_CANCELLED) {
+            return null;
+        }
+        if ($job->get_status() !== Rmmigrate_Job::STATUS_CANCELLED) {
+            $job->cancel();
+        }
+        self::disable_maintenance();
+
+        return array('message' => $job->get_status_label());
     }
 
     private static function prune_restore_work_artifacts(Rmmigrate_Job $job): void

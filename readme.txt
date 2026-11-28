@@ -4,7 +4,7 @@ Tags: multisite, backup, restore, migration, clone
 Requires at least: 6.2
 Tested up to: 7.2
 Requires PHP: 7.4
-Stable tag: 1.2.28
+Stable tag: 1.2.29
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -34,7 +34,7 @@ Everything in this list works without an account, a trial or usage limits.
 * **Local export and import** to move or clone a site to another WordPress install, for example for a staging copy.
 * **Search & replace** for URLs and paths during import, including serialized data.
 * **Extract one subsite to a standalone site:** restore a single site from a network archive onto a normal single-site install.
-* **Subsite self-service:** site administrators with `manage_options` can save and restore their own subsite.
+* **Subsite self-service (opt-in):** a network administrator can allow site administrators with `manage_options` to save and restore their own subsite. This is off by default.
 * **One local schedule** (daily, weekly or monthly) stored on your server.
 * **AES-256 encryption** for archives, if you want it.
 * **Email notifications** for manual and scheduled jobs, restores and imports.
@@ -160,6 +160,12 @@ Report security issues to phillip@rosenheinrich.com; we aim to respond within 72
 
 == Changelog ==
 
+= 1.2.29 =
+* Change: Subsite administrators can no longer start backups unless a network administrator turns this on in Settings. Existing sites without a saved choice stay off.
+* Fix: WordPress 6.7+ no longer shows a "_load_textdomain_just_in_time" notice during plugin setup.
+* Fix: An aborted or failed import is reported as cancelled or failed, not as completed.
+* Security: New archives do not store the database host, name, or user in the manifest. Older archives that include those fields still import.
+
 = 1.2.28 =
 * Compatibility: Tested with WordPress 7.2 (including 7.2 RC).
 
@@ -170,12 +176,12 @@ Report security issues to phillip@rosenheinrich.com; we aim to respond within 72
 * Change: The server check recognises a system cron (DISABLE_WP_CRON) and no longer asks you to keep the tab open.
 * Fix: On a multisite network the background scheduler tick now runs only on the main site. Subsites remove a leftover tick event, so a system cron no longer leaves an overdue event there.
 
-= 1.2.26 =
-* Security: restrict backups to super admins and harden archive verification; fixes for prefix migration, subsite import into another network, standalone media URLs and aborted imports.
-
 Older entries are in changelog.txt, which ships with the plugin, and the full history is published at [https://multisitemigrate.rosenheinrich.com/changelog/](https://multisitemigrate.rosenheinrich.com/changelog/).
 
 == Upgrade Notice ==
+
+= 1.2.29 =
+Subsite administrator backups are off by default, aborted imports no longer show as completed, and a WordPress 6.7 translation notice is fixed. Recommended update.
 
 = 1.2.28 =
 Tested with WordPress 7.2 (including 7.2 RC). Recommended update.

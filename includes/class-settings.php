@@ -105,6 +105,7 @@ class Rmmigrate_Settings
             'lock_mode'                 => 'auto',
             'archive_mode_manual'       => false,
             'exclude_deleted_subsite_tables' => false,
+            'subsite_self_service'      => false,
             'schedules'                 => array(),
             'email_enabled'             => true,
             'email_address'             => '',
@@ -139,6 +140,7 @@ class Rmmigrate_Settings
             'admin_safe_mode',
             'installer_brand_name',
             'installer_brand_logo',
+            'subsite_self_service',
         );
     }
 
@@ -411,7 +413,9 @@ class Rmmigrate_Settings
             ));
         } elseif ($section === 'backups') {
             // archive_mode + include_wp_core: set only via backup wizard (last-used).
-            $merged = array_merge($merged, self::archive_settings_from_post($post, $current));
+            $merged = array_merge($merged, self::archive_settings_from_post($post, $current), array(
+                'subsite_self_service' => !empty($post['subsite_self_service']),
+            ));
         } elseif ($section === 'import') {
             $max_chunk_cap = class_exists('Rmmigrate_Extract_Engine') ? Rmmigrate_Extract_Engine::BLOCKING_SAFE_BYTES : 20971520;
             $merged['import_chunk_size'] = max(1048576, min($max_chunk_cap, (int) ($post['import_chunk_size'] ?? 2097152)));
@@ -507,6 +511,7 @@ class Rmmigrate_Settings
         $defaults = self::defaults();
         $merged = array_merge($defaults, $input);
         $merged['auto_backup_before_update'] = !empty($input['auto_backup_before_update']);
+        $merged['subsite_self_service'] = !empty($input['subsite_self_service']);
         $merged['retention_pre_update'] = max(1, min(20, (int) ($input['retention_pre_update'] ?? $defaults['retention_pre_update'])));
         $merged['pre_update_profile'] = self::pre_update_profile_from($input['pre_update_profile'] ?? $defaults['pre_update_profile']);
         return $merged;

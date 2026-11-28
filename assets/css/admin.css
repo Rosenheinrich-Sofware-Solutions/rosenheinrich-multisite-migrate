@@ -1357,14 +1357,9 @@ a.mm-job-item:focus {
     display: none;
 }
 
-/* Row actions: Download, Restore and More get a column sized for them, on one line when there is room. */
+/* Row actions stay inside the cell. Long labels wrap instead of covering Stored. */
 .mm-premium-table.mm-data-table.multisite-migrate-archives-table th.column-actions {
     width: 19rem;
-}
-@media (min-width: 769px) {
-    .multisite-migrate-archives-table td.mm-row-actions .mm-row-buttons {
-        flex-wrap: nowrap;
-    }
 }
 @media (max-width: 1279px) and (min-width: 769px) {
     /* Narrower screens: same one line, tighter buttons, "More" becomes a ⋯ button. */

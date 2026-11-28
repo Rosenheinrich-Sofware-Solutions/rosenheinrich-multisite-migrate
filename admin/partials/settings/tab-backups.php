@@ -30,6 +30,18 @@ if (!defined('ABSPATH')) {
         <th scope="row"><label for="safety_snapshot_enabled"><?php esc_html_e('Safety snapshot before restore', 'rosenheinrich-multisite-migrate'); ?></label></th>
         <td><input type="checkbox" name="safety_snapshot_enabled" id="safety_snapshot_enabled" value="1" <?php checked(!empty($rmmigrate_settings['safety_snapshot_enabled'])); ?>></td>
     </tr>
+    <?php if (is_multisite() && is_network_admin()) : ?>
+    <tr>
+        <th scope="row"><?php esc_html_e('Subsite administrator backups', 'rosenheinrich-multisite-migrate'); ?></th>
+        <td>
+            <label for="mm-subsite-self-service">
+                <input type="checkbox" name="subsite_self_service" id="mm-subsite-self-service" value="1" <?php checked(!empty($rmmigrate_settings['subsite_self_service'])); ?>>
+                <?php esc_html_e('Allow site administrators to back up and restore their own site', 'rosenheinrich-multisite-migrate'); ?>
+            </label>
+            <p class="description"><?php esc_html_e('Off by default. When this is off, only network administrators can start backups. Turn it on if you want each site administrator to manage backups for their own site.', 'rosenheinrich-multisite-migrate'); ?></p>
+        </td>
+    </tr>
+    <?php endif; ?>
     <tr>
         <th scope="row"><?php esc_html_e('Backup before updates (optional)', 'rosenheinrich-multisite-migrate'); ?></th>
         <td>

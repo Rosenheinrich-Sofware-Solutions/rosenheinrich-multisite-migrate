@@ -1,3 +1,6 @@
+= 1.2.28 =
+* Compatibility: Tested with WordPress 7.2 (including 7.2 RC).
+
 = 1.2.27 =
 * Fix: A backup that is interrupted mid-step, for example because you leave the page, now resumes instead of failing its archive integrity check. With a system cron it can also finish without the browser tab open.
 * New: Failed and cancelled backup entries are removed automatically after 14 days, and at most the 10 newest are kept. Completed backups still follow your retention setting.

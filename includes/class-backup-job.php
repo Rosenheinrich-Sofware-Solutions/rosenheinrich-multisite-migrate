@@ -925,7 +925,7 @@ class Rmmigrate_Job
 
     public function get_status(): int
     {
-        return (int) $this->data['status'];
+        return (int) ($this->data['status'] ?? 0);
     }
 
     public function get_scope(): string
@@ -1182,6 +1182,70 @@ class Rmmigrate_Job
         return true;
     }
 
+    /**
+     * Persist a status change. COMPLETE/ERROR use a conditional UPDATE so a stale
+     * in-memory job object cannot overwrite a cancelled, completed, or failed row.
+     *
+     * @param array<string,mixed> $fields
+     * @param array<int,string>   $formats
+     * @return int|false Rows updated, or false on a database error.
+     */
+    private function persist_status_fields(array $fields, array $formats, int $new_status)
+    {
+        global $wpdb;
+
+        $protect = ($new_status === self::STATUS_COMPLETE || $new_status === self::STATUS_ERROR);
+        if ($protect && class_exists('wpdb', false) && $wpdb instanceof \wpdb && method_exists($wpdb, 'query') && method_exists($wpdb, 'prepare')) {
+            unset($formats);
+            $table = self::table_name();
+            $updated_at = (string) ($fields['updated_at'] ?? '');
+            $completed_at = (string) ($fields['completed_at'] ?? $updated_at);
+            $id = $this->get_id();
+            // phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Plugin jobs table name; values bound via prepare().
+            if (array_key_exists('error_message', $fields)) {
+                $result = $wpdb->query(
+                    $wpdb->prepare(
+                        "UPDATE {$table} SET status = %d, updated_at = %s, completed_at = %s, error_message = %s WHERE id = %d AND status NOT IN (%d, %d, %d)",
+                        $new_status,
+                        $updated_at,
+                        $completed_at,
+                        (string) $fields['error_message'],
+                        $id,
+                        self::STATUS_CANCELLED,
+                        self::STATUS_COMPLETE,
+                        self::STATUS_ERROR
+                    )
+                );
+            } else {
+                $result = $wpdb->query(
+                    $wpdb->prepare(
+                        "UPDATE {$table} SET status = %d, updated_at = %s, completed_at = %s WHERE id = %d AND status NOT IN (%d, %d, %d)",
+                        $new_status,
+                        $updated_at,
+                        $completed_at,
+                        $id,
+                        self::STATUS_CANCELLED,
+                        self::STATUS_COMPLETE,
+                        self::STATUS_ERROR
+                    )
+                );
+            }
+            if ($result === false) {
+                return false;
+            }
+            if ((int) $result === 0) {
+                $persisted = $wpdb->get_var($wpdb->prepare("SELECT status FROM {$table} WHERE id = %d", $id));
+                if ($persisted !== null && $persisted !== false && $persisted !== '') {
+                    $this->data['status'] = (int) $persisted;
+                }
+            }
+            // phpcs:enable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+            return (int) $result;
+        }
+
+        return $wpdb->update(self::table_name(), $fields, array('id' => $this->get_id()), $formats, array('%d'));
+    }
+
     public function set_status(int $status, ?string $error = null, ?string $service_code = null): void
     {
         global $wpdb;
@@ -1193,6 +1257,24 @@ class Rmmigrate_Job
             return;
         }
         if ($status === self::STATUS_ERROR && $previous === self::STATUS_ERROR && $error === null) {
+            return;
+        }
+        // A cancelled job may move to DELETING (purge); it must not be reported as completed or failed.
+        if ($previous === self::STATUS_CANCELLED
+            && $status !== self::STATUS_CANCELLED
+            && $status !== self::STATUS_DELETING
+        ) {
+            return;
+        }
+        if ($status === self::STATUS_COMPLETE && $previous === self::STATUS_ERROR) {
+            return;
+        }
+        if ($status === self::STATUS_COMPLETE
+            && $previous !== self::STATUS_CANCELLED
+            && class_exists('Rmmigrate_Job_Cleanup', false)
+            && Rmmigrate_Job_Cleanup::cancel_flag_requested($this->get_id())
+        ) {
+            $this->cancel();
             return;
         }
 
@@ -1241,9 +1323,12 @@ class Rmmigrate_Job
                 );
             }
         }
-        $updated = $wpdb->update(self::table_name(), $fields, array('id' => $this->get_id()), $formats, array('%d'));
+        $updated = $this->persist_status_fields($fields, $formats, $status);
         if ($updated === false) {
             self::log_db_write_failure('set_status', $this->get_id());
+            return;
+        }
+        if ((int) $updated === 0 && ($status === self::STATUS_COMPLETE || $status === self::STATUS_ERROR)) {
             return;
         }
         $this->data = array_merge($this->data, $fields);
@@ -1340,6 +1425,8 @@ class Rmmigrate_Job
             Rmmigrate_Activity_Log::record($type, $message, 'warning', array(
                 'job_id' => $this->get_id(),
             ));
+            Rmmigrate_Notifications::maybe_send_job($this, $status, $message);
+            do_action('rmmigrate_job_terminal', $this, $status, $message);
         }
     }
 

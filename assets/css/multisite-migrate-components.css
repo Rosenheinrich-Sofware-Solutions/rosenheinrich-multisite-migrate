@@ -1702,7 +1702,8 @@
 .mm-premium-table.mm-data-table td.column-local,
 .mm-premium-table.mm-data-table td.column-remote {
     text-align: center;
-    white-space: nowrap;
+    overflow: hidden;
+    white-space: normal;
 }
 
 .mm-premium-table.mm-data-table th.column-actions {
@@ -1770,14 +1771,18 @@
 .mm-local-none {
     display: inline-flex;
     align-items: center;
+    flex-wrap: wrap;
+    justify-content: center;
     gap: 4px;
     max-width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
     padding: 2px var(--mm-space-2);
     border-radius: var(--mm-radius-pill);
     font-size: var(--mm-text-xs);
     font-weight: var(--mm-font-semibold);
     line-height: 1.6;
-    white-space: nowrap;
+    white-space: normal;
 }
 
 .mm-local-badge {
@@ -1801,6 +1806,9 @@
 
 .mm-local-badge__text {
     display: inline;
+    min-width: 0;
+    flex: 1 1 8em;
+    overflow-wrap: break-word;
 }
 
 .mm-local-yes {

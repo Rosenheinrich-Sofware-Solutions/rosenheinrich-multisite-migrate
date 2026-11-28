@@ -142,6 +142,7 @@ class Rmmigrate_SQL_Importer
 
         try {
             while ((microtime(true) - $start) < $budget_sec) {
+                $this->assert_import_not_cancelled();
                 $chunk = $handle->read(Rmmigrate_Engine_Config::sql_import_chunk_bytes());
                 if ($chunk === false || $chunk === '') {
                     if ($buffer !== '') {
@@ -1072,6 +1073,32 @@ class Rmmigrate_SQL_Importer
     }
 
     /**
+     * Abort the current slice if the user cancelled the import/restore.
+     * Leaves the job cancelled (not completed or failed-as-error).
+     */
+    private function assert_import_not_cancelled(): void
+    {
+        if (!class_exists('Rmmigrate_Job_Cleanup', false) || !isset($this->job)) {
+            return;
+        }
+        $status = (int) (is_array($this->job->data ?? null) ? ($this->job->data['status'] ?? 0) : $this->job->get_status());
+        $job_id = (int) $this->job->get_id();
+        $requested = $job_id > 0 && Rmmigrate_Job_Cleanup::cancel_flag_requested($job_id);
+        if (!$requested && $status !== Rmmigrate_Job::STATUS_CANCELLED) {
+            return;
+        }
+        $this->rollback_import_transaction();
+        if ($status !== Rmmigrate_Job::STATUS_CANCELLED) {
+            $this->job->cancel();
+        }
+        // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal worker exception.
+        throw Rmmigrate_Job_Exception::raise(
+            sanitize_key('job_cancelled'),
+            esc_html__('Import cancelled.', 'rosenheinrich-multisite-migrate')
+        );
+    }
+
+    /**
      * Fail closed before the first statement: scan the whole dump (resumable across slices).
      */
     private function run_statement_guard_scan(string $sql_path, int $budget_sec): bool
@@ -1107,6 +1134,7 @@ class Rmmigrate_SQL_Importer
         $checked = (int) ($scan['statements'] ?? 0);
         try {
             while (true) {
+                $this->assert_import_not_cancelled();
                 $chunk = $handle->read(Rmmigrate_Engine_Config::sql_import_chunk_bytes());
                 if ($chunk === false || $chunk === '') {
                     $tail = trim($buffer);

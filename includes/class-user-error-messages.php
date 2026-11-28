@@ -200,28 +200,64 @@ class Rmmigrate_User_Error_Messages
             return __('A file could not be restored.', 'rosenheinrich-multisite-migrate');
         }
 
+        $changed = self::banner_for_changed_archive($raw);
+        if ($changed !== '') {
+            return $changed;
+        }
+
         $mapped = self::map($raw, $code);
         $message = $mapped['message'];
         $message = preg_replace('/:\s*(\.?[\w.\-]+|\/[^\s]+|\\\\[^\s]+)\s*$/u', '', $message) ?? $message;
         $message = trim($message);
-        if ($message === '') {
-            $job_type = sanitize_key((string) ($last_error['job_type'] ?? ''));
-            if ($job_type === 'restore') {
-                return __('The restore did not complete.', 'rosenheinrich-multisite-migrate');
-            }
-            if ($job_type === 'backup') {
-                return __('The backup did not complete.', 'rosenheinrich-multisite-migrate');
-            }
-            if ($job_type === 'import') {
-                return __('The import did not complete.', 'rosenheinrich-multisite-migrate');
-            }
-            return __('The job did not complete.', 'rosenheinrich-multisite-migrate');
+        $length = function_exists('mb_strlen') ? mb_strlen($message) : strlen($message);
+        // Long technical text stays on the job and in the activity log.
+        if ($message === '' || $length > 110) {
+            return self::banner_incomplete($last_error);
         }
 
-        if (function_exists('mb_substr')) {
-            return (string) mb_substr($message, 0, 200);
+        return $message;
+    }
+
+    /**
+     * Archive integrity failures store a long explanation. The banner stays
+     * one sentence; the activity log keeps the full text.
+     */
+    private static function banner_for_changed_archive(string $raw): string
+    {
+        if (stripos($raw, 'database.sql') === false) {
+            return '';
         }
-        return substr($message, 0, 200);
+        if (!preg_match('/manifest|modified|verändert|modifi|geändert|alterado|modificat|измен/ui', $raw)) {
+            return '';
+        }
+        $rolled_back = (bool) preg_match(
+            '/rolled back|tables were restored|zurückgesetzt|wiederhergestellt/ui',
+            $raw
+        );
+        if ($rolled_back) {
+            return __('The backup file was changed. Your previous data was restored.', 'rosenheinrich-multisite-migrate');
+        }
+
+        return __('The backup file was changed, so the restore stopped.', 'rosenheinrich-multisite-migrate');
+    }
+
+    /**
+     * @param array{job_type?:string} $last_error
+     */
+    private static function banner_incomplete(array $last_error): string
+    {
+        $job_type = sanitize_key((string) ($last_error['job_type'] ?? ''));
+        if ($job_type === 'restore') {
+            return __('The restore did not complete.', 'rosenheinrich-multisite-migrate');
+        }
+        if ($job_type === 'backup') {
+            return __('The backup did not complete.', 'rosenheinrich-multisite-migrate');
+        }
+        if ($job_type === 'import') {
+            return __('The import did not complete.', 'rosenheinrich-multisite-migrate');
+        }
+
+        return __('The job did not complete.', 'rosenheinrich-multisite-migrate');
     }
 
     public static function format(Throwable $e): string

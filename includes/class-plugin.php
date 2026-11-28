@@ -169,7 +169,8 @@ final class Rmmigrate_Plugin
         Rmmigrate_Bootstrap::register_cron_schedules_filter();
         // WP 6.7+: load translations on init (not plugins_loaded) to avoid JIT notices.
         add_action('init', array($this, 'load_textdomain'), 0);
-        add_action('plugins_loaded', array($this, 'init'));
+        // Defer translation-using setup until after the textdomain is loaded (priority 0).
+        add_action('init', array($this, 'init'), 1);
     }
 
     /**

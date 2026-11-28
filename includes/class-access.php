@@ -10,10 +10,11 @@ if (!defined('ABSPATH')) {
  * Backups and restores are administrator operations: on multisite the whole
  * network is managed by super admins (manage_network) from Network Admin, and
  * on single-site installs by administrators (manage_options). Subsite
- * administrators with manage_options can back up, restore and delete backups of
- * their own site. Archive download is limited to restricted exports they created
- * (no wp-config.php, no network tables, no password hashes); importing uploaded
- * archives and every other network-level operation requires a super admin.
+ * administrators may back up, restore and delete backups of their own site only
+ * when a network administrator has turned that option on (off by default).
+ * Archive download is limited to restricted exports they created (no wp-config.php,
+ * no network tables, no password hashes); importing uploaded archives and every
+ * other network-level operation requires a super admin.
  */
 class Rmmigrate_Access
 {
@@ -57,6 +58,9 @@ class Rmmigrate_Access
         if (!self::is_subsite_admin_context() || !current_user_can('manage_options')) {
             return false;
         }
+        if (!self::subsite_self_service_enabled()) {
+            return false;
+        }
 
         return self::subsite_any_page_visible();
     }
@@ -64,6 +68,9 @@ class Rmmigrate_Access
     public static function subsite_page_visible(string $slug): bool
     {
         if (!self::is_subsite_admin_context() || !current_user_can('manage_options')) {
+            return false;
+        }
+        if (!self::subsite_self_service_enabled()) {
             return false;
         }
 
@@ -220,7 +227,7 @@ class Rmmigrate_Access
             return current_user_can('manage_network');
         }
 
-        return self::is_subsite_scoped_operation();
+        return self::is_subsite_scoped_operation() && self::subsite_self_service_enabled();
     }
 
     public static function can_delete_backup(): bool
@@ -237,12 +244,27 @@ class Rmmigrate_Access
             return current_user_can('manage_network');
         }
 
-        return self::is_subsite_scoped_operation();
+        return self::is_subsite_scoped_operation() && self::subsite_self_service_enabled();
     }
 
     public static function can_current_site(string $action): bool
     {
         return self::can(get_current_blog_id(), $action);
+    }
+
+    /**
+     * Network-admin opt-in: subsite administrators may back up and restore their own site.
+     * A missing or empty saved value is treated as off (safer default on shared hosting).
+     */
+    public static function subsite_self_service_enabled(): bool
+    {
+        if (!class_exists('Rmmigrate_Settings', false)) {
+            return false;
+        }
+
+        $settings = Rmmigrate_Settings::get();
+
+        return !empty($settings['subsite_self_service']);
     }
 
     /**
@@ -281,7 +303,8 @@ class Rmmigrate_Access
         }
 
         if (self::is_subsite_scoped_operation()) {
-            return $blog_id === get_current_blog_id()
+            return self::subsite_self_service_enabled()
+                && $blog_id === get_current_blog_id()
                 && in_array($action, self::subsite_self_service_actions(), true);
         }
 
